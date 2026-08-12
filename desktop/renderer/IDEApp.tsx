@@ -1,5 +1,7 @@
 "use client";
 
+console.log('[IDE-APP] module evaluated');
+
 import { useState, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import { 
@@ -12,15 +14,11 @@ import ConfirmDialog from "./components/ConfirmDialog";
 import CommandPalette from "./components/CommandPalette";
 import QuickOpen from "./components/QuickOpen";
 
-// Dynamically import Monaco Editor to prevent SSR/module evaluation blocking
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-full bg-[#050505] text-cyan-400 flex items-center justify-center font-mono text-xs p-4">
-      <div className="flex items-center gap-2">
-        <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
-        <span>Initializing Monaco Code Editor...</span>
-      </div>
+    <div className="w-full h-full bg-[#050505] text-cyan-400 flex items-center justify-center font-mono text-xs">
+      Initializing Monaco Code Editor...
     </div>
   ),
 });
@@ -152,7 +150,12 @@ function extractFileList(node: FileNode): { name: string; path: string }[] {
 }
 
 export default function IDEApp() {
-  console.log("[IDE-APP] Component render starting...");
+  console.log('[IDE-APP] component render start');
+
+  useEffect(() => {
+    console.log('[IDE-APP] mounted');
+    return () => console.log('[IDE-APP] unmounted');
+  }, []);
 
   const [folderPath, setFolderPath] = useState<string | null>("demo-workspaces/ai_cart_project");
   const [fileTree, setFileTree] = useState<FileNode | null>(defaultDemoTree);
@@ -232,11 +235,19 @@ export default function IDEApp() {
     "[ENGINE] Python analyze.py loaded. 4 Ghost lines detected in cart_calculator.py.",
   ]);
 
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const contentRowRef = useRef<HTMLDivElement | null>(null);
+  const explorerPanelRef = useRef<HTMLDivElement | null>(null);
+  const editorPaneRef = useRef<HTMLDivElement | null>(null);
+  const analysisPanelRef = useRef<HTMLDivElement | null>(null);
+  const monacoWrapperRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
   const decorationsRef = useRef<string[]>([]);
 
   const activeTab = openTabs.find((t) => t.path === activeTabPath) || openTabs[0];
+
+  console.log('[IDE-APP] active file', activeTab?.path, activeTab?.content?.length);
 
   const addLog = (msg: string) => {
     setLogs((prev) => [...prev.slice(-40), `[${new Date().toLocaleTimeString()}] ${msg}`]);
@@ -249,11 +260,11 @@ export default function IDEApp() {
 
   // On first launch, attempt to auto-load demo workspace from disk via IPC
   useEffect(() => {
-    console.log("[IDE-APP] useEffect: checking electronAPI and demo workspace...");
+    console.log('[IDE-APP] useEffect: starting loadDemoWorkspace');
     async function loadDemoWorkspace() {
       try {
         if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.getDefaultDemoWorkspace) {
-          console.log("[IDE-APP] Invoking getDefaultDemoWorkspace...");
+          console.log('[IDE-APP] invoking getDefaultDemoWorkspace');
           const demo = await window.electronAPI.getDefaultDemoWorkspace();
           if (demo && demo.tree) {
             setFolderPath(demo.folderPath);
@@ -261,8 +272,10 @@ export default function IDEApp() {
             addLog(`[DEMO] Loaded workspace from disk: ${demo.folderPath}`);
             
             const targetPath = `${demo.folderPath}/src/cart_calculator.py`;
+            console.log('[IDE-APP] invoking readFile for', targetPath);
             const fileRes = await window.electronAPI.readFile(targetPath);
             if (fileRes.success && fileRes.content) {
+              console.log('[IDE-APP] readFile success, content length:', fileRes.content.length);
               const newTab = {
                 path: targetPath,
                 name: "cart_calculator.py",
@@ -287,6 +300,7 @@ export default function IDEApp() {
   const savePaneSizes = (expW: number, anaW: number, conH: number) => {
     if (typeof window === "undefined") return;
     try {
+      console.log('[IDE-APP] saving pane sizes to localStorage');
       localStorage.setItem("echo_ide_pane_sizes", JSON.stringify({
         explorerWidth: expW,
         analysisWidth: anaW,
@@ -297,10 +311,36 @@ export default function IDEApp() {
     }
   };
 
-  // Keyboard Shortcuts Listener (⌘S, ⌘W, ⌘P, ⌘K, F5)
+  // Layout & focus editor on tab change or container resize
+  useEffect(() => {
+    console.log('[IDE-APP] useEffect: activeTabPath changed to', activeTabPath);
+    if (editorRef.current) {
+      try {
+        console.log('[IDE-APP] triggering editor layout and focus');
+        editorRef.current.layout();
+        editorRef.current.focus();
+      } catch (e) {}
+    }
+  }, [activeTabPath, explorerWidth, analysisWidth, consoleHeight]);
+
+  // Window resize listener
   useEffect(() => {
     if (typeof window === "undefined") return;
-    console.log("[IDE-APP] useEffect: attaching keyboard shortcuts listener...");
+    const handleResize = () => {
+      if (editorRef.current) {
+        try {
+          editorRef.current.layout();
+        } catch (e) {}
+      }
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  // Keyboard Shortcuts Listener
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    console.log('[IDE-APP] useEffect: attaching keyboard shortcuts listener');
     
     const handleKeyDown = (e: KeyboardEvent) => {
       const isCmd = e.metaKey || e.ctrlKey;
@@ -328,10 +368,11 @@ export default function IDEApp() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeTabPath, openTabs, activeTab]);
 
-  // Apply Monaco Line Highlights & Tooltips safely
+  // Apply Monaco Line Highlights
   useEffect(() => {
     if (!editorRef.current || !monacoRef.current) return;
     try {
+      console.log('[IDE-APP] useEffect: updating line decorations for', findings.length, 'findings');
       const editor = editorRef.current;
       const newDecorations = findings.map((f) => ({
         range: {
@@ -406,6 +447,7 @@ export default function IDEApp() {
     let content = defaultCartCalculatorCode;
     if (typeof window !== "undefined" && window.electronAPI && !file.path.startsWith("demo-workspaces/")) {
       try {
+        console.log('[IDE-APP] handleOpenFile invoking readFile for', file.path);
         const res = await window.electronAPI.readFile(file.path);
         if (res.success && res.content !== undefined) {
           content = res.content;
@@ -497,6 +539,7 @@ export default function IDEApp() {
 
     if (typeof window !== "undefined" && window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
       try {
+        console.log('[IDE-APP] handleSaveFile invoking writeFile for', activeTab.path);
         const res = await window.electronAPI.writeFile(activeTab.path, activeTab.content);
         if (res.success) {
           setOpenTabs((prev) =>
@@ -533,6 +576,7 @@ export default function IDEApp() {
 
     if (typeof window !== "undefined" && window.electronAPI && !path.startsWith("demo-workspaces/")) {
       try {
+        console.log('[IDE-APP] runAnalysis invoking analyzeFile for', path);
         const res = await window.electronAPI.analyzeFile(path);
         if (res && res.findings) {
           setFindings(res.findings);
@@ -571,6 +615,7 @@ export default function IDEApp() {
 
     if (typeof window !== "undefined" && window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
       try {
+        console.log('[IDE-APP] handleOpenDiffPreview invoking previewSafeRemove for', activeTab.path);
         const preview = await window.electronAPI.previewSafeRemove(activeTab.path);
         if (preview && preview.transformed_source !== undefined) {
           setDiffData(preview);
@@ -611,6 +656,7 @@ export default function IDEApp() {
 
     if (typeof window !== "undefined" && window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
       try {
+        console.log('[IDE-APP] handleApplySafeRemove invoking applySafeRemove for', activeTab.path);
         const res = await window.electronAPI.applySafeRemove(activeTab.path, diffData.transformed_source);
         if (res.success) {
           setOpenTabs((prev) =>
@@ -650,6 +696,7 @@ export default function IDEApp() {
 
     if (typeof window !== "undefined" && window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
       try {
+        console.log('[IDE-APP] handleRestoreBackup invoking restoreBackup for', activeTab.path);
         const res = await window.electronAPI.restoreBackup(activeTab.path);
         if (res.success && res.restoredContent) {
           setOpenTabs((prev) =>
@@ -683,9 +730,20 @@ export default function IDEApp() {
   };
 
   const handleEditorMount = (editor: any, monaco: any) => {
-    console.log("[IDE-APP] Monaco Editor mounted successfully.");
+    console.log('[MONACO] mounted');
     editorRef.current = editor;
     monacoRef.current = monaco;
+
+    setTimeout(() => {
+      try {
+        console.log('[MONACO] invoking editor.layout() and focus()');
+        editor.layout();
+        editor.focus();
+        const node = editor.getContainerDomNode();
+        console.log('[MONACO-SIZE-AFTER-LAYOUT]', node?.clientWidth, node?.clientHeight);
+        console.log('[MONACO-PARENT-SIZE-AFTER-LAYOUT]', node?.parentElement?.clientWidth, node?.parentElement?.clientHeight);
+      } catch (e) {}
+    }, 150);
 
     try {
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
@@ -716,7 +774,7 @@ export default function IDEApp() {
       });
       monaco.editor.setTheme("echo-dark");
     } catch (err) {
-      console.error("[IDE-APP] Error setting up Monaco theme/events:", err);
+      console.error("[MONACO] Error setting up Monaco theme/events:", err);
     }
   };
 
@@ -816,8 +874,12 @@ export default function IDEApp() {
 
   const fileList = fileTree ? extractFileList(fileTree) : [];
 
+  if (typeof window !== "undefined") {
+    console.log(`[P-METRICS] window=${window.innerWidth} root=${rootRef.current?.clientWidth} row=${contentRowRef.current?.clientWidth} exp=${explorerPanelRef.current?.clientWidth} edit=${editorPaneRef.current?.clientWidth} ana=${analysisPanelRef.current?.clientWidth} mon=${monacoWrapperRef.current?.clientWidth}`);
+  }
+
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#050505] text-white font-sans overflow-hidden select-none relative">
+    <div ref={rootRef} style={{ width: "100vw", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }} className="flex flex-col h-screen w-screen bg-[#050505] text-white font-sans overflow-hidden select-none relative">
       
       {/* Animated Top Edge Cyan Scanline */}
       <div className="top-scanline" />
@@ -897,11 +959,11 @@ export default function IDEApp() {
       </header>
 
       {/* 2. Main Resizable Workspace Grid */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
+      <div ref={contentRowRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", overflow: "hidden" }} className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
         
         {/* Left Sidebar: File Explorer */}
         {showExplorer && (
-          <div style={{ width: `${explorerWidth}px` }} className="bg-[#0a0a0a] border-r border-[#1f1f1f] flex flex-col justify-between shrink-0 select-none">
+          <div ref={explorerPanelRef} style={{ width: `${explorerWidth}px`, flexShrink: 0 }} className="bg-[#0a0a0a] border-r border-[#1f1f1f] flex flex-col justify-between shrink-0 select-none">
             <div className="p-3 border-b border-[#1f1f1f] flex items-center justify-between font-mono text-xs">
               <span className="text-zinc-400 uppercase tracking-widest font-bold text-[10px]">Explorer</span>
               <span className="text-cyan-400 text-[10px]">Tree-sitter</span>
@@ -924,7 +986,7 @@ export default function IDEApp() {
         )}
 
         {/* Center Pane: Multi-Tab Monaco Editor */}
-        <div className="flex-1 flex flex-col bg-[#050505] overflow-hidden min-w-0">
+        <div ref={editorPaneRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }} className="flex-1 min-w-0 flex flex-col overflow-hidden bg-[#050505]">
           
           {/* Multi-Tab Bar */}
           <div className="h-9 bg-[#0a0a0a] border-b border-[#1f1f1f] flex items-center px-2 gap-1 font-mono text-xs overflow-x-auto shrink-0">
@@ -960,13 +1022,14 @@ export default function IDEApp() {
           </div>
 
           {/* Monaco Editor Container */}
-          <div className="flex-1 relative min-h-0">
-            {activeTab && (
+          <div ref={monacoWrapperRef} style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden" }} className="flex-1 min-w-0 min-h-0 relative overflow-hidden bg-[#050505]">
+            {activeTab ? (
               <MonacoEditor
+                key={activeTab.path}
+                width="100%"
                 height="100%"
                 language={getLanguageFromPath(activeTab.path)}
-                theme="echo-dark"
-                value={activeTab.content}
+                value={activeTab.content ?? ""}
                 onChange={handleEditorChange}
                 onMount={handleEditorMount}
                 options={{
@@ -976,12 +1039,16 @@ export default function IDEApp() {
                   minimap: { enabled: true },
                   bracketPairColorization: { enabled: true },
                   "semanticHighlighting.enabled": true,
-                  wordWrap: "on",
+                  wordWrap: "off",
                   smoothScrolling: true,
                   automaticLayout: true,
                   padding: { top: 12 },
                 }}
               />
+            ) : (
+              <div className="w-full h-full bg-[#050505] text-zinc-500 flex items-center justify-center font-mono text-xs">
+                No file selected
+              </div>
             )}
           </div>
         </div>
@@ -990,7 +1057,7 @@ export default function IDEApp() {
         <div onMouseDown={startAnalysisResize} className="resizer-col" />
 
         {/* Right Pane: Tomography Analysis Panel */}
-        <div style={{ width: `${analysisWidth}px` }} className="bg-[#0a0a0a] border-l border-[#1f1f1f] flex flex-col justify-between p-4 space-y-4 shrink-0 overflow-y-auto select-none">
+        <div ref={analysisPanelRef} style={{ width: `${analysisWidth}px`, flexShrink: 0 }} className="bg-[#0a0a0a] border-l border-[#1f1f1f] flex flex-col justify-between p-4 space-y-4 shrink-0 overflow-y-auto select-none">
           <div className="space-y-4">
             
             {/* Header */}

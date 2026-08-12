@@ -2,7 +2,7 @@
   "name": "echo-nullity",
   "version": "1.0.0",
   "private": true,
-  "main": "app/electron/main.js",
+  "main": "desktop/electron/main.js",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

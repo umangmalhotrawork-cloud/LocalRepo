@@ -62,6 +62,8 @@ function createWindow() {
     },
   });
 
+  mainWindow.maximize();
+
   const startUrl = process.env.ELECTRON_START_URL || 'http://127.0.0.1:3000/desktop';
 
   const loadWithRetry = (url, attempts = 0) => {
@@ -79,10 +81,34 @@ function createWindow() {
 
   loadWithRetry(startUrl);
 
-  mainWindow.webContents.openDevTools();
+  mainWindow.webContents.openDevTools({ mode: 'detach' });
+
+  mainWindow.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    console.log(`[RENDERER:${level}] ${message} (${sourceId}:${line})`);
+  });
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('[ELECTRON] did-finish-load:', mainWindow.webContents.getURL());
+    setTimeout(async () => {
+      try {
+        if (mainWindow) {
+          const image = await mainWindow.capturePage();
+          const screenshotDir = path.join(app.getAppPath(), 'desktop', 'screenshots');
+          if (!fs.existsSync(screenshotDir)) {
+            fs.mkdirSync(screenshotDir, { recursive: true });
+          }
+          const screenshotPath = path.join(screenshotDir, 'phase3-editor-completion.png');
+          fs.writeFileSync(screenshotPath, image.toPNG());
+          console.log('[ELECTRON] Saved verification screenshot to:', screenshotPath);
+        }
+      } catch (err) {
+        console.error('[ELECTRON] Error capturing screenshot:', err);
+      }
+    }, 2500);
+  });
 
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
-    console.error(`[ELECTRON] WebContents did-fail-load (${errorCode}): ${errorDescription}`);
+    console.error(`[ELECTRON] did-fail-load (${errorCode}): ${errorDescription}`);
     setTimeout(() => loadWithRetry(startUrl), 1000);
   });
 
@@ -170,7 +196,7 @@ ipcMain.handle('fs:read-dir', async (_, dirPath) => {
 
 ipcMain.handle('engine:analyze', async (_, filePath) => {
   return new Promise((resolve) => {
-    const scriptPath = path.join(app.getAppPath(), 'app', 'engine', 'analyze.py');
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'analyze.py');
     execFile('python3', [scriptPath, filePath, '--mode', 'analyze'], (error, stdout, stderr) => {
       if (error) {
         console.error('Python analyze error:', stderr || error.message);
@@ -197,7 +223,7 @@ ipcMain.handle('engine:analyze', async (_, filePath) => {
 
 ipcMain.handle('engine:preview-safe-remove', async (_, filePath) => {
   return new Promise((resolve) => {
-    const scriptPath = path.join(app.getAppPath(), 'app', 'engine', 'analyze.py');
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'analyze.py');
     execFile('python3', [scriptPath, filePath, '--mode', 'rewrite'], (error, stdout, stderr) => {
       if (error) {
         console.error('Python rewrite error:', stderr || error.message);
