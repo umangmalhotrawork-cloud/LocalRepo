@@ -1,0 +1,403 @@
+Echo Nullity: Causal Code Tomography Engine
+
+Complete Project Specification, Architecture, Algorithms, Product Design, Safety Model, Research Roadmap, and Implementation Plan
+
+Executive Summary
+
+Echo Nullity is a local-first static analysis and developer tooling system designed to detect semantically vacuous yet executable code, especially in AI-generated software. Unlike traditional linters, dead-code analyzers, or profilers, Echo Nullity measures causal necessity: whether a line of code actually constrains the program’s output state. The project introduces several novel concepts including Causal Luminance, Semantic Tension Mapping, Ghost Code visualization, Causal Provenance Replay, Differential Mutation Verification, and repository-scale semantic tomography.
+
+Project Vision
+
+Create a new category of developer tooling that reveals code which is syntactically valid, executed, tested, and still unnecessary. Echo Nullity acts as an MRI scanner for software semantics.
+
+Emerging Engineering Problem
+
+Modern engineers increasingly rely on AI systems to generate code. AI-generated code often contains identity operations, redundant checks, vacuous error handling, duplicated semantic patterns, and over-engineered abstractions that pass tests but add maintenance cost, cognitive load, and performance overhead.
+
+Novel Concepts
+
+Causal Luminance: Per-line measure of logical necessity.
+
+Ghost Code: Reachable code with zero causal impact.
+
+Semantic Tension Mapping: Cross-function causal equivalence detection.
+
+Causal Provenance Replay: Minimal explanation chain proving necessity or nullity.
+
+Causal Entropy: Measure of how much a function constrains the output state space.
+
+User Experience
+
+Inside VS Code, the developer sees a semantic heatmap:
+
+Bright white = essential logic
+
+Yellow = weakly useful logic
+
+Faded gray = suspicious logic
+
+Ghost text = mathematically unnecessary logic
+
+Clicking a ghost line opens a provenance panel explaining exactly why the line has zero causal contribution.
+
+Safe Remove Feature
+
+Safe Remove performs verified, reversible semantic surgery on a live codebase.
+
+Preview removal as a unified diff.
+
+Run static dependency checks.
+
+Run side-effect audit.
+
+Run differential execution in a sandbox.
+
+Run performance sanity checks.
+
+Apply patch only after verification passes.
+
+Store rollback snapshot automatically.
+
+Patch Generation
+
+Patches are generated from AST node transformations, not text replacement, to preserve syntax and formatting.
+
+--- a/cart.py+++ b/cart.py@@- temp = price * 1- temp = temp + 0  return price
+
+Rollback Model
+
+Before applying any patch, Echo Nullity creates a Git stash or a local compressed snapshot. Rollback restores the exact previous state and refreshes editor decorations.
+
+System Architecture
+
+Parser (Tree-sitter)
+
+Control Flow Graph Builder
+
+Data Flow Graph Builder
+
+Causal Luminance Engine
+
+Semantic Tension Engine
+
+Provenance Replay Engine
+
+Differential Verifier
+
+VS Code Visualization Layer
+
+GitHub Action Integration
+
+Core Algorithms
+
+Causal Luminance
+
+Compute path conditions for each basic block and estimate how easily those conditions collapse under input mutations. Lines with zero state influence receive luminance 0.0.
+
+Semantic Tension Mapping
+
+Normalize ASTs by removing identifiers and literals, flatten decision structures, compute tree edit distance, and derive a causal equivalence score between functions.
+
+Differential Mutation Verification
+
+Temporarily bypass candidate code, rerun tests in an isolated sandbox, and compare observable program state.
+
+Side-Effect Taxonomy
+
+Pure Computation: Eligible for pruning.
+
+Observability State: Logging and metrics; removable only with explicit consent.
+
+Hard Side-Effects: File I/O, network I/O, locks, atomics; never auto-removed.
+
+Repository-Scale Analytics
+
+Ghost Code Ratio
+
+Semantic Tension Density
+
+Causal Entropy
+
+Verified Null Lines
+
+Redundant Clusters
+
+Semantic Compression Ratio
+
+Visualization Features
+
+Ghost Text opacity rendering
+
+Force-directed Tension graph
+
+Nullity Collapse animation
+
+Codebase X-Ray heatmap
+
+Time-travel commit comparison
+
+Interactive CFG explorer
+
+Developer Integrations
+
+VS Code extension
+
+CLI tool
+
+GitHub Action
+
+Pre-commit hook
+
+CI/CD headless mode
+
+CLI Examples
+
+echo-nullity scan ./project
+
+echo-nullity safe-remove --preview src/cart.py:12-18
+
+echo-nullity safe-remove --verify src/cart.py:12-18
+
+echo-nullity safe-remove --apply src/cart.py:12-18
+
+echo-nullity rollback en_20260812_104512
+
+Technology Stack
+
+Core Engine: Rust
+
+Parsing: Tree-sitter
+
+Graphs: petgraph
+
+IDE Extension: TypeScript + VS Code API
+
+Visualization: D3.js
+
+Verification: Rust + sandbox runner
+
+Serialization: MessagePack
+
+Recommended Repository Structure
+
+echo-nullity/├── core/│   ├── parser/│   ├── cfg/│   ├── dfg/│   ├── luminance/│   ├── tension/│   ├── provenance/│   ├── verifier/│   └── patterns/├── frontend/│   └── vscode/├── integrations/│   ├── github-action/│   └── pre-commit/├── benchmarks/│   └── nullbench/├── docs/└── tests/
+
+14-Week Build Roadmap
+
+Week 1: Tree-sitter integration
+
+Week 2: CFG builder
+
+Week 3: Path-condition extraction
+
+Week 4: Luminance engine
+
+Week 5: CLI scanner
+
+Week 6: VS Code extension scaffold
+
+Week 7: Heatmap rendering
+
+Week 8: Real-world evaluation
+
+Week 9: AST canonicalization
+
+Week 10: Tree edit distance
+
+Week 11: Tension matrix
+
+Week 12: Force graph visualization
+
+Week 13: Safe Remove integration
+
+Week 14: Polish, performance, and demo
+
+Live Demo Script
+
+Open an AI-generated file.
+
+Show ghost code highlights.
+
+Open provenance replay.
+
+Run verification.
+
+Apply Safe Remove.
+
+Open Tension View.
+
+Collapse redundant cluster.
+
+Run tests again and show green status.
+
+Research Questions
+
+Does causal redundancy correlate with AI generation confidence?
+
+Can Semantic Tension predict merge conflicts?
+
+Is Causal Luminance a proxy for maintainability?
+
+Do high-luminance codebases exhibit higher defect density?
+
+Benchmark Dataset (NullBench)
+
+Create a benchmark of AI-generated and human-written functions with manually annotated causal redundancy labels to evaluate precision, recall, and false-positive rates.
+
+Resume-Ready Entry
+
+Invented and implemented Echo Nullity, a local-first causal code tomography engine that introduces Causal Luminance and Semantic Tension Mapping to detect semantically vacuous yet executable code in AI-generated software. Built a multi-language static analysis pipeline, differential verification engine, and interactive VS Code visualizations using Rust, Tree-sitter, D3.js, and TypeScript.
+
+30-Second Interview Pitch
+
+Git tells me what changed. Tests tell me what works. Echo Nullity tells me what never needed to exist. It finds code that executes and passes tests but has no meaningful effect on the program’s behavior.
+
+Final Verdict
+
+Echo Nullity is not another AI application. It is a new semantic measurement instrument for software. The combination of Causal Luminance, Semantic Tension Mapping, Ghost Visualization, Provenance Replay, Differential Verification, and Safe Remove creates a distinctive, research-grade, locally buildable project suitable for major-project evaluation, internships, publications, and open-source release.
+
+Additional Research-Grade Additions
+
+Research Abstract
+
+This work presents Echo Nullity, a local-first causal code tomography engine for detecting semantically vacuous yet executable code in AI-generated software systems. The project introduces Causal Luminance, a per-line logical necessity metric, and Semantic Tension Mapping, a cross-function causal equivalence framework that exposes structurally divergent but behaviorally redundant logic. Unlike traditional static analyzers, Echo Nullity measures causal leverage over program outputs rather than syntactic correctness or reachability. The system combines Tree-sitter parsing, control/data-flow analysis, differential mutation verification, provenance replay, and interactive IDE visualizations. The expected outcome is a substantial reduction in AI-generated code bloat while preserving functional behavior, enabling safer human-AI collaborative software development.
+
+Evaluation Methodology
+
+Benchmark Dataset
+
+NullBench will contain 200 manually curated functions: 100 AI-generated functions and 100 human-written functions across Python, C++, and Rust. Each function will be annotated with ground-truth causal redundancy labels.
+
+Metrics
+
+Precision of ghost-code detection
+
+Recall of ghost-code detection
+
+False-positive rate
+
+False-negative rate
+
+Average removable LOC
+
+Semantic Compression Ratio
+
+Verification success rate
+
+Repository-level Ghost Code Ratio
+
+Baselines
+
+Pylint unreachable-code detector
+
+Vulture dead-code detector
+
+PMD duplicate-code detector
+
+SonarQube code-smell rules
+
+Expected Experimental Results
+
+We expect Echo Nullity to identify a significant fraction of semantically redundant AI-generated code missed by traditional dead-code and duplicate-code analyzers, while maintaining an acceptable false-positive rate.
+
+Performance Targets
+
+10k LOC scan time: < 5 seconds
+
+Incremental re-analysis: < 300 ms
+
+Memory usage: < 500 MB
+
+VS Code UI latency: < 16 ms per frame
+
+Rollback restoration time: < 1 second
+
+Patch verification overhead: < 2x baseline test time
+
+System Requirements
+
+Linux, macOS, or Windows 11
+
+Rust 1.80+
+
+Node.js 20+
+
+VS Code 1.90+
+
+Git 2.40+
+
+Minimum 8 GB RAM
+
+Recommended 16 GB RAM
+
+UI Mockup Placeholders
+
+Semantic Heatmap View
+
+VS Code editor with ghost-text opacity and luminance gradients.
+
+Tension Graph View
+
+Force-directed graph showing causal equivalence clusters.
+
+Safe Remove Preview
+
+Unified diff preview with verification status and rollback controls.
+
+Limitations and Threats to Validity
+
+Reflection and dynamic code generation may evade static analysis.
+
+Native extensions and FFI boundaries are treated as opaque regions.
+
+Incomplete test suites can produce false-safe removals.
+
+Concurrency side effects are difficult to model precisely.
+
+External service contracts may introduce hidden semantic dependencies.
+
+Tree canonicalization may over-approximate equivalence for some language constructs.
+
+Ethical and Privacy Considerations
+
+Echo Nullity is designed as a local-first tool. Source code never leaves the developer machine, no telemetry is collected by default, and all verification occurs in local sandboxes. The system must not automatically modify repositories without explicit user consent.
+
+Future Work
+
+Java, Go, and TypeScript support
+
+Incremental language-server integration
+
+SMT-backed deep verification mode
+
+Large-scale empirical study on open-source AI-generated pull requests
+
+Cross-repository semantic redundancy mining
+
+Interactive educational mode for teaching program semantics
+
+Project Risks and Mitigation
+
+False positives: Conservative default thresholds and mandatory verification.
+
+Performance overhead: Incremental analysis and caching of AST/CFG artifacts.
+
+Developer trust: Explainable provenance replay and reversible Safe Remove operations.
+
+Language-specific edge cases: Progressive rollout with extensive benchmark coverage.
+
+Potential Publication Targets
+
+ICSE (International Conference on Software Engineering)
+
+FSE (Foundations of Software Engineering)
+
+ASE (Automated Software Engineering)
+
+OOPSLA (Object-Oriented Programming, Systems, Languages & Applications)
+
+PLDI (Programming Language Design and Implementation)
+
+Extended Conclusion
+
+The combination of Causal Luminance, Semantic Tension Mapping, Differential Mutation Verification, Ghost Visualization, Provenance Replay, Safe Remove, and repository-scale semantic tomography positions Echo Nullity as a new semantic measurement instrument for software engineering. The project is simultaneously a practical developer tool, a research contribution, and a compelling major-project portfolio artifact.
