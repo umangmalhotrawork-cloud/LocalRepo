@@ -1952,9 +1952,50 @@ export default function IDEApp() {
     setVerifying(false);
   };
 
-  const handleOpenDiffPreview = async () => {
-    if (!activeTab || findings.length === 0) return;
-    addLog(`[SURGERY] Opening safe surgery diff preview for ${activeTab.name}...`);
+  const handleOpenDiffPreview = async (targetFinding?: any) => {
+    if (!activeTab) return;
+    const linesToPreview = targetFinding ? [targetFinding.line] : findings.map((f) => f.line);
+    if (linesToPreview.length === 0) return;
+
+    addLog(`[SURGERY] Preparing diff preview for ${activeTab.name} (${linesToPreview.length} target lines)...`);
+
+    if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.previewSurgery) {
+      try {
+        const res = await window.electronAPI.previewSurgery({
+          file: activeTab.path,
+          approved_lines: linesToPreview,
+        });
+        if (res && res.success) {
+          setDiffData({
+            file: res.file,
+            original_source: res.original_source,
+            transformed_source: res.transformed_source,
+            changed_lines: res.approved_lines || linesToPreview,
+            ghost_count_before: findings.length,
+            ghost_count_after: Math.max(0, findings.length - linesToPreview.length),
+            causal_luminance_after: 1.0,
+          });
+        }
+      } catch (err) {
+        console.error("[SURGERY] Error fetching diff preview:", err);
+      }
+    } else {
+      const original = activeTab.content || "";
+      const lines = original.split("\n");
+      const approvedSet = new Set(linesToPreview);
+      const transformed = lines.filter((_, idx) => !approvedSet.has(idx + 1)).join("\n");
+      setDiffData({
+        file: activeTab.path,
+        original_source: original,
+        transformed_source: transformed,
+        changed_lines: linesToPreview,
+        ghost_count_before: findings.length,
+        ghost_count_after: Math.max(0, findings.length - linesToPreview.length),
+        causal_luminance_after: 1.0,
+      });
+    }
+
+    setDiffDrawerOpen(true);
     setShowSurgeryDiffModal(true);
   };
 
@@ -1969,6 +2010,9 @@ export default function IDEApp() {
     setApplyingSurgery(true);
     addLog(`[SURGERY] Applying surgery to ${activeTab.name} (${approvedLines.length} approved lines)...`);
 
+    let success = false;
+    let transformedContent = "";
+
     if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.applySurgery) {
       try {
         const res = await window.electronAPI.applySurgery({
@@ -1977,22 +2021,11 @@ export default function IDEApp() {
         });
 
         if (res && res.success) {
-          const transformed = res.transformed_content;
-          setOpenTabs((prev) =>
-            prev.map((t) =>
-              t.path === activeTab.path
-                ? { ...t, content: transformed, savedContent: transformed, isDirty: false }
-                : t
-            )
-          );
-          setUndoAvailableForFile((prev) => ({ ...prev, [activeTab.path]: true }));
-          setShowSurgeryDiffModal(false);
+          success = true;
+          transformedContent = res.transformed_content;
           showToast(`Removed ${res.removed_count} ghost ${res.removed_count === 1 ? "line" : "lines"}`);
           addLog(`[SURGERY] Applied surgery to ${activeTab.name}: removed ${res.removed_count} ghost lines. Backup created at ${res.backup_path}`);
           console.log('[SURGERY] Applied surgery to', activeTab.name, 'removed', res.removed_count, 'lines');
-
-          // Rerun single-file AST analysis
-          runAnalysis(activeTab.path, transformed);
         } else {
           showToast(`Surgery failed: ${res?.error || "Unknown error"}`);
           addLog(`[ERROR] Surgery apply failed: ${res?.error || "Unknown error"}`);
@@ -2005,19 +2038,34 @@ export default function IDEApp() {
       // Fallback for mock/browser testing
       const lines = activeTab.content.split("\n");
       const approvedSet = new Set(approvedLines);
-      const transformed = lines.filter((_, idx) => !approvedSet.has(idx + 1)).join("\n");
+      transformedContent = lines.filter((_, idx) => !approvedSet.has(idx + 1)).join("\n");
+      success = true;
+      showToast(`Removed ${approvedLines.length} ghost ${approvedLines.length === 1 ? "line" : "lines"}`);
+    }
 
+    if (success) {
       setOpenTabs((prev) =>
         prev.map((t) =>
           t.path === activeTab.path
-            ? { ...t, content: transformed, savedContent: transformed, isDirty: false }
+            ? { ...t, content: transformedContent, savedContent: transformedContent, isDirty: false }
             : t
         )
       );
       setUndoAvailableForFile((prev) => ({ ...prev, [activeTab.path]: true }));
+      setDiffDrawerOpen(false);
       setShowSurgeryDiffModal(false);
-      showToast(`Removed ${approvedLines.length} ghost ${approvedLines.length === 1 ? "line" : "lines"}`);
-      runAnalysis(activeTab.path, transformed);
+
+      // 1. Rerun single-file AST analysis
+      runAnalysis(activeTab.path, transformedContent);
+
+      // 2. Refresh workspace dashboard, luminance, clones, semantics, and graph
+      if (folderPath) {
+        handleRunWorkspaceScan();
+        handleRunLuminanceScan();
+        handleScanStructuralClones();
+        handleScanSemanticClones();
+        handleLoadWorkspaceGraph();
+      }
     }
 
     setApplyingSurgery(false);
@@ -2027,25 +2075,18 @@ export default function IDEApp() {
     if (!activeTab) return;
     addLog(`[SURGERY] Restoring surgery backup for ${activeTab.name}...`);
 
+    let success = false;
+    let restoredContent = "";
+
     if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.undoSurgery) {
       try {
         const res = await window.electronAPI.undoSurgery({ file: activeTab.path });
         if (res && res.success) {
-          const restored = res.restored_content;
-          setOpenTabs((prev) =>
-            prev.map((t) =>
-              t.path === activeTab.path
-                ? { ...t, content: restored, savedContent: restored, isDirty: false }
-                : t
-            )
-          );
-          setUndoAvailableForFile((prev) => ({ ...prev, [activeTab.path]: false }));
+          success = true;
+          restoredContent = res.restored_content;
           showToast(`Surgery undone · Backup restored`);
           addLog(`[SURGERY] Restored ${activeTab.name} from backup ${res.backup_path}`);
           console.log('[SURGERY] Restored', activeTab.name, 'from backup');
-
-          // Rerun AST analysis
-          runAnalysis(activeTab.path, restored);
         } else {
           showToast(`Undo failed: ${res?.error || "No backup found"}`);
           addLog(`[ERROR] Undo surgery failed: ${res?.error || "No backup found"}`);
@@ -2055,16 +2096,31 @@ export default function IDEApp() {
       }
     } else {
       // Fallback
+      restoredContent = defaultCartCalculatorCode;
+      success = true;
+    }
+
+    if (success) {
       setOpenTabs((prev) =>
         prev.map((t) =>
           t.path === activeTab.path
-            ? { ...t, content: defaultCartCalculatorCode, savedContent: defaultCartCalculatorCode, isDirty: false }
+            ? { ...t, content: restoredContent, savedContent: restoredContent, isDirty: false }
             : t
         )
       );
       setUndoAvailableForFile((prev) => ({ ...prev, [activeTab.path]: false }));
-      showToast(`Surgery undone · Backup restored`);
-      runAnalysis(activeTab.path, defaultCartCalculatorCode);
+
+      // 1. Rerun AST analysis
+      runAnalysis(activeTab.path, restoredContent);
+
+      // 2. Refresh workspace metrics & scans
+      if (folderPath) {
+        handleRunWorkspaceScan();
+        handleRunLuminanceScan();
+        handleScanStructuralClones();
+        handleScanSemanticClones();
+        handleLoadWorkspaceGraph();
+      }
     }
   };
 
@@ -3037,9 +3093,21 @@ export default function IDEApp() {
                             <div className="text-zinc-300 font-mono bg-[#111111] p-1.5 rounded truncate">
                               {f.code}
                             </div>
-                            <p className="text-[11px] text-zinc-400 font-sans leading-tight">
-                              {f.reason}
-                            </p>
+                            <div className="flex items-center justify-between pt-1">
+                              <p className="text-[11px] text-zinc-400 font-sans leading-tight flex-1">
+                                {f.reason}
+                              </p>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleFindingClick(f);
+                                  handleOpenDiffPreview(f);
+                                }}
+                                className="ml-2 px-2 py-0.5 rounded bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-[10px] font-bold whitespace-nowrap transition-all"
+                              >
+                                Preview Surgery
+                              </button>
+                            </div>
                           </button>
                         );
                       })
