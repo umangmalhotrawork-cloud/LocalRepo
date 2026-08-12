@@ -28,6 +28,14 @@
 }
 
 /* Custom Grid & Texture Patterns */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 .bg-grid-pattern-v2 {
   background-size: 48px 48px;
   background-image: 

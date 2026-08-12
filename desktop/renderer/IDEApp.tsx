@@ -2260,44 +2260,48 @@ export default function IDEApp() {
       <div className="top-scanline" />
 
       {/* 1. Header Navigation Bar */}
-      <header className="h-12 bg-[#0a0a0a] border-b border-[#1f1f1f] flex items-center justify-between px-4 text-xs font-mono shrink-0 z-20 shadow-lg">
-        <div className="flex items-center gap-4">
+      <header className="h-12 bg-[#0a0a0a] border-b border-[#1f1f1f] flex items-center justify-between px-3 text-xs font-mono shrink-0 z-20 shadow-lg min-w-0 flex-nowrap w-full overflow-hidden select-none">
+        {/* Left Zone: Branding + Primary File Operations */}
+        <div className="flex-none shrink-0 flex items-center gap-2">
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
-            <span className="font-heading font-bold text-sm text-white tracking-tight">
+            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping shrink-0" />
+            <span className="font-heading font-bold text-sm text-white tracking-tight whitespace-nowrap">
               Echo Nullity IDE
             </span>
-            <span className="px-2 py-0.5 text-[9px] text-cyan-400 bg-cyan-950/80 border border-cyan-500/30 rounded-full font-bold">
+            <span className="px-2 py-0.5 text-[9px] text-cyan-400 bg-cyan-950/80 border border-cyan-500/30 rounded-full font-bold whitespace-nowrap">
               DEMO WORKSPACE
             </span>
           </div>
 
           <button
             onClick={handleOpenFolder}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-zinc-200 transition-all shadow-sm"
+            className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-zinc-200 transition-all shadow-sm"
           >
-            <FolderOpen className="w-3.5 h-3.5 text-cyan-400" />
+            <FolderOpen className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
             <span>Open Folder</span>
           </button>
 
           <button
             onClick={handleSaveFile}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-zinc-200 transition-all"
+            className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-zinc-200 transition-all"
           >
-            <Save className="w-3.5 h-3.5 text-cyan-400" />
+            <Save className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
             <span>Save (⌘S)</span>
           </button>
+        </div>
 
+        {/* Center Zone: Mode Switchers, Scans & Tools (Scrollable on small screens) */}
+        <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto no-scrollbar scrollbar-none [&::-webkit-scrollbar]:hidden py-1 px-2">
           <button
             onClick={() => setMainView(mainView === "dashboard" ? "editor" : "dashboard")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all ${
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
               mainView === "dashboard"
                 ? "bg-purple-950 text-purple-300 border-purple-500/50 shadow-purple-glow font-bold"
                 : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300"
             }`}
             title="Toggle Workspace Tomography Dashboard"
           >
-            <LayoutDashboard className="w-3.5 h-3.5 text-purple-400" />
+            <LayoutDashboard className="w-3.5 h-3.5 text-purple-400 shrink-0" />
             <span>Dashboard</span>
           </button>
 
@@ -2309,14 +2313,14 @@ export default function IDEApp() {
                 handleLoadWorkspaceGraph();
               }
             }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all ${
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
               mainView === "graph"
                 ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 shadow-cyan-glow font-bold"
                 : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300"
             }`}
             title="Toggle Cross-File Provenance Graph"
           >
-            <Network className="w-3.5 h-3.5 text-cyan-400" />
+            <Network className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
             <span>Graph</span>
           </button>
 
@@ -2328,14 +2332,14 @@ export default function IDEApp() {
                 handleRunCloneScan();
               }
             }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all ${
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
               mainView === "clones"
                 ? "bg-pink-950 text-pink-300 border-pink-500/50 shadow-[0_0_15px_rgba(236,72,153,0.25)] font-bold"
                 : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300"
             }`}
             title="Toggle Structural Clone Detection"
           >
-            <Layers className="w-3.5 h-3.5 text-pink-400" />
+            <Layers className="w-3.5 h-3.5 text-pink-400 shrink-0" />
             <span>Clones</span>
           </button>
 
@@ -2347,14 +2351,14 @@ export default function IDEApp() {
                 handleRunSemanticCloneScan();
               }
             }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all ${
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
               mainView === "semantic_clones"
                 ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 shadow-cyan-glow font-bold"
                 : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300"
             }`}
             title="Toggle Semantic Clone Detection (Behavioral Equivalence)"
           >
-            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+            <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
             <span>Semantic</span>
           </button>
 
@@ -2366,23 +2370,23 @@ export default function IDEApp() {
                 handleRunLuminanceScan();
               }
             }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all ${
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
               mainView === "luminance"
                 ? "bg-amber-950 text-amber-300 border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.25)] font-bold"
                 : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300"
             }`}
             title="Toggle Causal Luminance & Entropy Dashboard"
           >
-            <Flame className="w-3.5 h-3.5 text-amber-400" />
+            <Flame className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             <span>Luminance</span>
           </button>
 
           <button
             onClick={() => setStartupModalOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-zinc-400 hover:text-white transition-all"
+            className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-zinc-400 hover:text-white transition-all"
             title="Open Workspace Hub / Recent Projects"
           >
-            <Clock className="w-3.5 h-3.5 text-zinc-400" />
+            <Clock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
             <span>Hub</span>
           </button>
 
@@ -2391,132 +2395,70 @@ export default function IDEApp() {
               setSearchModalMode("files");
               setShowSearchModal(true);
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] hover:border-purple-500/40 text-purple-300 hover:text-white transition-all shadow-sm"
+            className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] hover:border-purple-500/40 text-purple-300 hover:text-white transition-all shadow-sm"
             title="Workspace Search (⌘P / ⌘⇧F / ⌘T)"
           >
-            <Search className="w-3.5 h-3.5 text-purple-400" />
+            <Search className="w-3.5 h-3.5 text-purple-400 shrink-0" />
             <span>Search</span>
-          </button>
-
-          <button
-            onClick={() => setQuickOpenOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-purple-300 transition-all"
-          >
-            <Search className="w-3.5 h-3.5 text-purple-400" />
-            <span>Quick Open (⌘P)</span>
-          </button>
-
-          <button
-            onClick={() => setCmdPaletteOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-cyan-300 transition-all"
-          >
-            <Command className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Palette (⌘K)</span>
-          </button>
-
-          {saveStatus && (
-            <span className="flex items-center gap-1 text-emerald-400 font-bold animate-fade-in bg-emerald-950/80 px-2.5 py-1 rounded-lg border border-emerald-500/30">
-              <Check className="w-3.5 h-3.5" />
-              <span>{saveStatus}</span>
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleExportReport}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] hover:border-emerald-500/40 text-zinc-300 hover:text-white transition-all shadow-sm"
-            title="Export complete standalone HTML, JSON, and SVG workspace report"
-          >
-            <Download className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Export Report</span>
-          </button>
-
-          <button
-            onClick={handleRunCloneScan}
-            disabled={cloneLoading}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-pink-500/40 text-pink-300 font-bold transition-all shadow-sm disabled:opacity-50"
-            title="Scan workspace for duplicate/cloned AST structures"
-          >
-            {cloneLoading ? (
-              <Activity className="w-3.5 h-3.5 animate-spin text-pink-400" />
-            ) : (
-              <Layers className="w-3.5 h-3.5 text-pink-400" />
-            )}
-            <span>{cloneLoading ? "Scanning clones..." : "Run Clone Scan"}</span>
-          </button>
-
-          <button
-            onClick={handleScanSemanticClones}
-            disabled={semanticCloneScanLoading}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-amber-500/40 text-amber-300 font-bold transition-all shadow-sm disabled:opacity-50"
-            title="Scan workspace for semantic code clones using identity elimination & commutative AST normalization"
-          >
-            {semanticCloneScanLoading ? (
-              <Activity className="w-3.5 h-3.5 animate-spin text-amber-400" />
-            ) : (
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            )}
-            <span>{semanticCloneScanLoading ? "Finding semantics..." : "Find Semantic Clones"}</span>
-          </button>
-
-          <button
-            onClick={handleRunLuminanceScan}
-            disabled={luminanceLoading}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-amber-500/40 text-amber-300 font-bold transition-all shadow-sm disabled:opacity-50"
-            title="Compute quantitative Causal Luminance and Entropy metrics"
-          >
-            {luminanceLoading ? (
-              <Activity className="w-3.5 h-3.5 animate-spin text-amber-400" />
-            ) : (
-              <Flame className="w-3.5 h-3.5 text-amber-400" />
-            )}
-            <span>{luminanceLoading ? "Scoring..." : "Run Luminance Scan"}</span>
           </button>
 
           <button
             onClick={handleRunWorkspaceScan}
             disabled={workspaceScanLoading}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-cyan-500/40 text-cyan-300 font-bold transition-all shadow-sm disabled:opacity-50"
+            className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-cyan-500/40 text-cyan-300 font-bold transition-all shadow-sm disabled:opacity-50"
           >
             {workspaceScanLoading ? (
-              <Activity className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+              <Activity className="w-3.5 h-3.5 animate-spin text-cyan-400 shrink-0" />
             ) : (
-              <Layers className="w-3.5 h-3.5 text-cyan-400" />
+              <Layers className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
             )}
-            <span>{workspaceScanLoading ? "Scanning workspace..." : "Run Workspace Scan"}</span>
+            <span>{workspaceScanLoading ? "Scanning..." : "Scan Workspace"}</span>
           </button>
 
           <button
             onClick={handleScanStructuralClones}
             disabled={structuralCloneLoading}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-purple-500/40 text-purple-300 font-bold transition-all shadow-sm disabled:opacity-50"
+            className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-purple-500/40 text-purple-300 font-bold transition-all shadow-sm disabled:opacity-50"
             title="Scan workspace for structural AST clones with normalized identifiers"
           >
             {structuralCloneLoading ? (
-              <Activity className="w-3.5 h-3.5 animate-spin text-purple-400" />
+              <Activity className="w-3.5 h-3.5 animate-spin text-purple-400 shrink-0" />
             ) : (
-              <Copy className="w-3.5 h-3.5 text-purple-400" />
+              <Copy className="w-3.5 h-3.5 text-purple-400 shrink-0" />
             )}
             <span>{structuralCloneLoading ? "Finding clones..." : "Find Clones"}</span>
           </button>
 
           <button
+            onClick={handleScanSemanticClones}
+            disabled={semanticCloneScanLoading}
+            className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-amber-500/40 text-amber-300 font-bold transition-all shadow-sm disabled:opacity-50"
+            title="Scan workspace for semantic code clones using identity elimination & commutative AST normalization"
+          >
+            {semanticCloneScanLoading ? (
+              <Activity className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            )}
+            <span>{semanticCloneScanLoading ? "Finding semantics..." : "Find Semantics"}</span>
+          </button>
+
+          <button
             onClick={() => activeTabPath && runAnalysis(activeTabPath, activeTab.content)}
             disabled={analyzing}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-purple-950/70 hover:bg-purple-900/80 border border-purple-500/40 text-purple-300 font-bold transition-all shadow-purple-glow"
+            className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-purple-950/70 hover:bg-purple-900/80 border border-purple-500/40 text-purple-300 font-bold transition-all shadow-purple-glow"
           >
-            <Play className="w-3.5 h-3.5 fill-purple-400" />
-            <span>{analyzing ? "Analyzing AST..." : "Run Tomography (F5)"}</span>
+            <Play className="w-3.5 h-3.5 fill-purple-400 shrink-0" />
+            <span>{analyzing ? "Analyzing..." : "Tomography (F5)"}</span>
           </button>
 
           {activeTabPath && undoAvailableForFile[activeTabPath] && (
             <button
               onClick={handleUndoSurgery}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-950/80 hover:bg-amber-900 border border-amber-500/50 text-amber-300 font-bold transition-all shadow-sm"
+              className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-950/80 hover:bg-amber-900 border border-amber-500/50 text-amber-300 font-bold transition-all shadow-sm"
               title="Undo last surgery and restore .echo-nullity-backup"
             >
-              <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+              <RotateCcw className="w-3.5 h-3.5 text-amber-400 shrink-0" />
               <span>Undo Surgery</span>
             </button>
           )}
@@ -2524,10 +2466,47 @@ export default function IDEApp() {
           <button
             onClick={handleOpenDiffPreview}
             disabled={findings.length === 0}
-            className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-black font-bold shadow-cyan-glow transition-all disabled:opacity-40"
+            className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-black font-bold shadow-cyan-glow transition-all disabled:opacity-40"
           >
-            <Sparkles className="w-3.5 h-3.5 fill-black" />
-            <span>Safe Remove Surgery ({findings.length})</span>
+            <Sparkles className="w-3.5 h-3.5 fill-black shrink-0" />
+            <span>Safe Remove ({findings.length})</span>
+          </button>
+
+          {saveStatus && (
+            <span className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1 text-emerald-400 font-bold animate-fade-in bg-emerald-950/80 px-2.5 py-1 rounded-lg border border-emerald-500/30">
+              <Check className="w-3.5 h-3.5 shrink-0" />
+              <span>{saveStatus}</span>
+            </span>
+          )}
+        </div>
+
+        {/* Right Zone: Quick Actions & Report Export (Always Visible) */}
+        <div className="flex-none shrink-0 ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setQuickOpenOpen(true)}
+            className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-purple-300 transition-all"
+            title="Quick Open File (⌘P)"
+          >
+            <Search className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+            <span>Quick Open (⌘P)</span>
+          </button>
+
+          <button
+            onClick={() => setCmdPaletteOpen(true)}
+            className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-cyan-300 transition-all"
+            title="Command Palette (⌘K)"
+          >
+            <Command className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span>Palette (⌘K)</span>
+          </button>
+
+          <button
+            onClick={handleExportReport}
+            className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] hover:border-emerald-500/40 text-zinc-300 hover:text-white transition-all shadow-sm"
+            title="Export complete standalone HTML, JSON, and SVG workspace report"
+          >
+            <Download className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>Export Report</span>
           </button>
         </div>
       </header>
