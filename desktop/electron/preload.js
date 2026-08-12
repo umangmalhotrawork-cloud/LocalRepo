@@ -12,4 +12,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   applySafeRemove: (filePath, transformedContent) => ipcRenderer.invoke('engine:apply-safe-remove', filePath, transformedContent),
   restoreBackup: (filePath) => ipcRenderer.invoke('engine:restore-backup', filePath),
   scanWorkspace: (workspacePath) => ipcRenderer.invoke('engine:scan-workspace', workspacePath),
+  verifyEquivalence: (filePath, transformedContent) => ipcRenderer.invoke('engine:verify-equivalence', filePath, transformedContent),
+  buildWorkspaceGraph: (workspacePath) => ipcRenderer.invoke('engine:build-workspace-graph', workspacePath),
 });

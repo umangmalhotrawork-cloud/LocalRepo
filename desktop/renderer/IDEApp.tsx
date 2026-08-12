@@ -7,13 +7,17 @@ import dynamic from "next/dynamic";
 import { 
   FolderOpen, FileText, ChevronRight, ChevronDown, Play, Sparkles, 
   Terminal as TerminalIcon, Zap, X, Check, Save, RotateCcw, ArrowRight, 
-  Command, Search, Cpu, Layers, Activity, BarChart3 
+  Command, Search, Cpu, Layers, Activity, BarChart3, CheckCircle2, AlertTriangle, ShieldCheck,
+  LayoutDashboard, Clock, FileSearch, Network
 } from "lucide-react";
 
 import ConfirmDialog from "./components/ConfirmDialog";
 import CommandPalette from "./components/CommandPalette";
 import QuickOpen from "./components/QuickOpen";
 import ProvenanceReplayPanel, { Finding, ProvenanceStep } from "./components/ProvenanceReplayPanel";
+import WorkspaceDashboard, { WorkspaceReport, WorkspaceFileReport } from "./components/WorkspaceDashboard";
+import WorkspaceGraphPanel, { WorkspaceGraph, GraphNode } from "./components/WorkspaceGraphPanel";
+import StartupModal from "./components/StartupModal";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -38,8 +42,30 @@ declare global {
       applySafeRemove: (path: string, transformedContent: string) => Promise<any>;
       restoreBackup: (path: string) => Promise<any>;
       scanWorkspace: (path: string) => Promise<any>;
+      verifyEquivalence: (path: string, transformedContent: string) => Promise<any>;
+      buildWorkspaceGraph: (path: string) => Promise<any>;
     };
   }
+}
+
+export interface VerificationResult {
+  verified: boolean;
+  status: string;
+  original: {
+    exit_code: number;
+    stdout: string;
+    stderr: string;
+    duration_ms: number;
+  } | null;
+  transformed: {
+    exit_code: number;
+    stdout: string;
+    stderr: string;
+    duration_ms: number;
+  } | null;
+  delta_ms: number;
+  outputs_match: boolean;
+  error?: string;
 }
 
 interface FileNode {
@@ -47,25 +73,6 @@ interface FileNode {
   path: string;
   isDirectory: boolean;
   children?: FileNode[];
-}
-
-export interface WorkspaceFileReport {
-  path: string;
-  absolute_path?: string;
-  ghost_lines: number;
-  total_lines: number;
-  ghost_ratio: number;
-  findings: Finding[];
-}
-
-export interface WorkspaceReport {
-  workspace: string;
-  files_scanned: number;
-  total_ghost_lines: number;
-  total_lines: number;
-  ghost_ratio: number;
-  files: WorkspaceFileReport[];
-  error?: string;
 }
 
 interface TabItem {
@@ -260,9 +267,17 @@ export default function IDEApp() {
       return_sink_line: 24,
     },
   ]);
+  type MainView = "editor" | "dashboard" | "graph";
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(findings[0] || null);
   const [workspaceReport, setWorkspaceReport] = useState<WorkspaceReport | null>(null);
+  const [workspaceSummary, setWorkspaceSummary] = useState<WorkspaceReport | null>(null);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceScanLoading, setWorkspaceScanLoading] = useState(false);
+  const [mainView, setMainView] = useState<MainView>("editor");
+  const [workspaceGraph, setWorkspaceGraph] = useState<WorkspaceGraph | null>(null);
+  const [graphLoading, setGraphLoading] = useState(false);
+  const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
+  const [startupModalOpen, setStartupModalOpen] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<"file" | "project">("file");
   const [luminance, setLuminance] = useState<number>(0.0);
   const [analyzing, setAnalyzing] = useState(false);
@@ -273,6 +288,8 @@ export default function IDEApp() {
   // Modals & Panels State
   const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
   const [diffData, setDiffData] = useState<DiffPreviewData | null>(null);
+  const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
+  const [verifying, setVerifying] = useState(false);
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [closeConfirmTab, setCloseConfirmTab] = useState<TabItem | null>(null);
@@ -314,9 +331,31 @@ export default function IDEApp() {
     setTimeout(() => setSaveStatus(null), 4000);
   };
 
+  const saveRecentWorkspace = (folder: string) => {
+    if (typeof window === "undefined" || !folder) return;
+    try {
+      setRecentWorkspaces((prev) => {
+        const updated = [folder, ...prev.filter((f) => f !== folder)].slice(0, 5);
+        localStorage.setItem("echo_recent_workspaces", JSON.stringify(updated));
+        return updated;
+      });
+    } catch (e) {
+      console.warn("[IDE-APP] Failed to save recent workspace:", e);
+    }
+  };
+
   // On first launch, attempt to auto-load demo workspace from disk via IPC
   useEffect(() => {
     console.log('[IDE-APP] useEffect: starting loadDemoWorkspace');
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem("echo_recent_workspaces");
+        if (stored) {
+          setRecentWorkspaces(JSON.parse(stored));
+        }
+      } catch (e) {}
+    }
+
     async function loadDemoWorkspace() {
       try {
         if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.getDefaultDemoWorkspace) {
@@ -325,6 +364,7 @@ export default function IDEApp() {
           if (demo && demo.tree) {
             setFolderPath(demo.folderPath);
             setFileTree(demo.tree);
+            saveRecentWorkspace(demo.folderPath);
             addLog(`[DEMO] Loaded workspace from disk: ${demo.folderPath}`);
             
             const targetPath = `${demo.folderPath}/src/cart_calculator.py`;
@@ -343,14 +383,22 @@ export default function IDEApp() {
               setActiveTabPath(targetPath);
               runAnalysis(targetPath, fileRes.content);
 
+              console.log('[WORKSPACE] scan start', demo.folderPath);
+              setWorkspaceLoading(true);
+              setWorkspaceScanLoading(true);
               try {
                 const scanRes = await window.electronAPI.scanWorkspace(demo.folderPath);
                 if (scanRes && !scanRes.error) {
+                  setWorkspaceSummary(scanRes);
                   setWorkspaceReport(scanRes);
+                  console.log('[WORKSPACE] scan complete', scanRes);
                   console.log('[IDE-APP] Initial workspace scan loaded:', scanRes.files_scanned, 'files');
                 }
               } catch (scanErr) {
-                console.error('[IDE-APP] Error in initial workspace scan:', scanErr);
+                console.error('[WORKSPACE] scan error:', scanErr);
+              } finally {
+                setWorkspaceLoading(false);
+                setWorkspaceScanLoading(false);
               }
             }
           }
@@ -465,6 +513,43 @@ export default function IDEApp() {
     }
   }, [findings, activeTabPath, activeTab?.content]);
 
+  // Open Recent Workspace Handler
+  const handleOpenRecentWorkspace = async (targetFolder: string) => {
+    if (typeof window === "undefined" || !window.electronAPI) return;
+    try {
+      addLog(`[IPC] Opening recent workspace: ${targetFolder}`);
+      const dirRes = await window.electronAPI.readDir(targetFolder);
+      if (dirRes && dirRes.tree) {
+        setFolderPath(targetFolder);
+        setFileTree(dirRes.tree);
+        saveRecentWorkspace(targetFolder);
+
+        // Auto trigger workspace scan
+        console.log('[WORKSPACE] scan start', targetFolder);
+        setWorkspaceLoading(true);
+        setWorkspaceScanLoading(true);
+        try {
+          const scanRes = await window.electronAPI.scanWorkspace(targetFolder);
+          if (scanRes && !scanRes.error) {
+            setWorkspaceSummary(scanRes);
+            setWorkspaceReport(scanRes);
+            console.log('[WORKSPACE] scan complete', scanRes);
+            if (scanRes.files.length > 0) {
+              handleOpenWorkspaceFile(scanRes.files[0]);
+            }
+          }
+        } catch (scanErr) {
+          console.error('[WORKSPACE] scan error:', scanErr);
+        } finally {
+          setWorkspaceLoading(false);
+          setWorkspaceScanLoading(false);
+        }
+      }
+    } catch (e) {
+      console.error("[IDE-APP] Error opening recent workspace:", e);
+    }
+  };
+
   // Open Folder Handler
   const handleOpenFolder = async () => {
     if (typeof window === "undefined" || !window.electronAPI) {
@@ -478,7 +563,27 @@ export default function IDEApp() {
       if (res && res.tree) {
         setFolderPath(res.folderPath);
         setFileTree(res.tree);
+        saveRecentWorkspace(res.folderPath);
         addLog(`[IPC] Opened directory: ${res.folderPath}`);
+
+        // Automatically trigger workspace scan
+        console.log('[WORKSPACE] scan start', res.folderPath);
+        setWorkspaceLoading(true);
+        setWorkspaceScanLoading(true);
+        try {
+          const scanRes = await window.electronAPI.scanWorkspace(res.folderPath);
+          if (scanRes && !scanRes.error) {
+            setWorkspaceSummary(scanRes);
+            setWorkspaceReport(scanRes);
+            console.log('[WORKSPACE] scan complete', scanRes);
+            addLog(`[WORKSPACE] Scan complete: ${scanRes.files_scanned} files analyzed.`);
+          }
+        } catch (scanErr) {
+          console.error('[WORKSPACE] scan error:', scanErr);
+        } finally {
+          setWorkspaceLoading(false);
+          setWorkspaceScanLoading(false);
+        }
       }
     } catch (err) {
       console.error("[IDE-APP] Error in openFolder:", err);
@@ -704,14 +809,18 @@ export default function IDEApp() {
   const handleRunWorkspaceScan = async () => {
     if (!folderPath) return;
 
+    setWorkspaceLoading(true);
     setWorkspaceScanLoading(true);
+    console.log('[WORKSPACE] scan start', folderPath);
     addLog(`[SCAN] Starting workspace-wide AST tomography on ${folderPath}...`);
 
     if (typeof window !== "undefined" && window.electronAPI && !folderPath.startsWith("demo-workspaces/")) {
       try {
         const report = await window.electronAPI.scanWorkspace(folderPath);
         if (report && !report.error) {
+          setWorkspaceSummary(report);
           setWorkspaceReport(report);
+          console.log('[WORKSPACE] scan complete', report);
           setRightPanelTab("project");
           showToast(`Scanned ${report.files_scanned} files (${report.total_ghost_lines} ghost lines)`);
           addLog(`[SCAN] Project scan complete: ${report.files_scanned} files, ${report.total_ghost_lines} ghost lines (ratio: ${(report.ghost_ratio * 100).toFixed(1)}%).`);
@@ -730,6 +839,10 @@ export default function IDEApp() {
         total_ghost_lines: 4,
         total_lines: 52,
         ghost_ratio: 0.0769,
+        average_causal_luminance: 0.67,
+        risky_files_count: 1,
+        safe_removals_count: 4,
+        scan_duration_ms: 10.5,
         files: [
           {
             path: "src/cart_calculator.py",
@@ -737,6 +850,7 @@ export default function IDEApp() {
             ghost_lines: 4,
             total_lines: 24,
             ghost_ratio: 0.1667,
+            causal_luminance: 0.0,
             findings: findings,
           },
           {
@@ -745,6 +859,7 @@ export default function IDEApp() {
             ghost_lines: 0,
             total_lines: 16,
             ghost_ratio: 0.0,
+            causal_luminance: 1.0,
             findings: [],
           },
           {
@@ -753,16 +868,20 @@ export default function IDEApp() {
             ghost_lines: 0,
             total_lines: 12,
             ghost_ratio: 0.0,
+            causal_luminance: 1.0,
             findings: [],
           },
         ],
       };
+      setWorkspaceSummary(demoReport);
       setWorkspaceReport(demoReport);
+      console.log('[WORKSPACE] scan complete', demoReport);
       setRightPanelTab("project");
       showToast(`Scanned 3 files (4 ghost lines)`);
       addLog(`[SCAN] Project scan complete: 3 files, 4 ghost lines.`);
     }
 
+    setWorkspaceLoading(false);
     setWorkspaceScanLoading(false);
   };
 
@@ -783,6 +902,134 @@ export default function IDEApp() {
     }
   };
 
+  const handleLoadWorkspaceGraph = async (targetFolder?: string) => {
+    const folder = targetFolder || folderPath;
+    if (!folder) return;
+
+    setGraphLoading(true);
+    console.log('[GRAPH] build start', folder);
+    addLog(`[GRAPH] Building cross-file provenance graph for ${folder}...`);
+
+    if (typeof window !== "undefined" && window.electronAPI && !folder.startsWith("demo-workspaces/")) {
+      try {
+        const graphData = await window.electronAPI.buildWorkspaceGraph(folder);
+        if (graphData && !graphData.error) {
+          setWorkspaceGraph(graphData);
+          console.log('[GRAPH] build complete', graphData.nodes?.length || 0, graphData.edges?.length || 0);
+          addLog(`[GRAPH] Graph generated: ${graphData.nodes?.length || 0} nodes, ${graphData.edges?.length || 0} edges.`);
+        }
+      } catch (err) {
+        console.error("[IDE-APP] Error building workspace graph:", err);
+      }
+    } else {
+      // Demo workspace graph fallback
+      const demoGraph: WorkspaceGraph = {
+        workspace: folder,
+        nodes: [
+          { id: "src/cart_calculator.py::L6::subtotal::definition", file: "src/cart_calculator.py", symbol: "subtotal", line: 6, kind: "definition", code: "subtotal = sum(item[\"price\"] * item[\"quantity\"] for item in items)", label: "subtotal (L6)" },
+          { id: "src/cart_calculator.py::L9::subtotal::ghost_operation", file: "src/cart_calculator.py", symbol: "subtotal", line: 9, kind: "ghost_operation", code: "subtotal = subtotal * 1", label: "subtotal (L9)" },
+          { id: "src/cart_calculator.py::L10::subtotal::ghost_operation", file: "src/cart_calculator.py", symbol: "subtotal", line: 10, kind: "ghost_operation", code: "subtotal = subtotal + 0", label: "subtotal (L10)" },
+          { id: "src/cart_calculator.py::L11::subtotal::ghost_operation", file: "src/cart_calculator.py", symbol: "subtotal", line: 11, kind: "ghost_operation", code: "subtotal = subtotal - 0", label: "subtotal (L11)" },
+          { id: "src/cart_calculator.py::L12::subtotal::ghost_operation", file: "src/cart_calculator.py", symbol: "subtotal", line: 12, kind: "ghost_operation", code: "subtotal = subtotal / 1", label: "subtotal (L12)" },
+          { id: "src/cart_calculator.py::L16::discount_amount::use", file: "src/cart_calculator.py", symbol: "discount_amount", line: 16, kind: "use", code: "discount_amount = subtotal * 0.10", label: "discount_amount (L16)" },
+          { id: "src/cart_calculator.py::L20::taxable_amount::use", file: "src/cart_calculator.py", symbol: "taxable_amount", line: 20, kind: "use", code: "taxable_amount = max(0.0, subtotal - discount_amount)", label: "taxable_amount (L20)" },
+          { id: "src/cart_calculator.py::L24::return", file: "src/cart_calculator.py", symbol: "return", line: 24, kind: "return_sink", code: "return round(final_total, 2)", label: "return (L24)" },
+          { id: "src/checkout_engine.py::process_checkout", file: "src/checkout_engine.py", symbol: "process_checkout", line: 1, kind: "definition", code: "def process_checkout():", label: "def process_checkout()" },
+          { id: "src/invoice_processor.py::generate_invoice_pdf", file: "src/invoice_processor.py", symbol: "generate_invoice_pdf", line: 1, kind: "definition", code: "def generate_invoice_pdf():", label: "def generate_invoice_pdf()" }
+        ],
+        edges: [
+          { source: "src/cart_calculator.py::L6::subtotal::definition", target: "src/cart_calculator.py::L9::subtotal::ghost_operation", type: "ghost_flow" },
+          { source: "src/cart_calculator.py::L9::subtotal::ghost_operation", target: "src/cart_calculator.py::L16::discount_amount::use", type: "data_flow" },
+          { source: "src/cart_calculator.py::L16::discount_amount::use", target: "src/cart_calculator.py::L20::taxable_amount::use", type: "data_flow" },
+          { source: "src/cart_calculator.py::L20::taxable_amount::use", target: "src/cart_calculator.py::L24::return", type: "data_flow" }
+        ]
+      };
+      setWorkspaceGraph(demoGraph);
+      console.log('[GRAPH] build complete', demoGraph.nodes.length, demoGraph.edges.length);
+      addLog(`[GRAPH] Graph generated: ${demoGraph.nodes.length} nodes, ${demoGraph.edges.length} edges.`);
+    }
+
+    setGraphLoading(false);
+  };
+
+  const handleGraphNodeClick = async (node: GraphNode) => {
+    console.log('[GRAPH] node clicked', node.id);
+    addLog(`[GRAPH] Navigating to node ${node.symbol} (line ${node.line}) in ${node.file}...`);
+
+    const targetPath = folderPath ? `${folderPath}/${node.file}` : node.file;
+    const fileName = node.file.split("/").pop() || node.file;
+
+    await handleOpenFile({
+      name: fileName,
+      path: targetPath,
+      isDirectory: false,
+    });
+
+    setMainView("editor");
+
+    setTimeout(() => {
+      if (editorRef.current) {
+        try {
+          editorRef.current.revealLineInCenter(node.line);
+          editorRef.current.setPosition({ lineNumber: node.line, column: 1 });
+          editorRef.current.focus();
+        } catch (e) {}
+      }
+    }, 150);
+  };
+
+  const runDifferentialVerification = async (filePath: string, transformedContent: string) => {
+    setVerifying(true);
+    addLog(`[VERIFY] Running isolated differential verification for ${filePath}...`);
+
+    if (typeof window !== "undefined" && window.electronAPI && !filePath.startsWith("demo-workspaces/")) {
+      try {
+        const res = await window.electronAPI.verifyEquivalence(filePath, transformedContent);
+        setVerificationResult(res);
+        if (res && res.verified) {
+          addLog(`[VERIFY] Behavioral equivalence confirmed! (Original: ${res.original?.duration_ms}ms, Transformed: ${res.transformed?.duration_ms}ms, Delta: ${res.delta_ms}ms)`);
+        } else {
+          addLog(`[WARN] Verification status: ${res?.status || "DIVERGENCE_DETECTED"}`);
+        }
+      } catch (err) {
+        console.error("[IDE-APP] Error running verification:", err);
+        setVerificationResult({
+          verified: false,
+          status: "VERIFICATION_FAILED",
+          original: null,
+          transformed: null,
+          delta_ms: 0,
+          outputs_match: false,
+          error: String(err),
+        });
+      }
+    } else {
+      await new Promise((r) => setTimeout(r, 300));
+      const mockResult: VerificationResult = {
+        verified: true,
+        status: "BEHAVIORAL_EQUIVALENCE_CONFIRMED",
+        original: {
+          exit_code: 0,
+          stdout: "",
+          stderr: "",
+          duration_ms: 22.4,
+        },
+        transformed: {
+          exit_code: 0,
+          stdout: "",
+          stderr: "",
+          duration_ms: 21.8,
+        },
+        delta_ms: -0.6,
+        outputs_match: true,
+      };
+      setVerificationResult(mockResult);
+      addLog(`[VERIFY] Behavioral equivalence confirmed.`);
+    }
+
+    setVerifying(false);
+  };
+
   const handleOpenDiffPreview = async () => {
     if (!activeTab || findings.length === 0) return;
 
@@ -795,6 +1042,7 @@ export default function IDEApp() {
         if (preview && preview.transformed_source !== undefined) {
           setDiffData(preview);
           setDiffDrawerOpen(true);
+          runDifferentialVerification(activeTab.path, preview.transformed_source);
         }
       } catch (err) {
         console.error("[IDE-APP] Error generating safe remove preview:", err);
@@ -810,16 +1058,18 @@ export default function IDEApp() {
         return l;
       });
 
+      const transformedCode = transformedLines.join("\n");
       setDiffData({
         file: activeTab.path,
         original_source: activeTab.content,
-        transformed_source: transformedLines.join("\n"),
+        transformed_source: transformedCode,
         changed_lines: changedLines,
         ghost_count_before: findings.length,
         ghost_count_after: 0,
         causal_luminance_after: 1.0,
       });
       setDiffDrawerOpen(true);
+      runDifferentialVerification(activeTab.path, transformedCode);
     }
   };
 
@@ -1089,6 +1339,47 @@ export default function IDEApp() {
           </button>
 
           <button
+            onClick={() => setMainView(mainView === "dashboard" ? "editor" : "dashboard")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all ${
+              mainView === "dashboard"
+                ? "bg-purple-950 text-purple-300 border-purple-500/50 shadow-purple-glow font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300"
+            }`}
+            title="Toggle Workspace Tomography Dashboard"
+          >
+            <LayoutDashboard className="w-3.5 h-3.5 text-purple-400" />
+            <span>Dashboard</span>
+          </button>
+
+          <button
+            onClick={() => {
+              const next = mainView === "graph" ? "editor" : "graph";
+              setMainView(next);
+              if (next === "graph" && !workspaceGraph) {
+                handleLoadWorkspaceGraph();
+              }
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all ${
+              mainView === "graph"
+                ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 shadow-cyan-glow font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300"
+            }`}
+            title="Toggle Cross-File Provenance Graph"
+          >
+            <Network className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Graph</span>
+          </button>
+
+          <button
+            onClick={() => setStartupModalOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-zinc-400 hover:text-white transition-all"
+            title="Open Workspace Hub / Recent Projects"
+          >
+            <Clock className="w-3.5 h-3.5 text-zinc-400" />
+            <span>Hub</span>
+          </button>
+
+          <button
             onClick={() => setQuickOpenOpen(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-purple-300 transition-all"
           >
@@ -1173,72 +1464,95 @@ export default function IDEApp() {
           <div onMouseDown={startExplorerResize} className="resizer-col" />
         )}
 
-        {/* Center Pane: Multi-Tab Monaco Editor */}
+        {/* Center Pane: Multi-Tab Monaco Editor, Workspace Dashboard, or Workspace Graph */}
         <div ref={editorPaneRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }} className="flex-1 min-w-0 flex flex-col overflow-hidden bg-[#050505]">
           
-          {/* Multi-Tab Bar */}
-          <div className="h-9 bg-[#0a0a0a] border-b border-[#1f1f1f] flex items-center px-2 gap-1 font-mono text-xs overflow-x-auto shrink-0">
-            {openTabs.map((tab) => (
-              <div
-                key={tab.path}
-                onClick={() => {
-                  setActiveTabPath(tab.path);
-                  restoreTabCursor(tab.path);
-                  runAnalysis(tab.path, tab.content);
-                }}
-                className={`group px-3 py-1 rounded-t-lg flex items-center gap-2 cursor-pointer transition-all ${
-                  activeTabPath === tab.path
-                    ? "bg-[#050505] text-cyan-400 border-t border-x border-cyan-500/40 font-bold shadow-sm"
-                    : "text-zinc-400 hover:text-white hover:bg-zinc-900/40"
-                }`}
-              >
-                <FileText className="w-3.5 h-3.5 text-cyan-400" />
-                <span>{tab.name}</span>
+          {mainView === "dashboard" ? (
+            <WorkspaceDashboard
+              summary={workspaceSummary || workspaceReport}
+              loading={workspaceLoading || workspaceScanLoading}
+              onRescan={handleRunWorkspaceScan}
+              onOpenFile={(file) => {
+                handleOpenWorkspaceFile(file);
+                setMainView("editor");
+              }}
+              onClose={() => setMainView("editor")}
+            />
+          ) : mainView === "graph" ? (
+            <WorkspaceGraphPanel
+              graph={workspaceGraph}
+              loading={graphLoading}
+              onRefresh={() => handleLoadWorkspaceGraph()}
+              onNodeClick={handleGraphNodeClick}
+              onClose={() => setMainView("editor")}
+            />
+          ) : (
+            <>
+              {/* Multi-Tab Bar */}
+              <div className="h-9 bg-[#0a0a0a] border-b border-[#1f1f1f] flex items-center px-2 gap-1 font-mono text-xs overflow-x-auto shrink-0">
+                {openTabs.map((tab) => (
+                  <div
+                    key={tab.path}
+                    onClick={() => {
+                      setActiveTabPath(tab.path);
+                      restoreTabCursor(tab.path);
+                      runAnalysis(tab.path, tab.content);
+                    }}
+                    className={`group px-3 py-1 rounded-t-lg flex items-center gap-2 cursor-pointer transition-all ${
+                      activeTabPath === tab.path
+                        ? "bg-[#050505] text-cyan-400 border-t border-x border-cyan-500/40 font-bold shadow-sm"
+                        : "text-zinc-400 hover:text-white hover:bg-zinc-900/40"
+                    }`}
+                  >
+                    <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>{tab.name}</span>
 
-                {tab.isDirty && (
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" title="Unsaved changes ●" />
+                    {tab.isDirty && (
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" title="Unsaved changes ●" />
+                    )}
+
+                    <button
+                      onClick={(e) => handleCloseTab(tab.path, e)}
+                      className="opacity-60 hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-opacity"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Monaco Editor Container */}
+              <div ref={monacoWrapperRef} style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden" }} className="flex-1 min-w-0 min-h-0 relative overflow-hidden bg-[#050505]">
+                {activeTab ? (
+                  <MonacoEditor
+                    key={activeTab.path}
+                    width="100%"
+                    height="100%"
+                    language={getLanguageFromPath(activeTab.path)}
+                    value={activeTab.content ?? ""}
+                    onChange={handleEditorChange}
+                    onMount={handleEditorMount}
+                    options={{
+                      fontSize: 13,
+                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                      lineNumbers: "on",
+                      minimap: { enabled: true },
+                      bracketPairColorization: { enabled: true },
+                      "semanticHighlighting.enabled": true,
+                      wordWrap: "off",
+                      smoothScrolling: true,
+                      automaticLayout: true,
+                      padding: { top: 12 },
+                    }}
+                  />
+                ) : (
+                  <div className="w-full h-full bg-[#050505] text-zinc-500 flex items-center justify-center font-mono text-xs">
+                    No file selected
+                  </div>
                 )}
-
-                <button
-                  onClick={(e) => handleCloseTab(tab.path, e)}
-                  className="opacity-60 hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-opacity"
-                >
-                  <X className="w-3 h-3" />
-                </button>
               </div>
-            ))}
-          </div>
-
-          {/* Monaco Editor Container */}
-          <div ref={monacoWrapperRef} style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden" }} className="flex-1 min-w-0 min-h-0 relative overflow-hidden bg-[#050505]">
-            {activeTab ? (
-              <MonacoEditor
-                key={activeTab.path}
-                width="100%"
-                height="100%"
-                language={getLanguageFromPath(activeTab.path)}
-                value={activeTab.content ?? ""}
-                onChange={handleEditorChange}
-                onMount={handleEditorMount}
-                options={{
-                  fontSize: 13,
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                  lineNumbers: "on",
-                  minimap: { enabled: true },
-                  bracketPairColorization: { enabled: true },
-                  "semanticHighlighting.enabled": true,
-                  wordWrap: "off",
-                  smoothScrolling: true,
-                  automaticLayout: true,
-                  padding: { top: 12 },
-                }}
-              />
-            ) : (
-              <div className="w-full h-full bg-[#050505] text-zinc-500 flex items-center justify-center font-mono text-xs">
-                No file selected
-              </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
         {/* Resizer col 2 */}
@@ -1532,6 +1846,49 @@ export default function IDEApp() {
             </div>
           </div>
 
+          {/* Differential Behavioral Equivalence Verification Card */}
+          <div className="p-3 mx-4 mt-3 bg-[#0d0d0d] border border-[#222] rounded-xl space-y-2 font-mono text-xs">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-bold text-zinc-200">
+                <ShieldCheck className="w-4 h-4 text-cyan-400" />
+                <span>Behavioral Verification</span>
+              </div>
+              {verifying ? (
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[10px] animate-pulse">
+                  <Activity className="w-3 h-3 animate-spin" />
+                  <span>Testing Subprocess...</span>
+                </span>
+              ) : verificationResult?.verified ? (
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                  <span>EQUIVALENCE CONFIRMED</span>
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-950/80 border border-red-500/40 text-red-300 text-[10px] font-bold">
+                  <AlertTriangle className="w-3 h-3 text-red-400" />
+                  <span>DIVERGENCE DETECTED</span>
+                </span>
+              )}
+            </div>
+
+            {verificationResult && (
+              <div className="grid grid-cols-2 gap-2 pt-1 border-t border-[#1a1a1a] text-[11px]">
+                <div className="flex justify-between text-zinc-400">
+                  <span>Output Match:</span>
+                  <span className={verificationResult.outputs_match ? "text-emerald-400 font-bold" : "text-red-400 font-bold"}>
+                    {verificationResult.outputs_match ? "Identical (100%)" : "Divergent"}
+                  </span>
+                </div>
+                <div className="flex justify-between text-zinc-400">
+                  <span>Perf Delta:</span>
+                  <span className="text-cyan-300 font-bold">
+                    {verificationResult.delta_ms > 0 ? `+${verificationResult.delta_ms}` : verificationResult.delta_ms}ms
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="flex-1 p-4 overflow-y-auto font-mono text-xs space-y-2 bg-[#050505]">
             <span className="text-zinc-500 uppercase tracking-widest text-[10px]">Unified AST Diff Stream</span>
             
@@ -1575,7 +1932,8 @@ export default function IDEApp() {
             </button>
             <button
               onClick={handleApplySafeRemove}
-              className="px-5 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-black font-bold shadow-cyan-glow transition-all flex items-center gap-2"
+              disabled={verifying || (verificationResult !== null && !verificationResult.verified)}
+              className="px-5 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-black font-bold shadow-cyan-glow transition-all flex items-center gap-2 disabled:opacity-40"
             >
               <Zap className="w-4 h-4 fill-black" />
               <span>Apply Surgery</span>
@@ -1626,6 +1984,20 @@ export default function IDEApp() {
         onClose={() => setQuickOpenOpen(false)}
         files={fileList}
         onSelectFile={(path, name) => handleOpenFile({ name, path, isDirectory: false })}
+      />
+
+      {/* Startup Modal */}
+      <StartupModal
+        isOpen={startupModalOpen}
+        onClose={() => setStartupModalOpen(false)}
+        recentWorkspaces={recentWorkspaces}
+        onOpenRecent={(path) => handleOpenRecentWorkspace(path)}
+        onOpenFolder={handleOpenFolder}
+        onOpenDemo={() => {
+          if (folderPath) {
+            handleRunWorkspaceScan();
+          }
+        }}
       />
 
     </div>

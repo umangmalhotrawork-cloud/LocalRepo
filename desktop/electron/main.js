@@ -103,9 +103,11 @@ function createWindow() {
 
           // Click Project Scan tab and capture workspace report screenshot
           await mainWindow.webContents.executeJavaScript(`
-            const buttons = Array.from(document.querySelectorAll('button'));
-            const projBtn = buttons.find(b => b.textContent.includes('Project Scan'));
-            if (projBtn) projBtn.click();
+            (() => {
+              const buttons = Array.from(document.querySelectorAll('button'));
+              const projBtn = buttons.find(b => b.textContent.includes('Project Scan'));
+              if (projBtn) projBtn.click();
+            })();
           `);
 
           setTimeout(async () => {
@@ -114,6 +116,68 @@ function createWindow() {
               const screenshotPath2 = path.join(screenshotDir, 'milestone4-workspace-scan.png');
               fs.writeFileSync(screenshotPath2, image2.toPNG());
               console.log('[ELECTRON] Saved verification screenshot to:', screenshotPath2);
+
+              // Switch back to Active File and open Safe Remove Surgery Diff Drawer
+              await mainWindow.webContents.executeJavaScript(`
+                (() => {
+                  const buttons = Array.from(document.querySelectorAll('button'));
+                  const fileBtn = buttons.find(b => b.textContent.includes('Active File'));
+                  if (fileBtn) fileBtn.click();
+                  setTimeout(() => {
+                    const surgeryBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Safe Remove Surgery') || b.textContent.includes('Apply Safe Remove Surgery'));
+                    if (surgeryBtn) surgeryBtn.click();
+                  }, 300);
+                })();
+              `);
+
+              setTimeout(async () => {
+                if (mainWindow) {
+                  const image3 = await mainWindow.capturePage();
+                  const screenshotPath3 = path.join(screenshotDir, 'milestone5-differential-verification.png');
+                  fs.writeFileSync(screenshotPath3, image3.toPNG());
+                  console.log('[ELECTRON] Saved verification screenshot to:', screenshotPath3);
+
+                  // Close diff drawer and switch to Workspace Dashboard
+                  await mainWindow.webContents.executeJavaScript(`
+                    (() => {
+                      const buttons = Array.from(document.querySelectorAll('button'));
+                      const cancelBtn = buttons.find(b => b.textContent.trim() === 'Cancel');
+                      if (cancelBtn) cancelBtn.click();
+                      setTimeout(() => {
+                        const dashBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Dashboard'));
+                        if (dashBtn) dashBtn.click();
+                      }, 200);
+                    })();
+                  `);
+
+                  setTimeout(async () => {
+                    if (mainWindow) {
+                      const image4 = await mainWindow.capturePage();
+                      const screenshotPath4 = path.join(screenshotDir, 'milestone6-workspace-dashboard.png');
+                      fs.writeFileSync(screenshotPath4, image4.toPNG());
+                      console.log('[ELECTRON] Saved verification screenshot to:', screenshotPath4);
+
+                      // Switch to Workspace Graph Panel
+                      await mainWindow.webContents.executeJavaScript(`
+                        (() => {
+                          const buttons = Array.from(document.querySelectorAll('button'));
+                          const graphBtn = buttons.find(b => b.textContent.includes('Graph'));
+                          if (graphBtn) graphBtn.click();
+                        })();
+                      `);
+
+                      setTimeout(async () => {
+                        if (mainWindow) {
+                          const image5 = await mainWindow.capturePage();
+                          const screenshotPath5 = path.join(screenshotDir, 'milestone7-workspace-graph.png');
+                          fs.writeFileSync(screenshotPath5, image5.toPNG());
+                          console.log('[ELECTRON] Saved verification screenshot to:', screenshotPath5);
+                        }
+                      }, 1000);
+                    }
+                  }, 1000);
+                }
+              }, 1200);
             }
           }, 1000);
         }
@@ -334,6 +398,77 @@ ipcMain.handle('engine:scan-workspace', async (_, workspacePath) => {
           total_lines: 0,
           ghost_ratio: 0,
           files: [],
+        });
+      }
+    });
+  });
+});
+
+ipcMain.handle('engine:verify-equivalence', async (_, filePath, transformedContent) => {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'verify_equivalence.py');
+    const child = execFile('python3', [scriptPath, filePath], { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && !stdout) {
+        console.error('Python verify equivalence error:', stderr || error.message);
+        resolve({
+          verified: false,
+          status: 'VERIFICATION_PROCESS_ERROR',
+          error: stderr || error.message,
+          original: null,
+          transformed: null,
+          delta_ms: 0,
+          outputs_match: false,
+        });
+        return;
+      }
+      try {
+        const jsonResult = JSON.parse(stdout);
+        resolve(jsonResult);
+      } catch (parseError) {
+        console.error('Failed to parse verify_equivalence JSON output:', parseError, stdout);
+        resolve({
+          verified: false,
+          status: 'VERIFICATION_PARSE_ERROR',
+          error: 'Failed to parse verification JSON output',
+          original: null,
+          transformed: null,
+          delta_ms: 0,
+          outputs_match: false,
+        });
+      }
+    });
+
+    if (child.stdin) {
+      child.stdin.write(transformedContent || '');
+      child.stdin.end();
+    }
+  });
+});
+
+ipcMain.handle('engine:build-workspace-graph', async (_, workspacePath) => {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'build_workspace_graph.py');
+    execFile('python3', [scriptPath, workspacePath], { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && !stdout) {
+        console.error('Python build_workspace_graph error:', stderr || error.message);
+        resolve({
+          workspace: workspacePath,
+          nodes: [],
+          edges: [],
+          error: stderr || error.message,
+        });
+        return;
+      }
+      try {
+        const jsonResult = JSON.parse(stdout);
+        resolve(jsonResult);
+      } catch (parseError) {
+        console.error('Failed to parse build_workspace_graph JSON output:', parseError, stdout);
+        resolve({
+          workspace: workspacePath,
+          nodes: [],
+          edges: [],
+          error: 'Failed to parse workspace graph JSON output',
         });
       }
     });

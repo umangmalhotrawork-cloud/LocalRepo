@@ -192,6 +192,41 @@ def test_syntax_error_handling():
     assert result["ghost_lines_count"] == 0
     assert result["findings"] == []
 
+def test_verify_equivalence_identical():
+    from verify_equivalence import verify_equivalence
+    code = "x = 42\nprint('result:', x)\n"
+    with tempfile.NamedTemporaryFile("w+", suffix=".py", delete=False) as tf:
+        tf.write(code)
+        tf_path = tf.name
+
+    try:
+        res = verify_equivalence(tf_path, code)
+        assert res["verified"] is True
+        assert res["status"] == "BEHAVIORAL_EQUIVALENCE_CONFIRMED"
+        assert res["outputs_match"] is True
+        assert res["original"]["exit_code"] == 0
+        assert res["transformed"]["exit_code"] == 0
+    finally:
+        if os.path.exists(tf_path):
+            os.remove(tf_path)
+
+def test_verify_equivalence_divergent():
+    from verify_equivalence import verify_equivalence
+    orig_code = "print('OK')\n"
+    divergent_code = "raise RuntimeError('Failure')\n"
+    with tempfile.NamedTemporaryFile("w+", suffix=".py", delete=False) as tf:
+        tf.write(orig_code)
+        tf_path = tf.name
+
+    try:
+        res = verify_equivalence(tf_path, divergent_code)
+        assert res["verified"] is False
+        assert res["status"] == "BEHAVIORAL_DIVERGENCE_DETECTED"
+        assert res["outputs_match"] is False
+    finally:
+        if os.path.exists(tf_path):
+            os.remove(tf_path)
+
 if __name__ == "__main__":
     test_funcs = [v for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0
