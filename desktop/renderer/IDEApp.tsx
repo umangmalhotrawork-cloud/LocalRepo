@@ -7,7 +7,7 @@ import dynamic from "next/dynamic";
 import { 
   FolderOpen, FileText, ChevronRight, ChevronDown, Play, Sparkles, 
   Terminal as TerminalIcon, Zap, X, Check, Save, RotateCcw, ArrowRight, 
-  Command, Search, Cpu 
+  Command, Search, Cpu, Layers, Activity, BarChart3 
 } from "lucide-react";
 
 import ConfirmDialog from "./components/ConfirmDialog";
@@ -37,6 +37,7 @@ declare global {
       previewSafeRemove: (path: string) => Promise<any>;
       applySafeRemove: (path: string, transformedContent: string) => Promise<any>;
       restoreBackup: (path: string) => Promise<any>;
+      scanWorkspace: (path: string) => Promise<any>;
     };
   }
 }
@@ -46,6 +47,25 @@ interface FileNode {
   path: string;
   isDirectory: boolean;
   children?: FileNode[];
+}
+
+export interface WorkspaceFileReport {
+  path: string;
+  absolute_path?: string;
+  ghost_lines: number;
+  total_lines: number;
+  ghost_ratio: number;
+  findings: Finding[];
+}
+
+export interface WorkspaceReport {
+  workspace: string;
+  files_scanned: number;
+  total_ghost_lines: number;
+  total_lines: number;
+  ghost_ratio: number;
+  files: WorkspaceFileReport[];
+  error?: string;
 }
 
 interface TabItem {
@@ -241,6 +261,9 @@ export default function IDEApp() {
     },
   ]);
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(findings[0] || null);
+  const [workspaceReport, setWorkspaceReport] = useState<WorkspaceReport | null>(null);
+  const [workspaceScanLoading, setWorkspaceScanLoading] = useState(false);
+  const [rightPanelTab, setRightPanelTab] = useState<"file" | "project">("file");
   const [luminance, setLuminance] = useState<number>(0.0);
   const [analyzing, setAnalyzing] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
@@ -319,6 +342,16 @@ export default function IDEApp() {
               setOpenTabs([newTab]);
               setActiveTabPath(targetPath);
               runAnalysis(targetPath, fileRes.content);
+
+              try {
+                const scanRes = await window.electronAPI.scanWorkspace(demo.folderPath);
+                if (scanRes && !scanRes.error) {
+                  setWorkspaceReport(scanRes);
+                  console.log('[IDE-APP] Initial workspace scan loaded:', scanRes.files_scanned, 'files');
+                }
+              } catch (scanErr) {
+                console.error('[IDE-APP] Error in initial workspace scan:', scanErr);
+              }
             }
           }
         }
@@ -668,6 +701,88 @@ export default function IDEApp() {
     setAnalyzing(false);
   };
 
+  const handleRunWorkspaceScan = async () => {
+    if (!folderPath) return;
+
+    setWorkspaceScanLoading(true);
+    addLog(`[SCAN] Starting workspace-wide AST tomography on ${folderPath}...`);
+
+    if (typeof window !== "undefined" && window.electronAPI && !folderPath.startsWith("demo-workspaces/")) {
+      try {
+        const report = await window.electronAPI.scanWorkspace(folderPath);
+        if (report && !report.error) {
+          setWorkspaceReport(report);
+          setRightPanelTab("project");
+          showToast(`Scanned ${report.files_scanned} files (${report.total_ghost_lines} ghost lines)`);
+          addLog(`[SCAN] Project scan complete: ${report.files_scanned} files, ${report.total_ghost_lines} ghost lines (ratio: ${(report.ghost_ratio * 100).toFixed(1)}%).`);
+        } else {
+          addLog(`[ERROR] Workspace scan failed: ${report?.error || "Unknown error"}`);
+        }
+      } catch (err) {
+        console.error("[IDE-APP] Error running workspace scan:", err);
+        addLog(`[ERROR] Scan exception: ${err}`);
+      }
+    } else {
+      // Demo workspace scan fallback
+      const demoReport: WorkspaceReport = {
+        workspace: folderPath,
+        files_scanned: 3,
+        total_ghost_lines: 4,
+        total_lines: 52,
+        ghost_ratio: 0.0769,
+        files: [
+          {
+            path: "src/cart_calculator.py",
+            absolute_path: "demo-workspaces/ai_cart_project/src/cart_calculator.py",
+            ghost_lines: 4,
+            total_lines: 24,
+            ghost_ratio: 0.1667,
+            findings: findings,
+          },
+          {
+            path: "src/checkout_engine.py",
+            absolute_path: "demo-workspaces/ai_cart_project/src/checkout_engine.py",
+            ghost_lines: 0,
+            total_lines: 16,
+            ghost_ratio: 0.0,
+            findings: [],
+          },
+          {
+            path: "src/invoice_processor.py",
+            absolute_path: "demo-workspaces/ai_cart_project/src/invoice_processor.py",
+            ghost_lines: 0,
+            total_lines: 12,
+            ghost_ratio: 0.0,
+            findings: [],
+          },
+        ],
+      };
+      setWorkspaceReport(demoReport);
+      setRightPanelTab("project");
+      showToast(`Scanned 3 files (4 ghost lines)`);
+      addLog(`[SCAN] Project scan complete: 3 files, 4 ghost lines.`);
+    }
+
+    setWorkspaceScanLoading(false);
+  };
+
+  const handleOpenWorkspaceFile = async (fileReport: WorkspaceFileReport) => {
+    const targetPath = fileReport.absolute_path || (folderPath ? `${folderPath}/${fileReport.path}` : fileReport.path);
+    const fileName = fileReport.path.split("/").pop() || fileReport.path;
+
+    await handleOpenFile({
+      name: fileName,
+      path: targetPath,
+      isDirectory: false,
+    });
+
+    if (fileReport.findings && fileReport.findings.length > 0) {
+      setTimeout(() => {
+        handleFindingClick(fileReport.findings[0]);
+      }, 100);
+    }
+  };
+
   const handleOpenDiffPreview = async () => {
     if (!activeTab || findings.length === 0) return;
 
@@ -999,6 +1114,19 @@ export default function IDEApp() {
 
         <div className="flex items-center gap-3">
           <button
+            onClick={handleRunWorkspaceScan}
+            disabled={workspaceScanLoading}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-cyan-500/40 text-cyan-300 font-bold transition-all shadow-sm disabled:opacity-50"
+          >
+            {workspaceScanLoading ? (
+              <Activity className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+            ) : (
+              <Layers className="w-3.5 h-3.5 text-cyan-400" />
+            )}
+            <span>{workspaceScanLoading ? "Scanning workspace..." : "Run Workspace Scan"}</span>
+          </button>
+
+          <button
             onClick={() => activeTabPath && runAnalysis(activeTabPath, activeTab.content)}
             disabled={analyzing}
             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-purple-950/70 hover:bg-purple-900/80 border border-purple-500/40 text-purple-300 font-bold transition-all shadow-purple-glow"
@@ -1128,71 +1256,186 @@ export default function IDEApp() {
               </span>
             </div>
 
-            {/* Causal Score Summary */}
-            <div className="p-3 bg-[#050505] rounded-xl border border-[#1f1f1f] space-y-2 font-mono text-xs shadow-inner">
-              <div className="flex justify-between">
-                <span className="text-zinc-400">Causal Impact:</span>
-                <span className="text-cyan-400 font-bold">{luminance === 0.0 ? "0.00%" : "100.00%"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-zinc-400">Ghost Lines:</span>
-                <span className="text-purple-400 font-bold">{findings.length}</span>
-              </div>
-            </div>
-
-            {/* Findings List (Clickable findings navigation) */}
-            <div className="space-y-2">
-              <span className="text-xs font-mono text-zinc-400 uppercase tracking-widest font-bold">
-                Detected Vacuous Lines
-              </span>
-
-              <div className="space-y-2 max-h-48 overflow-y-auto font-mono text-xs">
-                {findings.length > 0 ? (
-                  findings.map((f, i) => {
-                    const isSelected = selectedFinding?.line === f.line;
-                    return (
-                      <button
-                        key={i}
-                        onClick={() => handleFindingClick(f)}
-                        className={`w-full text-left p-2.5 bg-[#050505] hover:bg-[#0d0d0d] transition-all rounded-xl border space-y-1 group ${
-                          isSelected
-                            ? "border-cyan-400 bg-cyan-950/20 shadow-cyan-glow/20"
-                            : "border-cyan-500/30 hover:border-cyan-400/80"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between text-cyan-400 font-bold group-hover:text-cyan-300">
-                          <span className="flex items-center gap-1.5">
-                            {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
-                            Line {f.line}
-                          </span>
-                          <span className="text-[10px] bg-purple-950/80 px-1.5 py-0.5 rounded border border-purple-500/30">
-                            {f.title}
-                          </span>
-                        </div>
-                        <div className="text-zinc-300 font-mono bg-[#111111] p-1.5 rounded truncate">
-                          {f.code}
-                        </div>
-                        <p className="text-[11px] text-zinc-400 font-sans leading-tight">
-                          {f.reason}
-                        </p>
-                      </button>
-                    );
-                  })
-                ) : (
-                  <div className="p-4 bg-[#050505] rounded-xl border border-[#1f1f1f] text-center text-zinc-500 text-xs font-mono">
-                    No vacuous ghost lines detected. Code is causally optimal.
-                  </div>
+            {/* Panel Tabs: Active File vs Project Scan */}
+            <div className="grid grid-cols-2 gap-1 p-1 bg-[#050505] rounded-xl border border-[#1f1f1f] text-[11px] font-mono">
+              <button
+                onClick={() => setRightPanelTab("file")}
+                className={`py-1.5 px-2 rounded-lg font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  rightPanelTab === "file"
+                    ? "bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 shadow-sm"
+                    : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                <span>Active File</span>
+                <span className="px-1.5 py-0.2 rounded-full bg-zinc-800 text-[9px] text-zinc-300">
+                  {findings.length}
+                </span>
+              </button>
+              <button
+                onClick={() => setRightPanelTab("project")}
+                className={`py-1.5 px-2 rounded-lg font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  rightPanelTab === "project"
+                    ? "bg-purple-950/80 text-purple-300 border border-purple-500/40 shadow-sm"
+                    : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                <span>Project Scan</span>
+                {workspaceReport && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-purple-900/60 text-[9px] text-purple-200">
+                    {workspaceReport.total_ghost_lines}
+                  </span>
                 )}
-              </div>
+              </button>
             </div>
 
-            {/* Dynamic Provenance Replay Timeline Panel */}
-            <div className="pt-3 border-t border-[#1f1f1f]">
-              <ProvenanceReplayPanel
-                finding={selectedFinding}
-                onStepClick={handleProvenanceStepClick}
-              />
-            </div>
+            {rightPanelTab === "project" ? (
+              /* Project Scan View */
+              <div className="space-y-4">
+                {/* Project Summary Metrics */}
+                <div className="p-3 bg-[#050505] rounded-xl border border-[#1f1f1f] space-y-2 font-mono text-xs shadow-inner">
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Files Scanned:</span>
+                    <span className="text-cyan-400 font-bold">{workspaceReport?.files_scanned ?? 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Total Ghost Lines:</span>
+                    <span className="text-purple-400 font-bold">{workspaceReport?.total_ghost_lines ?? 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Overall Ghost Ratio:</span>
+                    <span className="text-amber-400 font-bold">
+                      {workspaceReport ? `${(workspaceReport.ghost_ratio * 100).toFixed(1)}%` : "0.0%"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Ranked File Findings List */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs font-mono text-zinc-400 uppercase tracking-widest font-bold">
+                    <span>Project Findings</span>
+                    {workspaceReport && (
+                      <span className="text-[10px] text-zinc-500 lowercase">by ghost ratio</span>
+                    )}
+                  </div>
+
+                  <div className="space-y-2 max-h-64 overflow-y-auto font-mono text-xs">
+                    {workspaceReport && workspaceReport.files.length > 0 ? (
+                      workspaceReport.files.map((file, i) => {
+                        const hasGhosts = file.ghost_lines > 0;
+                        return (
+                          <button
+                            key={i}
+                            onClick={() => handleOpenWorkspaceFile(file)}
+                            className="w-full text-left p-3 bg-[#050505] hover:bg-[#0d0d0d] hover:border-cyan-400 transition-all rounded-xl border border-zinc-800 space-y-1.5 group"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-zinc-200 font-bold group-hover:text-cyan-300 truncate max-w-[160px]">
+                                {file.path}
+                              </span>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${
+                                  hasGhosts
+                                    ? "bg-amber-950/80 text-amber-300 border-amber-500/40"
+                                    : "bg-emerald-950/80 text-emerald-300 border-emerald-500/40"
+                                }`}
+                              >
+                                {file.ghost_lines} {file.ghost_lines === 1 ? "Ghost" : "Ghosts"}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                              <span>LOC: {file.total_lines}</span>
+                              <span className={hasGhosts ? "text-cyan-400 font-bold" : "text-zinc-500"}>
+                                Ratio: {(file.ghost_ratio * 100).toFixed(1)}%
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="p-4 bg-[#050505] rounded-xl border border-[#1f1f1f] text-center text-zinc-500 text-xs font-mono space-y-2">
+                        <p>No project scan performed yet.</p>
+                        <button
+                          onClick={handleRunWorkspaceScan}
+                          disabled={workspaceScanLoading}
+                          className="px-3 py-1.5 rounded-lg bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[11px] font-bold hover:bg-cyan-900 transition-all"
+                        >
+                          {workspaceScanLoading ? "Scanning..." : "Run Workspace Scan"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Active File View */
+              <>
+                {/* Causal Score Summary */}
+                <div className="p-3 bg-[#050505] rounded-xl border border-[#1f1f1f] space-y-2 font-mono text-xs shadow-inner">
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Causal Impact:</span>
+                    <span className="text-cyan-400 font-bold">{luminance === 0.0 ? "0.00%" : "100.00%"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Ghost Lines:</span>
+                    <span className="text-purple-400 font-bold">{findings.length}</span>
+                  </div>
+                </div>
+
+                {/* Findings List (Clickable findings navigation) */}
+                <div className="space-y-2">
+                  <span className="text-xs font-mono text-zinc-400 uppercase tracking-widest font-bold">
+                    Detected Vacuous Lines
+                  </span>
+
+                  <div className="space-y-2 max-h-48 overflow-y-auto font-mono text-xs">
+                    {findings.length > 0 ? (
+                      findings.map((f, i) => {
+                        const isSelected = selectedFinding?.line === f.line;
+                        return (
+                          <button
+                            key={i}
+                            onClick={() => handleFindingClick(f)}
+                            className={`w-full text-left p-2.5 bg-[#050505] hover:bg-[#0d0d0d] transition-all rounded-xl border space-y-1 group ${
+                              isSelected
+                                ? "border-cyan-400 bg-cyan-950/20 shadow-cyan-glow/20"
+                                : "border-cyan-500/30 hover:border-cyan-400/80"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between text-cyan-400 font-bold group-hover:text-cyan-300">
+                              <span className="flex items-center gap-1.5">
+                                {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
+                                Line {f.line}
+                              </span>
+                              <span className="text-[10px] bg-purple-950/80 px-1.5 py-0.5 rounded border border-purple-500/30">
+                                {f.title}
+                              </span>
+                            </div>
+                            <div className="text-zinc-300 font-mono bg-[#111111] p-1.5 rounded truncate">
+                              {f.code}
+                            </div>
+                            <p className="text-[11px] text-zinc-400 font-sans leading-tight">
+                              {f.reason}
+                            </p>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="p-4 bg-[#050505] rounded-xl border border-[#1f1f1f] text-center text-zinc-500 text-xs font-mono">
+                        No vacuous ghost lines detected. Code is causally optimal.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Dynamic Provenance Replay Timeline Panel */}
+                <div className="pt-3 border-t border-[#1f1f1f]">
+                  <ProvenanceReplayPanel
+                    finding={selectedFinding}
+                    onStepClick={handleProvenanceStepClick}
+                  />
+                </div>
+              </>
+            )}
 
           </div>
 

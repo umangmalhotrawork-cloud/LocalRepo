@@ -100,6 +100,22 @@ function createWindow() {
           const screenshotPath = path.join(screenshotDir, 'phase3-editor-completion.png');
           fs.writeFileSync(screenshotPath, image.toPNG());
           console.log('[ELECTRON] Saved verification screenshot to:', screenshotPath);
+
+          // Click Project Scan tab and capture workspace report screenshot
+          await mainWindow.webContents.executeJavaScript(`
+            const buttons = Array.from(document.querySelectorAll('button'));
+            const projBtn = buttons.find(b => b.textContent.includes('Project Scan'));
+            if (projBtn) projBtn.click();
+          `);
+
+          setTimeout(async () => {
+            if (mainWindow) {
+              const image2 = await mainWindow.capturePage();
+              const screenshotPath2 = path.join(screenshotDir, 'milestone4-workspace-scan.png');
+              fs.writeFileSync(screenshotPath2, image2.toPNG());
+              console.log('[ELECTRON] Saved verification screenshot to:', screenshotPath2);
+            }
+          }, 1000);
         }
       } catch (err) {
         console.error('[ELECTRON] Error capturing screenshot:', err);
@@ -286,4 +302,40 @@ ipcMain.handle('engine:restore-backup', async (_, filePath) => {
   } catch (e) {
     return { success: false, error: e.message };
   }
+});
+
+ipcMain.handle('engine:scan-workspace', async (_, workspacePath) => {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'scan_workspace.py');
+    execFile('python3', [scriptPath, workspacePath], { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        console.error('Python workspace scan error:', stderr || error.message);
+        resolve({
+          error: stderr || error.message,
+          workspace: workspacePath,
+          files_scanned: 0,
+          total_ghost_lines: 0,
+          total_lines: 0,
+          ghost_ratio: 0,
+          files: [],
+        });
+        return;
+      }
+      try {
+        const jsonResult = JSON.parse(stdout);
+        resolve(jsonResult);
+      } catch (parseError) {
+        console.error('Failed to parse scan_workspace JSON output:', parseError);
+        resolve({
+          error: 'Failed to parse workspace scan JSON output',
+          workspace: workspacePath,
+          files_scanned: 0,
+          total_ghost_lines: 0,
+          total_lines: 0,
+          ghost_ratio: 0,
+          files: [],
+        });
+      }
+    });
+  });
 });
