@@ -20,4 +20,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   previewSurgery: (payload) => ipcRenderer.invoke('surgery:preview', payload),
   applySurgery: (payload) => ipcRenderer.invoke('surgery:apply', payload),
   undoSurgery: (payload) => ipcRenderer.invoke('surgery:undo', payload),
+  searchWorkspace: (payload) => ipcRenderer.invoke('workspace:search', payload),
 });

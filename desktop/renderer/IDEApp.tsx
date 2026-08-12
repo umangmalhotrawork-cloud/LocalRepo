@@ -19,6 +19,7 @@ import WorkspaceDashboard, { WorkspaceReport, WorkspaceFileReport } from "./comp
 import WorkspaceGraphPanel, { WorkspaceGraph, GraphNode } from "./components/WorkspaceGraphPanel";
 import StartupModal from "./components/StartupModal";
 import SurgeryDiffPreview from "./components/SurgeryDiffPreview";
+import WorkspaceSearchModal, { SearchMode, SearchResultItem } from "./components/WorkspaceSearchModal";
 import { useWorkspaceState, EditorViewState, WorkspacePersistedState } from "./hooks/useWorkspaceState";
 import { buildWorkspaceReport, ReportExportPayload } from "./utils/reportBuilder";
 import { exportGraphSvg } from "./utils/exportGraphSvg";
@@ -54,6 +55,7 @@ declare global {
       previewSurgery: (payload: { file: string; approved_lines: number[] }) => Promise<any>;
       applySurgery: (payload: { file: string; approved_lines: number[] }) => Promise<{ success: boolean; file: string; removed_count: number; backup_path: string; new_hash: string; transformed_content: string; error?: string }>;
       undoSurgery: (payload: { file: string }) => Promise<{ success: boolean; file: string; restored_content: string; backup_path: string; error?: string }>;
+      searchWorkspace: (payload: { workspace: string; query?: string; mode?: string; limit?: number }) => Promise<{ workspace: string; query: string; mode: string; results_count: number; results: SearchResultItem[]; error?: string }>;
     };
   }
 }
@@ -305,6 +307,9 @@ export default function IDEApp() {
   const [showSurgeryDiffModal, setShowSurgeryDiffModal] = useState(false);
   const [undoAvailableForFile, setUndoAvailableForFile] = useState<Record<string, boolean>>({});
   const [applyingSurgery, setApplyingSurgery] = useState(false);
+  const [showSearchModal, setShowSearchModal] = useState(false);
+  const [searchModalMode, setSearchModalMode] = useState<SearchMode>("files");
+  const [searchModalQuery, setSearchModalQuery] = useState("");
   const [diffData, setDiffData] = useState<DiffPreviewData | null>(null);
   const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
   const [verifying, setVerifying] = useState(false);
@@ -610,15 +615,27 @@ export default function IDEApp() {
       const isCmd = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
 
-      if (isCmd && key === "s") {
+      if (isCmd && e.shiftKey && key === "f") {
+        e.preventDefault();
+        setSearchModalMode("content");
+        setShowSearchModal(true);
+        console.log('[SHORTCUT] ⌘⇧F triggered Content Search');
+      } else if (isCmd && key === "p") {
+        e.preventDefault();
+        setSearchModalMode("files");
+        setShowSearchModal(true);
+        console.log('[SHORTCUT] ⌘P triggered Files Search');
+      } else if (isCmd && key === "t") {
+        e.preventDefault();
+        setSearchModalMode("symbols");
+        setShowSearchModal(true);
+        console.log('[SHORTCUT] ⌘T triggered Symbols Search');
+      } else if (isCmd && key === "s") {
         e.preventDefault();
         handleSaveFile();
       } else if (isCmd && key === "w") {
         e.preventDefault();
         if (activeTab) handleCloseTab(activeTab.path);
-      } else if (isCmd && key === "p") {
-        e.preventDefault();
-        setQuickOpenOpen(true);
       } else if (isCmd && key === "k") {
         e.preventDefault();
         setCmdPaletteOpen(true);
@@ -1063,6 +1080,35 @@ export default function IDEApp() {
         handleFindingClick(fileReport.findings[0]);
       }, 100);
     }
+  };
+
+  const handleSelectSearchResult = async (result: SearchResultItem) => {
+    const targetPath = result.absolute_path || (folderPath ? `${folderPath}/${result.file}` : result.file);
+    const fileName = result.filename || result.file.split("/").pop() || "file.py";
+
+    await handleOpenFile({
+      name: fileName,
+      path: targetPath,
+      isDirectory: false,
+    });
+
+    setTimeout(() => {
+      if (editorRef.current && result.line > 0) {
+        try {
+          editorRef.current.revealLineInCenter(result.line);
+          editorRef.current.setPosition({
+            lineNumber: result.line,
+            column: result.column || 1,
+          });
+          editorRef.current.focus();
+          setCursorPos({ line: result.line, col: result.column || 1 });
+        } catch (e) {}
+      }
+    }, 150);
+
+    showToast(`Navigated to ${fileName}:${result.line}`);
+    addLog(`[NAV] Jumped to ${result.file}:${result.line}:${result.column} (${result.match_type})`);
+    console.log('[NAV] Jumped to', result.file, 'at line', result.line);
   };
 
   const handleExportReport = async () => {
@@ -1645,6 +1691,18 @@ export default function IDEApp() {
           >
             <Clock className="w-3.5 h-3.5 text-zinc-400" />
             <span>Hub</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setSearchModalMode("files");
+              setShowSearchModal(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] hover:border-purple-500/40 text-purple-300 hover:text-white transition-all shadow-sm"
+            title="Workspace Search (⌘P / ⌘⇧F / ⌘T)"
+          >
+            <Search className="w-3.5 h-3.5 text-purple-400" />
+            <span>Search</span>
           </button>
 
           <button
@@ -2272,6 +2330,18 @@ export default function IDEApp() {
         onClose={() => setQuickOpenOpen(false)}
         files={fileList}
         onSelectFile={(path, name) => handleOpenFile({ name, path, isDirectory: false })}
+      />
+
+      {/* Workspace Search Modal (Files, Content, Symbols) */}
+      <WorkspaceSearchModal
+        isOpen={showSearchModal}
+        onClose={() => setShowSearchModal(false)}
+        workspacePath={folderPath || "demo-workspaces/ai_cart_project"}
+        initialMode={searchModalMode}
+        initialQuery={searchModalQuery}
+        onModeChange={setSearchModalMode}
+        onQueryChange={setSearchModalQuery}
+        onSelectResult={handleSelectSearchResult}
       />
 
       {/* Safe Surgery Diff Preview Modal */}

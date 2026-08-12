@@ -1,8 +1,20 @@
 "use client";
 
 import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from "react";
-import IDEApp from "@desktop/renderer/IDEApp";
+import dynamic from "next/dynamic";
 import { AlertTriangle, RefreshCw } from "lucide-react";
+
+const IDEApp = dynamic(() => import("@desktop/renderer/IDEApp"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-screen h-screen bg-[#050505] text-cyan-400 flex flex-col items-center justify-center font-mono text-sm gap-3">
+      <div className="flex items-center gap-3">
+        <div className="w-3.5 h-3.5 rounded-full bg-cyan-400 animate-ping" />
+        <span className="font-bold text-white">Loading Echo Nullity Desktop IDE...</span>
+      </div>
+    </div>
+  ),
+});
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -61,25 +73,6 @@ class IDEErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState>
 }
 
 export default function DesktopPage() {
-  console.log('[DESKTOP-PAGE] function render');
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    console.log('[DESKTOP-PAGE] useEffect fired');
-    setMounted(true);
-  }, []);
-
-  if (!mounted) {
-    return (
-      <div className="w-screen h-screen bg-[#050505] text-cyan-400 flex flex-col items-center justify-center font-mono text-sm gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-3.5 h-3.5 rounded-full bg-cyan-400 animate-ping" />
-          <span className="font-bold text-white">Loading Echo Nullity Desktop IDE...</span>
-        </div>
-      </div>
-    );
-  }
-
   console.log('[DESKTOP-PAGE] rendering IDEApp');
   return (
     <IDEErrorBoundary>

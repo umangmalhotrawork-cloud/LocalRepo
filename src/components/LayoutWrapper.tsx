@@ -1,12 +1,21 @@
 "use client";
 
+import React, { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
-import Navbar from "@/components/Navbar";
-import Footer from "@/components/Footer";
-import AnimatedBackgroundV2 from "@/components/ui/AnimatedBackgroundV2";
+import dynamic from "next/dynamic";
+
+const Navbar = dynamic(() => import("@/components/Navbar"), { ssr: false });
+const Footer = dynamic(() => import("@/components/Footer"), { ssr: false });
+const AnimatedBackgroundV2 = dynamic(() => import("@/components/ui/AnimatedBackgroundV2"), { ssr: false });
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const isDesktopApp = pathname === "/desktop" || pathname?.startsWith("/desktop");
 
   if (isDesktopApp) {
@@ -19,10 +28,10 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
 
   return (
     <div className="min-h-screen flex flex-col justify-between bg-[#050505] text-white selection:bg-cyan-500/30 selection:text-cyan-200">
-      <AnimatedBackgroundV2 />
-      <Navbar />
+      {mounted && <AnimatedBackgroundV2 />}
+      {mounted && <Navbar />}
       <main className="flex-grow z-10 relative">{children}</main>
-      <Footer />
+      {mounted && <Footer />}
     </div>
   );
 }

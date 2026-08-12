@@ -89,8 +89,17 @@ function createWindow() {
     console.log(`[RENDERER:${level}] ${message} (${sourceId}:${line})`);
   });
 
-  mainWindow.webContents.on('did-finish-load', () => {
-    console.log('[ELECTRON] did-finish-load:', mainWindow.webContents.getURL());
+  mainWindow.webContents.on('did-finish-load', async () => {
+    const targetUrl = mainWindow.webContents.getURL();
+    console.log('[ELECTRON] did-finish-load:', targetUrl);
+
+    await new Promise((r) => setTimeout(r, 300));
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+
     setTimeout(async () => {
       try {
         if (mainWindow) {
@@ -287,6 +296,105 @@ function createWindow() {
                                               const afterUndoPath = path.join(screenshotDir, 'milestone10-after-undo.png');
                                               fs.writeFileSync(afterUndoPath, afterUndoImg.toPNG());
                                               console.log('[ELECTRON] Saved after-undo screenshot to:', afterUndoPath);
+
+                                              // Milestone 11: 1. Files Search
+                                              setTimeout(async () => {
+                                                if (mainWindow) {
+                                                  await mainWindow.webContents.executeJavaScript(`
+                                                    (() => {
+                                                      const setReactInput = (input, val) => {
+                                                        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                                                        nativeSetter.call(input, val);
+                                                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                                                      };
+
+                                                      const searchBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Search');
+                                                      if (searchBtn) searchBtn.click();
+                                                      setTimeout(() => {
+                                                        const input = document.querySelector('input[placeholder*="Search"]');
+                                                        if (input) {
+                                                          setReactInput(input, 'invoice');
+                                                        }
+                                                      }, 400);
+                                                    })();
+                                                  `);
+
+                                                  setTimeout(async () => {
+                                                    if (mainWindow) {
+                                                      const filesImg = await mainWindow.capturePage();
+                                                      const filesPath = path.join(screenshotDir, 'milestone11-search-files.png');
+                                                      fs.writeFileSync(filesPath, filesImg.toPNG());
+                                                      console.log('[ELECTRON] Saved files search screenshot to:', filesPath);
+
+                                                      // Milestone 11: 2. Content Search
+                                                      await mainWindow.webContents.executeJavaScript(`
+                                                        (() => {
+                                                          const setReactInput = (input, val) => {
+                                                            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                                                            nativeSetter.call(input, val);
+                                                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                                                          };
+
+                                                          const contentTab = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Content'));
+                                                          if (contentTab) contentTab.click();
+                                                          setTimeout(() => {
+                                                            const input = document.querySelector('input[placeholder*="Search"]');
+                                                            if (input) {
+                                                              setReactInput(input, 'subtotal');
+                                                            }
+                                                          }, 400);
+                                                        })();
+                                                      `);
+
+                                                      setTimeout(async () => {
+                                                        if (mainWindow) {
+                                                          const contentImg = await mainWindow.capturePage();
+                                                          const contentPath = path.join(screenshotDir, 'milestone11-search-content.png');
+                                                          fs.writeFileSync(contentPath, contentImg.toPNG());
+                                                          console.log('[ELECTRON] Saved content search screenshot to:', contentPath);
+
+                                                          // Milestone 11: 3. Symbols Search
+                                                          await mainWindow.webContents.executeJavaScript(`
+                                                            (() => {
+                                                              const setReactInput = (input, val) => {
+                                                                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                                                                nativeSetter.call(input, val);
+                                                                input.dispatchEvent(new Event('input', { bubbles: true }));
+                                                              };
+
+                                                              const symbolsTab = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Symbols'));
+                                                              if (symbolsTab) symbolsTab.click();
+                                                              setTimeout(() => {
+                                                                const input = document.querySelector('input[placeholder*="Search"]');
+                                                                if (input) {
+                                                                  setReactInput(input, 'calculate_cart_total');
+                                                                }
+                                                              }, 400);
+                                                            })();
+                                                          `);
+
+                                                          setTimeout(async () => {
+                                                            if (mainWindow) {
+                                                              const symbolsImg = await mainWindow.capturePage();
+                                                              const symbolsPath = path.join(screenshotDir, 'milestone11-search-symbols.png');
+                                                              fs.writeFileSync(symbolsPath, symbolsImg.toPNG());
+                                                              console.log('[ELECTRON] Saved symbols search screenshot to:', symbolsPath);
+
+                                                              // Jump to symbol in editor
+                                                              await mainWindow.webContents.executeJavaScript(`
+                                                                (() => {
+                                                                  const resultItem = document.querySelector('.divide-y > div');
+                                                                  if (resultItem) resultItem.click();
+                                                                })();
+                                                              `);
+                                                            }
+                                                          }, 1500);
+                                                        }
+                                                      }, 1500);
+                                                    }
+                                                  }, 1500);
+                                                }
+                                              }, 1000);
                                             }
                                           }, 1500);
                                         }
@@ -668,6 +776,42 @@ ipcMain.handle('surgery:undo', async (_, payload) => {
         resolve(jsonResult);
       } catch (parseError) {
         resolve({ success: false, error: 'Failed to parse undo_surgery JSON output' });
+      }
+    });
+  });
+});
+
+ipcMain.handle('workspace:search', async (_, payload) => {
+  return new Promise((resolve) => {
+    const { workspace, query = '', mode = 'files', limit = 200 } = payload || {};
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'search_workspace.py');
+    const args = [scriptPath, workspace || '.', '--query', query, '--mode', mode, '--limit', String(limit)];
+    execFile('python3', args, { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && !stdout) {
+        console.error('Python search_workspace error:', stderr || error.message);
+        resolve({
+          workspace,
+          query,
+          mode,
+          results_count: 0,
+          results: [],
+          error: stderr || error.message,
+        });
+        return;
+      }
+      try {
+        const jsonResult = JSON.parse(stdout);
+        resolve(jsonResult);
+      } catch (parseError) {
+        console.error('Failed to parse search_workspace JSON output:', parseError, stdout);
+        resolve({
+          workspace,
+          query,
+          mode,
+          results_count: 0,
+          results: [],
+          error: 'Failed to parse search_workspace JSON output',
+        });
       }
     });
   });
