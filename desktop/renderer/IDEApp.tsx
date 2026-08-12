@@ -42,6 +42,13 @@ export interface StructuralCloneGroup {
   occurrences: StructuralCloneOccurrence[];
 }
 
+export interface SemanticCloneGroup {
+  fingerprint: string;
+  occurrences_count: number;
+  confidence: number;
+  occurrences: StructuralCloneOccurrence[];
+}
+
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
   loading: () => (
@@ -76,6 +83,7 @@ declare global {
       searchWorkspace: (payload: { workspace: string; query?: string; mode?: string; limit?: number }) => Promise<{ workspace: string; query: string; mode: string; results_count: number; results: SearchResultItem[]; error?: string }>;
       detectClones: (workspacePath: string) => Promise<CloneReport>;
       scanStructuralClones: (workspacePath: string) => Promise<StructuralCloneGroup[]>;
+      scanSemanticClones: (workspacePath: string) => Promise<SemanticCloneGroup[]>;
       detectSemanticClones: (workspacePath: string) => Promise<SemanticCloneReport>;
       calculateLuminance: (workspacePath: string) => Promise<WorkspaceLuminanceReport>;
     };
@@ -318,9 +326,11 @@ export default function IDEApp() {
   const [graphLoading, setGraphLoading] = useState(false);
   const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
   const [startupModalOpen, setStartupModalOpen] = useState(false);
-  const [rightPanelTab, setRightPanelTab] = useState<"file" | "project" | "clones">("file");
+  const [rightPanelTab, setRightPanelTab] = useState<"file" | "project" | "clones" | "semantic">("file");
   const [structuralCloneGroups, setStructuralCloneGroups] = useState<StructuralCloneGroup[]>([]);
   const [structuralCloneLoading, setStructuralCloneLoading] = useState(false);
+  const [semanticCloneGroups, setSemanticCloneGroups] = useState<SemanticCloneGroup[]>([]);
+  const [semanticCloneScanLoading, setSemanticCloneScanLoading] = useState(false);
   const [luminance, setLuminance] = useState<number>(0.0);
   const [analyzing, setAnalyzing] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
@@ -508,6 +518,15 @@ export default function IDEApp() {
                 }
               } catch (e) {}
             }
+
+            if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.scanSemanticClones) {
+              try {
+                const semRes = await window.electronAPI.scanSemanticClones(demo.folderPath);
+                if (Array.isArray(semRes)) {
+                  setSemanticCloneGroups(semRes);
+                }
+              } catch (e) {}
+            }
           }
         }
       }
@@ -636,6 +655,15 @@ export default function IDEApp() {
             const cloneRes = await window.electronAPI.scanStructuralClones(loadedState.folderPath);
             if (Array.isArray(cloneRes)) {
               setStructuralCloneGroups(cloneRes);
+            }
+          } catch (e) {}
+        }
+
+        if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.scanSemanticClones) {
+          try {
+            const semRes = await window.electronAPI.scanSemanticClones(loadedState.folderPath);
+            if (Array.isArray(semRes)) {
+              setSemanticCloneGroups(semRes);
             }
           } catch (e) {}
         }
@@ -1260,6 +1288,32 @@ export default function IDEApp() {
     }
   };
 
+  const handleScanSemanticClones = async () => {
+    if (!folderPath) return;
+    setSemanticCloneScanLoading(true);
+    addLog(`[SEMANTIC] Scanning for semantic AST clones in: ${folderPath}...`);
+
+    if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.scanSemanticClones) {
+      try {
+        const groups = await window.electronAPI.scanSemanticClones(folderPath);
+        if (Array.isArray(groups)) {
+          setSemanticCloneGroups(groups);
+          setRightPanelTab("semantic");
+          showToast(`Semantic clone scan complete · ${groups.length} clone groups`);
+          addLog(`[SEMANTIC] Semantic clone scan complete · ${groups.length} clone groups`);
+          console.log(`[SEMANTIC] Semantic clone scan complete · ${groups.length} clone groups`, groups);
+        }
+      } catch (err: any) {
+        console.error("[SEMANTIC] Semantic clone scan error:", err);
+        addLog(`[SEMANTIC] Error: ${err.message || String(err)}`);
+      } finally {
+        setSemanticCloneScanLoading(false);
+      }
+    } else {
+      setSemanticCloneScanLoading(false);
+    }
+  };
+
   const handleOpenCloneOccurrence = async (occ: StructuralCloneOccurrence) => {
     const targetPath = occ.absolute_path || (folderPath ? `${folderPath}/${occ.file}` : occ.file);
     const fileName = occ.file.split("/").pop() || "file.py";
@@ -1356,21 +1410,37 @@ export default function IDEApp() {
       })),
       graphSvg,
       clones: cloneItems,
-      semanticClones: semanticCloneReport?.groups?.map((g) => ({
-        group_id: g.group_id,
-        semantic_pattern: g.semantic_pattern,
-        similarity: g.similarity,
-        similarity_label: g.similarity_label,
-        files: g.files,
-        instances_count: g.instances_count,
-        instances: g.instances.map((i) => ({
-          file: i.file,
-          start_line: i.start_line,
-          end_line: i.end_line,
-          code: i.code,
-          implementation_style: i.implementation_style,
-        })),
-      })),
+      semanticClones: semanticCloneGroups.length > 0
+        ? semanticCloneGroups.map((g, idx) => ({
+            group_id: `SEM-GRP-${idx + 1}`,
+            semantic_pattern: g.fingerprint.length > 35 ? g.fingerprint.slice(0, 32) + "..." : g.fingerprint,
+            similarity: g.confidence,
+            similarity_label: `${Math.round(g.confidence * 100)}% CONFIDENCE`,
+            files: Array.from(new Set(g.occurrences.map((o) => o.file))),
+            instances_count: g.occurrences.length,
+            instances: g.occurrences.map((i) => ({
+              file: i.file,
+              start_line: i.start_line,
+              end_line: i.end_line,
+              code: i.code,
+              implementation_style: "canonical_ast_reduction",
+            })),
+          }))
+        : semanticCloneReport?.groups?.map((g) => ({
+            group_id: g.group_id,
+            semantic_pattern: g.semantic_pattern,
+            similarity: g.similarity,
+            similarity_label: g.similarity_label,
+            files: g.files,
+            instances_count: g.instances_count,
+            instances: g.instances.map((i) => ({
+              file: i.file,
+              start_line: i.start_line,
+              end_line: i.end_line,
+              code: i.code,
+              implementation_style: i.implementation_style,
+            })),
+          })),
       luminanceReport: luminanceReport ? {
         mean_luminance: luminanceReport.mean_luminance,
         median_luminance: luminanceReport.median_luminance,
@@ -2377,17 +2447,17 @@ export default function IDEApp() {
           </button>
 
           <button
-            onClick={handleRunSemanticCloneScan}
-            disabled={semanticCloneLoading}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-cyan-500/40 text-cyan-300 font-bold transition-all shadow-sm disabled:opacity-50"
-            title="Scan workspace for behavioral/semantic code clones"
+            onClick={handleScanSemanticClones}
+            disabled={semanticCloneScanLoading}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-amber-500/40 text-amber-300 font-bold transition-all shadow-sm disabled:opacity-50"
+            title="Scan workspace for semantic code clones using identity elimination & commutative AST normalization"
           >
-            {semanticCloneLoading ? (
-              <Activity className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+            {semanticCloneScanLoading ? (
+              <Activity className="w-3.5 h-3.5 animate-spin text-amber-400" />
             ) : (
-              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
             )}
-            <span>{semanticCloneLoading ? "Scanning semantics..." : "Run Semantic Scan"}</span>
+            <span>{semanticCloneScanLoading ? "Finding semantics..." : "Find Semantic Clones"}</span>
           </button>
 
           <button
@@ -2631,54 +2701,154 @@ export default function IDEApp() {
               </span>
             </div>
 
-            {/* Panel Tabs: Active File vs Project Scan vs Clones */}
-            <div className="grid grid-cols-3 gap-1 p-1 bg-[#050505] rounded-xl border border-[#1f1f1f] text-[11px] font-mono">
+            {/* Panel Tabs: Active File vs Project Scan vs Clones vs Semantic */}
+            <div className="grid grid-cols-4 gap-1 p-1 bg-[#050505] rounded-xl border border-[#1f1f1f] text-[10px] font-mono">
               <button
                 onClick={() => setRightPanelTab("file")}
-                className={`py-1.5 px-1.5 rounded-lg font-bold transition-all flex items-center justify-center gap-1 ${
+                className={`py-1.5 px-1 rounded-lg font-bold transition-all flex items-center justify-center gap-1 ${
                   rightPanelTab === "file"
                     ? "bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 shadow-sm"
                     : "text-zinc-400 hover:text-white"
                 }`}
               >
-                <span>Active File</span>
-                <span className="px-1.5 py-0.2 rounded-full bg-zinc-800 text-[9px] text-zinc-300">
+                <span>File</span>
+                <span className="px-1 py-0.2 rounded-full bg-zinc-800 text-[8px] text-zinc-300">
                   {findings.length}
                 </span>
               </button>
               <button
                 onClick={() => setRightPanelTab("project")}
-                className={`py-1.5 px-1.5 rounded-lg font-bold transition-all flex items-center justify-center gap-1 ${
+                className={`py-1.5 px-1 rounded-lg font-bold transition-all flex items-center justify-center gap-1 ${
                   rightPanelTab === "project"
                     ? "bg-purple-950/80 text-purple-300 border border-purple-500/40 shadow-sm"
                     : "text-zinc-400 hover:text-white"
                 }`}
               >
-                <span>Project</span>
+                <span>Proj</span>
                 {workspaceReport && (
-                  <span className="px-1.5 py-0.2 rounded-full bg-purple-900/60 text-[9px] text-purple-200">
+                  <span className="px-1 py-0.2 rounded-full bg-purple-900/60 text-[8px] text-purple-200">
                     {workspaceReport.total_ghost_lines}
                   </span>
                 )}
               </button>
               <button
                 onClick={() => setRightPanelTab("clones")}
-                className={`py-1.5 px-1.5 rounded-lg font-bold transition-all flex items-center justify-center gap-1 ${
+                className={`py-1.5 px-1 rounded-lg font-bold transition-all flex items-center justify-center gap-1 ${
                   rightPanelTab === "clones"
                     ? "bg-fuchsia-950/80 text-fuchsia-300 border border-fuchsia-500/40 shadow-sm"
                     : "text-zinc-400 hover:text-white"
                 }`}
               >
-                <span>Clones</span>
+                <span>Clone</span>
                 {structuralCloneGroups.length > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full bg-fuchsia-900/60 text-[9px] text-fuchsia-200">
+                  <span className="px-1 py-0.2 rounded-full bg-fuchsia-900/60 text-[8px] text-fuchsia-200">
                     {structuralCloneGroups.length}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => setRightPanelTab("semantic")}
+                className={`py-1.5 px-1 rounded-lg font-bold transition-all flex items-center justify-center gap-1 ${
+                  rightPanelTab === "semantic"
+                    ? "bg-amber-950/80 text-amber-300 border border-amber-500/40 shadow-sm"
+                    : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                <span>Sem</span>
+                {semanticCloneGroups.length > 0 && (
+                  <span className="px-1 py-0.2 rounded-full bg-amber-900/60 text-[8px] text-amber-200">
+                    {semanticCloneGroups.length}
                   </span>
                 )}
               </button>
             </div>
 
-            {rightPanelTab === "clones" ? (
+            {rightPanelTab === "semantic" ? (
+              /* Semantic Clones View */
+              <div className="space-y-4">
+                {/* Semantic Clone Summary Metrics */}
+                <div className="p-3 bg-[#050505] rounded-xl border border-[#1f1f1f] space-y-2 font-mono text-xs shadow-inner">
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Semantic Groups:</span>
+                    <span className="text-amber-400 font-bold">{semanticCloneGroups.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Total Occurrences:</span>
+                    <span className="text-orange-400 font-bold">
+                      {semanticCloneGroups.reduce((acc, g) => acc + g.occurrences.length, 0)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">AST Normalization:</span>
+                    <span className="text-amber-300 font-bold">Identity + Commutative</span>
+                  </div>
+                </div>
+
+                {/* Semantic Clone Groups List */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs font-mono text-zinc-400 uppercase tracking-widest font-bold">
+                    <span>Semantic Clone Groups</span>
+                    <span className="text-[10px] text-zinc-500 lowercase">by confidence</span>
+                  </div>
+
+                  <div className="space-y-2.5 max-h-72 overflow-y-auto font-mono text-xs pr-1">
+                    {semanticCloneGroups.length > 0 ? (
+                      semanticCloneGroups.map((group, gIdx) => (
+                        <div
+                          key={gIdx}
+                          className="p-3 bg-[#050505] rounded-xl border border-zinc-800 space-y-2"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span
+                              className="text-[11px] font-bold text-amber-300 truncate max-w-[150px]"
+                              title={group.fingerprint}
+                            >
+                              {group.fingerprint}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded border font-bold bg-amber-950/80 text-amber-300 border-amber-500/40">
+                              {Math.round(group.confidence * 100)}% Confidence
+                            </span>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            {group.occurrences.map((occ, oIdx) => (
+                              <button
+                                key={oIdx}
+                                onClick={() => handleOpenCloneOccurrence(occ)}
+                                className="w-full text-left p-2 bg-[#0d0d0d] hover:bg-zinc-900/70 hover:border-amber-400/80 transition-all rounded-lg border border-zinc-800/80 space-y-1 group"
+                              >
+                                <div className="flex items-center justify-between text-[11px]">
+                                  <span className="text-cyan-300 font-bold group-hover:text-cyan-200 truncate max-w-[140px]">
+                                    {occ.file}
+                                  </span>
+                                  <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300">
+                                    L{occ.start_line}–L{occ.end_line}
+                                  </span>
+                                </div>
+                                <div className="text-zinc-300 font-mono bg-[#050505] p-1.5 rounded border border-zinc-900 truncate text-[10px]">
+                                  {occ.code}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="p-4 bg-[#050505] rounded-xl border border-[#1f1f1f] text-center text-zinc-500 text-xs font-mono space-y-2">
+                        <p>No semantic clones scanned yet.</p>
+                        <button
+                          onClick={handleScanSemanticClones}
+                          disabled={semanticCloneScanLoading}
+                          className="px-3 py-1.5 rounded-lg bg-amber-950 text-amber-300 border border-amber-500/40 text-[11px] font-bold hover:bg-amber-900 transition-all"
+                        >
+                          {semanticCloneScanLoading ? "Scanning..." : "Find Semantic Clones"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : rightPanelTab === "clones" ? (
               /* Structural Clones View */
               <div className="space-y-4">
                 {/* Clone Summary Metrics */}

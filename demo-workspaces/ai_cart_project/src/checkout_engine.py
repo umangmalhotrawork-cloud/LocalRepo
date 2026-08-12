@@ -23,4 +23,6 @@ def compute_order_total(items):
     total = 0.0
     for item in items:
         total += item["price"] * item["quantity"]
+    total = total * 1
+    total *= 1
     return total

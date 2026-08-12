@@ -24,5 +24,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   detectClones: (workspacePath) => ipcRenderer.invoke('engine:detect-clones', workspacePath),
   scanStructuralClones: (workspacePath) => ipcRenderer.invoke('clone:scan', workspacePath),
   detectSemanticClones: (workspacePath) => ipcRenderer.invoke('engine:detect-semantic-clones', workspacePath),
+  scanSemanticClones: (workspacePath) => ipcRenderer.invoke('semantic:scan', workspacePath),
   calculateLuminance: (workspacePath) => ipcRenderer.invoke('engine:calculate-luminance', workspacePath),
 });

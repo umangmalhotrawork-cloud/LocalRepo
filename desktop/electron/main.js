@@ -968,6 +968,30 @@ ipcMain.handle('clone:scan', async (_, workspacePath) => {
   return runStructuralCloneScan(workspacePath);
 });
 
+function runSemanticCloneScan(workspacePath) {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'python', 'semantic_engine.py');
+    execFile('python3', [scriptPath, workspacePath], { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && !stdout) {
+        console.error('Python semantic_engine error:', stderr || error.message);
+        resolve([]);
+        return;
+      }
+      try {
+        const jsonResult = JSON.parse(stdout);
+        resolve(jsonResult);
+      } catch (parseError) {
+        console.error('Failed to parse semantic_engine JSON output:', parseError, stdout);
+        resolve([]);
+      }
+    });
+  });
+}
+
+ipcMain.handle('semantic:scan', async (_, workspacePath) => {
+  return runSemanticCloneScan(workspacePath);
+});
+
 ipcMain.handle('engine:detect-clones', async (_, workspacePath) => {
   return new Promise((resolve) => {
     const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'detect_clones.py');

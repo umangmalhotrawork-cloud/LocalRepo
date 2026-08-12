@@ -19,6 +19,8 @@ def calculate_cart_total(items, discount_code=None, tax_rate=0.08):
         
     taxable_amount = max(0.0, subtotal - discount_amount)
     tax = taxable_amount * tax_rate
+    subtotal = subtotal + tax
+    total = tax + subtotal
     final_total = taxable_amount + tax
     
     return round(final_total, 2)

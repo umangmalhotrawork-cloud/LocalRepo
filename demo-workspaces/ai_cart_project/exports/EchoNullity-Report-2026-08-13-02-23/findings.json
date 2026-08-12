@@ -1,0 +1,254 @@
+[
+  {
+    "file": "cart_calculator.py",
+    "line": 9,
+    "type": "vacuous_identity",
+    "title": "Identity Multiplication (x * 1)",
+    "code": "subtotal = subtotal * 1",
+    "description": "Multiplying by 1 leaves output state identical.",
+    "causal_impact": 100,
+    "causal_path_length": 10,
+    "return_sink_line": 26,
+    "provenance_chain": [
+      {
+        "type": "definition",
+        "line": 6,
+        "code": "subtotal = sum(item[\"price\"] * item[\"quantity\"] for item in items)"
+      },
+      {
+        "type": "ghost_operation",
+        "line": 9,
+        "code": "subtotal = subtotal * 1"
+      },
+      {
+        "type": "use",
+        "line": 16,
+        "code": "discount_amount = subtotal * 0.10"
+      },
+      {
+        "type": "use",
+        "line": 18,
+        "code": "discount_amount = subtotal * 0.20"
+      },
+      {
+        "type": "use",
+        "line": 20,
+        "code": "taxable_amount = max(0.0, subtotal - discount_amount)"
+      },
+      {
+        "type": "use",
+        "line": 21,
+        "code": "tax = taxable_amount * tax_rate"
+      },
+      {
+        "type": "use",
+        "line": 22,
+        "code": "subtotal = subtotal + tax"
+      },
+      {
+        "type": "use",
+        "line": 23,
+        "code": "total = tax + subtotal"
+      },
+      {
+        "type": "use",
+        "line": 24,
+        "code": "final_total = taxable_amount + tax"
+      },
+      {
+        "type": "return_sink",
+        "line": 26,
+        "code": "return round(final_total, 2)"
+      }
+    ]
+  },
+  {
+    "file": "cart_calculator.py",
+    "line": 10,
+    "type": "vacuous_identity",
+    "title": "Identity Addition (x + 0)",
+    "code": "subtotal = subtotal + 0",
+    "description": "Adding 0 leaves value invariant.",
+    "causal_impact": 100,
+    "causal_path_length": 10,
+    "return_sink_line": 26,
+    "provenance_chain": [
+      {
+        "type": "definition",
+        "line": 6,
+        "code": "subtotal = sum(item[\"price\"] * item[\"quantity\"] for item in items)"
+      },
+      {
+        "type": "ghost_operation",
+        "line": 10,
+        "code": "subtotal = subtotal + 0"
+      },
+      {
+        "type": "use",
+        "line": 16,
+        "code": "discount_amount = subtotal * 0.10"
+      },
+      {
+        "type": "use",
+        "line": 18,
+        "code": "discount_amount = subtotal * 0.20"
+      },
+      {
+        "type": "use",
+        "line": 20,
+        "code": "taxable_amount = max(0.0, subtotal - discount_amount)"
+      },
+      {
+        "type": "use",
+        "line": 21,
+        "code": "tax = taxable_amount * tax_rate"
+      },
+      {
+        "type": "use",
+        "line": 22,
+        "code": "subtotal = subtotal + tax"
+      },
+      {
+        "type": "use",
+        "line": 23,
+        "code": "total = tax + subtotal"
+      },
+      {
+        "type": "use",
+        "line": 24,
+        "code": "final_total = taxable_amount + tax"
+      },
+      {
+        "type": "return_sink",
+        "line": 26,
+        "code": "return round(final_total, 2)"
+      }
+    ]
+  },
+  {
+    "file": "cart_calculator.py",
+    "line": 11,
+    "type": "vacuous_identity",
+    "title": "Identity Subtraction (x - 0)",
+    "code": "subtotal = subtotal - 0",
+    "description": "Subtracting 0 exerts zero state leverage.",
+    "causal_impact": 100,
+    "causal_path_length": 10,
+    "return_sink_line": 26,
+    "provenance_chain": [
+      {
+        "type": "definition",
+        "line": 6,
+        "code": "subtotal = sum(item[\"price\"] * item[\"quantity\"] for item in items)"
+      },
+      {
+        "type": "ghost_operation",
+        "line": 11,
+        "code": "subtotal = subtotal - 0"
+      },
+      {
+        "type": "use",
+        "line": 16,
+        "code": "discount_amount = subtotal * 0.10"
+      },
+      {
+        "type": "use",
+        "line": 18,
+        "code": "discount_amount = subtotal * 0.20"
+      },
+      {
+        "type": "use",
+        "line": 20,
+        "code": "taxable_amount = max(0.0, subtotal - discount_amount)"
+      },
+      {
+        "type": "use",
+        "line": 21,
+        "code": "tax = taxable_amount * tax_rate"
+      },
+      {
+        "type": "use",
+        "line": 22,
+        "code": "subtotal = subtotal + tax"
+      },
+      {
+        "type": "use",
+        "line": 23,
+        "code": "total = tax + subtotal"
+      },
+      {
+        "type": "use",
+        "line": 24,
+        "code": "final_total = taxable_amount + tax"
+      },
+      {
+        "type": "return_sink",
+        "line": 26,
+        "code": "return round(final_total, 2)"
+      }
+    ]
+  },
+  {
+    "file": "cart_calculator.py",
+    "line": 12,
+    "type": "vacuous_identity",
+    "title": "Identity Division (x / 1)",
+    "code": "subtotal = subtotal / 1",
+    "description": "Dividing by 1 is mathematically redundant.",
+    "causal_impact": 100,
+    "causal_path_length": 10,
+    "return_sink_line": 26,
+    "provenance_chain": [
+      {
+        "type": "definition",
+        "line": 6,
+        "code": "subtotal = sum(item[\"price\"] * item[\"quantity\"] for item in items)"
+      },
+      {
+        "type": "ghost_operation",
+        "line": 12,
+        "code": "subtotal = subtotal / 1"
+      },
+      {
+        "type": "use",
+        "line": 16,
+        "code": "discount_amount = subtotal * 0.10"
+      },
+      {
+        "type": "use",
+        "line": 18,
+        "code": "discount_amount = subtotal * 0.20"
+      },
+      {
+        "type": "use",
+        "line": 20,
+        "code": "taxable_amount = max(0.0, subtotal - discount_amount)"
+      },
+      {
+        "type": "use",
+        "line": 21,
+        "code": "tax = taxable_amount * tax_rate"
+      },
+      {
+        "type": "use",
+        "line": 22,
+        "code": "subtotal = subtotal + tax"
+      },
+      {
+        "type": "use",
+        "line": 23,
+        "code": "total = tax + subtotal"
+      },
+      {
+        "type": "use",
+        "line": 24,
+        "code": "final_total = taxable_amount + tax"
+      },
+      {
+        "type": "return_sink",
+        "line": 26,
+        "code": "return round(final_total, 2)"
+      }
+    ]
+  }
+]

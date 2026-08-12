@@ -210,11 +210,11 @@ export default function WorkspaceGraphPanel({
         };
       case "semantic_clone":
         return {
-          bg: "fill-[#083344]",
-          border: "stroke-cyan-400",
-          text: "text-cyan-300",
-          badgeBg: "bg-cyan-950 text-cyan-300 border-cyan-500/40",
-          edgeStroke: "#06b6d4",
+          bg: "fill-[#431407]",
+          border: "stroke-amber-500",
+          text: "text-amber-300",
+          badgeBg: "bg-amber-950 text-amber-300 border-amber-500/40",
+          edgeStroke: "#f97316",
         };
       default:
         return {
@@ -229,6 +229,10 @@ export default function WorkspaceGraphPanel({
 
   const cloneCount = useMemo(() => {
     return filteredNodes.filter((n) => n.kind === "clone").length;
+  }, [filteredNodes]);
+
+  const semanticCloneCount = useMemo(() => {
+    return filteredNodes.filter((n) => n.kind === "semantic_clone").length;
   }, [filteredNodes]);
 
   return (
@@ -252,6 +256,12 @@ export default function WorkspaceGraphPanel({
               <>
                 <span>•</span>
                 <span className="text-purple-400 font-bold">{cloneCount} clones</span>
+              </>
+            )}
+            {semanticCloneCount > 0 && (
+              <>
+                <span>•</span>
+                <span className="text-amber-400 font-bold">{semanticCloneCount} semantic clones</span>
               </>
             )}
           </div>
@@ -478,7 +488,7 @@ export default function WorkspaceGraphPanel({
               const d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
 
               const markerColor = isSemanticClone
-                ? "url(#arrow-cyan)"
+                ? "url(#arrow-amber)"
                 : isCloneEdge
                 ? "url(#arrow-purple)"
                 : isGhostEdge
@@ -488,7 +498,7 @@ export default function WorkspaceGraphPanel({
                 : "url(#arrow-cyan)";
 
               const strokeColor = isSemanticClone
-                ? "#06b6d4"
+                ? "#f97316"
                 : isCloneEdge
                 ? "#a855f7"
                 : isGhostEdge
@@ -504,8 +514,8 @@ export default function WorkspaceGraphPanel({
                     fill="none"
                     stroke={strokeColor}
                     strokeWidth={isSemanticClone || isCloneEdge ? "2.2" : isGhostEdge ? "2.5" : "1.8"}
-                    strokeDasharray={isSemanticClone || isCloneEdge ? "4,4" : isCrossFile ? "5,5" : undefined}
-                    strokeOpacity={isSemanticClone ? 0.9 : isCloneEdge ? 0.85 : 0.65}
+                    strokeDasharray={isSemanticClone ? "2,4" : isCloneEdge ? "4,4" : isCrossFile ? "5,5" : undefined}
+                    strokeOpacity={isSemanticClone ? 0.95 : isCloneEdge ? 0.85 : 0.65}
                     markerEnd={markerColor}
                     className="hover:stroke-white transition-colors"
                   />
