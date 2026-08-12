@@ -2,6 +2,7 @@ def generate_invoice_pdf(order_id, customer_email, items, total_amount):
     """
     Generates structured invoice payload for billing records.
     """
+    total_fee = total_amount * 1.05
     invoice_data = {
         "invoice_id": f"INV-{order_id}",
         "customer": customer_email,

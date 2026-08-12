@@ -127,6 +127,44 @@
   background: rgba(34, 211, 238, 0.15);
 }
 
+/* Monaco Causal Luminance Heatmap Highlights */
+.luminance-glyph-dark {
+  background: #ef4444 !important;
+  width: 5px !important;
+  margin-left: 3px;
+  border-radius: 2px;
+}
+.luminance-glyph-med {
+  background: #f59e0b !important;
+  width: 4px !important;
+  margin-left: 3px;
+  border-radius: 2px;
+}
+.luminance-glyph-bright {
+  background: #06b6d4 !important;
+  width: 4px !important;
+  margin-left: 3px;
+  border-radius: 2px;
+}
+.luminance-bg-dark {
+  background-color: rgba(239, 68, 68, 0.15) !important;
+}
+.luminance-bg-med {
+  background-color: rgba(245, 158, 11, 0.08) !important;
+}
+.luminance-bg-bright {
+  background-color: rgba(6, 182, 212, 0.06) !important;
+}
+.luminance-line-dark {
+  border-left: 3px solid #ef4444;
+}
+.luminance-line-med {
+  border-left: 3px solid #f59e0b;
+}
+.luminance-line-bright {
+  border-left: 3px solid #06b6d4;
+}
+
 /* Resizable Splitter Handles */
 .resizer-col {
   width: 4px;

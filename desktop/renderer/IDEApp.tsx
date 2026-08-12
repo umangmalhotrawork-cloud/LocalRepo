@@ -2,13 +2,13 @@
 
 console.log('[IDE-APP] module evaluated');
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { 
   FolderOpen, FileText, ChevronRight, ChevronDown, Play, Sparkles, 
   Terminal as TerminalIcon, Zap, X, Check, Save, RotateCcw, ArrowRight, 
   Command, Search, Cpu, Layers, Activity, BarChart3, CheckCircle2, AlertTriangle, ShieldCheck,
-  LayoutDashboard, Clock, FileSearch, Network, Download
+  LayoutDashboard, Clock, FileSearch, Network, Download, Flame, Sun, Moon, Copy
 } from "lucide-react";
 
 import ConfirmDialog from "./components/ConfirmDialog";
@@ -22,9 +22,25 @@ import SurgeryDiffPreview from "./components/SurgeryDiffPreview";
 import WorkspaceSearchModal, { SearchMode, SearchResultItem } from "./components/WorkspaceSearchModal";
 import ClonePanel, { CloneReport, CloneInstance } from "./components/ClonePanel";
 import SemanticClonePanel, { SemanticCloneReport, SemanticCloneInstance } from "./components/SemanticClonePanel";
+import CodeEditorPanel, { WorkspaceLuminanceReport, FileLuminanceReport, StatementLuminance } from "./components/CodeEditorPanel";
 import { useWorkspaceState, EditorViewState, WorkspacePersistedState } from "./hooks/useWorkspaceState";
 import { buildWorkspaceReport, ReportExportPayload } from "./utils/reportBuilder";
 import { exportGraphSvg } from "./utils/exportGraphSvg";
+
+export interface StructuralCloneOccurrence {
+  file: string;
+  absolute_path: string;
+  start_line: number;
+  end_line: number;
+  code: string;
+  kind: string;
+}
+
+export interface StructuralCloneGroup {
+  fingerprint: string;
+  occurrences_count: number;
+  occurrences: StructuralCloneOccurrence[];
+}
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -59,7 +75,9 @@ declare global {
       undoSurgery: (payload: { file: string }) => Promise<{ success: boolean; file: string; restored_content: string; backup_path: string; error?: string }>;
       searchWorkspace: (payload: { workspace: string; query?: string; mode?: string; limit?: number }) => Promise<{ workspace: string; query: string; mode: string; results_count: number; results: SearchResultItem[]; error?: string }>;
       detectClones: (workspacePath: string) => Promise<CloneReport>;
+      scanStructuralClones: (workspacePath: string) => Promise<StructuralCloneGroup[]>;
       detectSemanticClones: (workspacePath: string) => Promise<SemanticCloneReport>;
+      calculateLuminance: (workspacePath: string) => Promise<WorkspaceLuminanceReport>;
     };
   }
 }
@@ -283,7 +301,7 @@ export default function IDEApp() {
       return_sink_line: 24,
     },
   ]);
-  type MainView = "editor" | "dashboard" | "graph" | "clones" | "semantic_clones";
+  type MainView = "editor" | "dashboard" | "graph" | "clones" | "semantic_clones" | "luminance";
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(findings[0] || null);
   const [workspaceReport, setWorkspaceReport] = useState<WorkspaceReport | null>(null);
   const [workspaceSummary, setWorkspaceSummary] = useState<WorkspaceReport | null>(null);
@@ -294,16 +312,26 @@ export default function IDEApp() {
   const [cloneLoading, setCloneLoading] = useState(false);
   const [semanticCloneReport, setSemanticCloneReport] = useState<SemanticCloneReport | null>(null);
   const [semanticCloneLoading, setSemanticCloneLoading] = useState(false);
+  const [luminanceReport, setLuminanceReport] = useState<WorkspaceLuminanceReport | null>(null);
+  const [luminanceLoading, setLuminanceLoading] = useState(false);
   const [workspaceGraph, setWorkspaceGraph] = useState<WorkspaceGraph | null>(null);
   const [graphLoading, setGraphLoading] = useState(false);
   const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
   const [startupModalOpen, setStartupModalOpen] = useState(false);
-  const [rightPanelTab, setRightPanelTab] = useState<"file" | "project">("file");
+  const [rightPanelTab, setRightPanelTab] = useState<"file" | "project" | "clones">("file");
+  const [structuralCloneGroups, setStructuralCloneGroups] = useState<StructuralCloneGroup[]>([]);
+  const [structuralCloneLoading, setStructuralCloneLoading] = useState(false);
   const [luminance, setLuminance] = useState<number>(0.0);
   const [analyzing, setAnalyzing] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [cursorPositions, setCursorPositions] = useState<Record<string, { line: number; col: number }>>({});
+
+  const activeFileLuminance = useMemo<FileLuminanceReport | null>(() => {
+    if (!luminanceReport || !activeTabPath) return null;
+    const base = activeTabPath.split("/").pop() || "";
+    return luminanceReport.files.find((f) => activeTabPath.endsWith(f.file) || f.file.endsWith(base)) || null;
+  }, [luminanceReport, activeTabPath]);
 
   // Persistence Hook & Editor State Tracking
   const { loadedState, requestSave, hasLoaded } = useWorkspaceState();
@@ -461,6 +489,25 @@ export default function IDEApp() {
               setWorkspaceLoading(false);
               setWorkspaceScanLoading(false);
             }
+
+            if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.calculateLuminance) {
+              try {
+                const lumRes = await window.electronAPI.calculateLuminance(demo.folderPath);
+                if (lumRes && !lumRes.error) {
+                  setLuminanceReport(lumRes);
+                  setLuminance(lumRes.mean_luminance);
+                }
+              } catch (e) {}
+            }
+
+            if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.scanStructuralClones) {
+              try {
+                const cloneRes = await window.electronAPI.scanStructuralClones(demo.folderPath);
+                if (Array.isArray(cloneRes)) {
+                  setStructuralCloneGroups(cloneRes);
+                }
+              } catch (e) {}
+            }
           }
         }
       }
@@ -557,7 +604,7 @@ export default function IDEApp() {
           runAnalysis(activePath, activeTabObj.content);
         }
 
-        // 4. Background workspace scan
+        // 4. Background workspace scan & luminance calculation
         if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.scanWorkspace) {
           setWorkspaceLoading(true);
           setWorkspaceScanLoading(true);
@@ -572,6 +619,25 @@ export default function IDEApp() {
             setWorkspaceLoading(false);
             setWorkspaceScanLoading(false);
           }
+        }
+
+        if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.calculateLuminance) {
+          try {
+            const lumRes = await window.electronAPI.calculateLuminance(loadedState.folderPath);
+            if (lumRes && !lumRes.error) {
+              setLuminanceReport(lumRes);
+              setLuminance(lumRes.mean_luminance);
+            }
+          } catch (e) {}
+        }
+
+        if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.scanStructuralClones) {
+          try {
+            const cloneRes = await window.electronAPI.scanStructuralClones(loadedState.folderPath);
+            if (Array.isArray(cloneRes)) {
+              setStructuralCloneGroups(cloneRes);
+            }
+          } catch (e) {}
         }
 
         if (loadedState.mainView === "graph") {
@@ -657,36 +723,85 @@ export default function IDEApp() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeTabPath, openTabs, activeTab]);
 
-  // Apply Monaco Line Highlights
+  // Apply Monaco Line Highlights & Luminance Heatmap
   useEffect(() => {
     if (!editorRef.current || !monacoRef.current) return;
     try {
-      console.log('[IDE-APP] useEffect: updating line decorations for', findings.length, 'findings');
       const editor = editorRef.current;
-      const newDecorations = findings.map((f) => ({
-        range: {
-          startLineNumber: f.line,
-          startColumn: 1,
-          endLineNumber: f.line,
-          endColumn: 100,
-        },
-        options: {
-          isWholeLine: true,
-          className: "ghost-code-line-bg",
-          inlineClassName: "ghost-code-line-text",
-          glyphMarginClassName: "ghost-code-glyph",
-          linesDecorationsClassName: "ghost-code-line-decoration",
-          hoverMessage: {
-            value: `**${f.title}** (Causal Luminance: 0.00)\n\n${f.reason}`,
+      let newDecorations: any[] = [];
+
+      if (activeFileLuminance && activeFileLuminance.statements.length > 0) {
+        newDecorations = activeFileLuminance.statements.map((s) => {
+          const lum = s.luminance;
+          const isDark = lum < 0.25;
+          const isMedium = lum >= 0.25 && lum < 0.70;
+          const isBright = lum >= 0.70;
+
+          const glyphClass = isDark
+            ? "luminance-glyph-dark"
+            : isMedium
+            ? "luminance-glyph-med"
+            : "luminance-glyph-bright";
+
+          const lineClass = isDark
+            ? "luminance-line-dark"
+            : isMedium
+            ? "luminance-line-med"
+            : "luminance-line-bright";
+
+          const bgClass = isDark
+            ? "luminance-bg-dark"
+            : isMedium
+            ? "luminance-bg-med"
+            : "luminance-bg-bright";
+
+          const scorePct = (lum * 100).toFixed(0);
+          const classLabel = isDark ? "Dark Code (Vacuous)" : isMedium ? "Moderate Leverage" : "Bright (High Causal Influence)";
+
+          return {
+            range: {
+              startLineNumber: s.line,
+              startColumn: 1,
+              endLineNumber: s.end_line || s.line,
+              endColumn: 100,
+            },
+            options: {
+              isWholeLine: true,
+              className: bgClass,
+              glyphMarginClassName: glyphClass,
+              linesDecorationsClassName: lineClass,
+              hoverMessage: {
+                value: `### Causal Luminance: ${scorePct}% (${lum.toFixed(2)})\n**Classification**: ${classLabel}\n\n**Reason**: ${s.reason || "Statement analysis"}\n\n*Factors*: Data Flow: ${(s.factors?.data_flow ?? 0) * 100}%, Control Flow: ${(s.factors?.control_flow ?? 0) * 100}%, Mutation: ${(s.factors?.mutation ?? 0) * 100}%`,
+              },
+            },
+          };
+        });
+      } else {
+        newDecorations = findings.map((f) => ({
+          range: {
+            startLineNumber: f.line,
+            startColumn: 1,
+            endLineNumber: f.line,
+            endColumn: 100,
           },
-        },
-      }));
+          options: {
+            isWholeLine: true,
+            className: "ghost-code-line-bg",
+            inlineClassName: "ghost-code-line-text",
+            glyphMarginClassName: "ghost-code-glyph",
+            linesDecorationsClassName: "ghost-code-line-decoration",
+            hoverMessage: {
+              value: `**${f.title}** (Causal Luminance: 0.00)\n\n${f.reason}`,
+            },
+          },
+        }));
+      }
 
       decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
     } catch (err) {
       console.error("[IDE-APP] Error applying line decorations:", err);
     }
-  }, [findings, activeTabPath, activeTab?.content]);
+  }, [findings, activeTabPath, activeTab?.content, activeFileLuminance]);
 
   // Open Recent Workspace Handler
   const handleOpenRecentWorkspace = async (targetFolder: string) => {
@@ -1119,6 +1234,59 @@ export default function IDEApp() {
     console.log('[NAV] Jumped to', result.file, 'at line', result.line);
   };
 
+  const handleScanStructuralClones = async () => {
+    if (!folderPath) return;
+    setStructuralCloneLoading(true);
+    addLog(`[CLONE] Scanning for structural AST clones in: ${folderPath}...`);
+
+    if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.scanStructuralClones) {
+      try {
+        const groups = await window.electronAPI.scanStructuralClones(folderPath);
+        if (Array.isArray(groups)) {
+          setStructuralCloneGroups(groups);
+          setRightPanelTab("clones");
+          showToast(`Structural clone scan complete · ${groups.length} clone groups`);
+          addLog(`[CLONE] Structural clone scan complete · ${groups.length} clone groups`);
+          console.log(`[CLONE] Structural clone scan complete · ${groups.length} clone groups`, groups);
+        }
+      } catch (err: any) {
+        console.error("[CLONE] Structural clone scan error:", err);
+        addLog(`[CLONE] Error: ${err.message || String(err)}`);
+      } finally {
+        setStructuralCloneLoading(false);
+      }
+    } else {
+      setStructuralCloneLoading(false);
+    }
+  };
+
+  const handleOpenCloneOccurrence = async (occ: StructuralCloneOccurrence) => {
+    const targetPath = occ.absolute_path || (folderPath ? `${folderPath}/${occ.file}` : occ.file);
+    const fileName = occ.file.split("/").pop() || "file.py";
+
+    await handleOpenFile({
+      name: fileName,
+      path: targetPath,
+      isDirectory: false,
+    });
+
+    setMainView("editor");
+
+    setTimeout(() => {
+      if (editorRef.current && occ.start_line > 0) {
+        try {
+          editorRef.current.revealLineInCenter(occ.start_line);
+          editorRef.current.setPosition({
+            lineNumber: occ.start_line,
+            column: 1,
+          });
+          editorRef.current.focus();
+          setCursorPos({ line: occ.start_line, col: 1 });
+        } catch (e) {}
+      }
+    }, 100);
+  };
+
   const handleExportReport = async () => {
     if (!folderPath) return;
 
@@ -1137,10 +1305,43 @@ export default function IDEApp() {
       scan_duration_ms: workspaceSummary?.scan_duration_ms || 32.5,
     };
 
-    const payload: ReportExportPayload = {
+    const cloneItems = structuralCloneGroups.length > 0
+      ? structuralCloneGroups.map((g, idx) => ({
+          group_id: `CLONE-GRP-${idx + 1}: ${g.fingerprint.length > 30 ? g.fingerprint.slice(0, 27) + "..." : g.fingerprint}`,
+          similarity: 1.0,
+          similarity_label: "100% STRUCTURAL MATCH",
+          clone_type: "structural_ast",
+          files: Array.from(new Set(g.occurrences.map((o) => o.file))),
+          instances_count: g.occurrences.length,
+          instances: g.occurrences.map((i) => ({
+            file: i.file,
+            start_line: i.start_line,
+            end_line: i.end_line,
+            code: i.code,
+          })),
+        }))
+      : cloneReport?.groups?.map((g) => ({
+          group_id: g.group_id,
+          similarity: g.similarity,
+          similarity_label: g.similarity_label,
+          clone_type: g.clone_type,
+          files: g.files,
+          instances_count: g.instances_count,
+          instances: g.instances.map((i) => ({
+            file: i.file,
+            start_line: i.start_line,
+            end_line: i.end_line,
+            code: i.code,
+          })),
+        }));
+
+    const payload: ReportExportPayload & { clone_groups_count?: number; clone_occurrences_count?: number; clone_groups?: any[] } = {
       workspacePath: folderPath,
       timestamp: new Date().toLocaleString(),
       metrics,
+      clone_groups_count: structuralCloneGroups.length || (cloneReport?.groups?.length ?? 0),
+      clone_occurrences_count: structuralCloneGroups.reduce((acc, g) => acc + g.occurrences.length, 0) || (cloneReport?.total_clones ?? 0),
+      clone_groups: structuralCloneGroups.length > 0 ? structuralCloneGroups : (cloneReport?.groups ?? []),
       findings: findings.map((f) => ({
         file: (f as any).file || (activeTab ? activeTab.name : "cart_calculator.py"),
         line: f.line,
@@ -1154,20 +1355,7 @@ export default function IDEApp() {
         provenance_chain: f.provenance_chain,
       })),
       graphSvg,
-      clones: cloneReport?.groups?.map((g) => ({
-        group_id: g.group_id,
-        similarity: g.similarity,
-        similarity_label: g.similarity_label,
-        clone_type: g.clone_type,
-        files: g.files,
-        instances_count: g.instances_count,
-        instances: g.instances.map((i) => ({
-          file: i.file,
-          start_line: i.start_line,
-          end_line: i.end_line,
-          code: i.code,
-        })),
-      })),
+      clones: cloneItems,
       semanticClones: semanticCloneReport?.groups?.map((g) => ({
         group_id: g.group_id,
         semantic_pattern: g.semantic_pattern,
@@ -1183,6 +1371,15 @@ export default function IDEApp() {
           implementation_style: i.implementation_style,
         })),
       })),
+      luminanceReport: luminanceReport ? {
+        mean_luminance: luminanceReport.mean_luminance,
+        median_luminance: luminanceReport.median_luminance,
+        dark_code_ratio: luminanceReport.dark_code_ratio,
+        bright_code_ratio: luminanceReport.bright_code_ratio,
+        causal_entropy_index: luminanceReport.causal_entropy_index,
+        histogram: luminanceReport.histogram,
+        darkest_statements: luminanceReport.darkest_statements,
+      } : null,
       activeFinding: selectedFinding ? {
         file: (selectedFinding as any).file || (activeTab ? activeTab.name : "cart_calculator.py"),
         line: selectedFinding.line,
@@ -1582,6 +1779,51 @@ export default function IDEApp() {
         try {
           editorRef.current.revealLineInCenter(instance.start_line);
           editorRef.current.setPosition({ lineNumber: instance.start_line, column: 1 });
+          editorRef.current.focus();
+        } catch (e) {}
+      }
+    }, 150);
+  };
+
+  const handleRunLuminanceScan = async () => {
+    const ws = folderPath || "demo-workspaces/ai_cart_project";
+    setLuminanceLoading(true);
+    addLog(`[LUMINANCE] Computing Causal Luminance and Entropy scores for: ${ws}`);
+
+    if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.calculateLuminance) {
+      try {
+        const rep = await window.electronAPI.calculateLuminance(ws);
+        if (rep && !rep.error) {
+          setLuminanceReport(rep);
+          setLuminance(rep.mean_luminance);
+          addLog(`[LUMINANCE] Scoring complete. Mean: ${(rep.mean_luminance * 100).toFixed(0)}%, Dark Ratio: ${(rep.dark_code_ratio * 100).toFixed(1)}%, Entropy: ${rep.causal_entropy_index}.`);
+        } else {
+          addLog(`[LUMINANCE] Engine error: ${rep?.error || "Unknown error"}`);
+        }
+      } catch (err: any) {
+        addLog(`[LUMINANCE] Exception: ${err.message || String(err)}`);
+      }
+    }
+    setLuminanceLoading(false);
+  };
+
+  const handleJumpToStatement = async (file: string, line: number) => {
+    const targetPath = folderPath ? `${folderPath}/${file}` : file;
+    const fileName = file.split("/").pop() || file;
+
+    await handleOpenFile({
+      name: fileName,
+      path: targetPath,
+      isDirectory: false,
+    });
+
+    setMainView("editor");
+
+    setTimeout(() => {
+      if (editorRef.current) {
+        try {
+          editorRef.current.revealLineInCenter(line);
+          editorRef.current.setPosition({ lineNumber: line, column: 1 });
           editorRef.current.focus();
         } catch (e) {}
       }
@@ -2047,6 +2289,25 @@ export default function IDEApp() {
           </button>
 
           <button
+            onClick={() => {
+              const next = mainView === "luminance" ? "editor" : "luminance";
+              setMainView(next);
+              if (next === "luminance" && !luminanceReport) {
+                handleRunLuminanceScan();
+              }
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all ${
+              mainView === "luminance"
+                ? "bg-amber-950 text-amber-300 border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.25)] font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300"
+            }`}
+            title="Toggle Causal Luminance & Entropy Dashboard"
+          >
+            <Flame className="w-3.5 h-3.5 text-amber-400" />
+            <span>Luminance</span>
+          </button>
+
+          <button
             onClick={() => setStartupModalOpen(true)}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-zinc-400 hover:text-white transition-all"
             title="Open Workspace Hub / Recent Projects"
@@ -2130,6 +2391,20 @@ export default function IDEApp() {
           </button>
 
           <button
+            onClick={handleRunLuminanceScan}
+            disabled={luminanceLoading}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-amber-500/40 text-amber-300 font-bold transition-all shadow-sm disabled:opacity-50"
+            title="Compute quantitative Causal Luminance and Entropy metrics"
+          >
+            {luminanceLoading ? (
+              <Activity className="w-3.5 h-3.5 animate-spin text-amber-400" />
+            ) : (
+              <Flame className="w-3.5 h-3.5 text-amber-400" />
+            )}
+            <span>{luminanceLoading ? "Scoring..." : "Run Luminance Scan"}</span>
+          </button>
+
+          <button
             onClick={handleRunWorkspaceScan}
             disabled={workspaceScanLoading}
             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-cyan-500/40 text-cyan-300 font-bold transition-all shadow-sm disabled:opacity-50"
@@ -2140,6 +2415,20 @@ export default function IDEApp() {
               <Layers className="w-3.5 h-3.5 text-cyan-400" />
             )}
             <span>{workspaceScanLoading ? "Scanning workspace..." : "Run Workspace Scan"}</span>
+          </button>
+
+          <button
+            onClick={handleScanStructuralClones}
+            disabled={structuralCloneLoading}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-purple-500/40 text-purple-300 font-bold transition-all shadow-sm disabled:opacity-50"
+            title="Scan workspace for structural AST clones with normalized identifiers"
+          >
+            {structuralCloneLoading ? (
+              <Activity className="w-3.5 h-3.5 animate-spin text-purple-400" />
+            ) : (
+              <Copy className="w-3.5 h-3.5 text-purple-400" />
+            )}
+            <span>{structuralCloneLoading ? "Finding clones..." : "Find Clones"}</span>
           </button>
 
           <button
@@ -2203,15 +2492,17 @@ export default function IDEApp() {
         {/* Center Pane: Multi-Tab Monaco Editor, Workspace Dashboard, or Workspace Graph */}
         <div ref={editorPaneRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }} className="flex-1 min-w-0 flex flex-col overflow-hidden bg-[#050505]">
           
-          {mainView === "dashboard" ? (
+          {mainView === "dashboard" || mainView === "luminance" ? (
             <WorkspaceDashboard
               summary={workspaceSummary || workspaceReport}
-              loading={workspaceLoading || workspaceScanLoading}
+              luminanceReport={luminanceReport}
+              loading={workspaceLoading || workspaceScanLoading || luminanceLoading}
               onRescan={handleRunWorkspaceScan}
               onOpenFile={(file) => {
                 handleOpenWorkspaceFile(file);
                 setMainView("editor");
               }}
+              onJumpToStatement={(file, line) => handleJumpToStatement(file, line)}
               onClose={() => setMainView("editor")}
             />
           ) : mainView === "graph" ? (
@@ -2247,6 +2538,7 @@ export default function IDEApp() {
                     key={tab.path}
                     onClick={() => {
                       setActiveTabPath(tab.path);
+                      setMainView("editor");
                       restoreTabCursor(tab.path);
                       runAnalysis(tab.path, tab.content);
                     }}
@@ -2303,6 +2595,23 @@ export default function IDEApp() {
                   </div>
                 )}
               </div>
+
+              {/* Gutter Heatmap & Luminance Panel */}
+              {activeFileLuminance && (
+                <CodeEditorPanel
+                  filePath={activeTabPath}
+                  fileLuminance={activeFileLuminance}
+                  onJumpToLine={(l) => {
+                    if (editorRef.current) {
+                      try {
+                        editorRef.current.revealLineInCenter(l);
+                        editorRef.current.setPosition({ lineNumber: l, column: 1 });
+                        editorRef.current.focus();
+                      } catch (e) {}
+                    }
+                  }}
+                />
+              )}
             </>
           )}
         </div>
@@ -2322,11 +2631,11 @@ export default function IDEApp() {
               </span>
             </div>
 
-            {/* Panel Tabs: Active File vs Project Scan */}
-            <div className="grid grid-cols-2 gap-1 p-1 bg-[#050505] rounded-xl border border-[#1f1f1f] text-[11px] font-mono">
+            {/* Panel Tabs: Active File vs Project Scan vs Clones */}
+            <div className="grid grid-cols-3 gap-1 p-1 bg-[#050505] rounded-xl border border-[#1f1f1f] text-[11px] font-mono">
               <button
                 onClick={() => setRightPanelTab("file")}
-                className={`py-1.5 px-2 rounded-lg font-bold transition-all flex items-center justify-center gap-1.5 ${
+                className={`py-1.5 px-1.5 rounded-lg font-bold transition-all flex items-center justify-center gap-1 ${
                   rightPanelTab === "file"
                     ? "bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 shadow-sm"
                     : "text-zinc-400 hover:text-white"
@@ -2339,22 +2648,122 @@ export default function IDEApp() {
               </button>
               <button
                 onClick={() => setRightPanelTab("project")}
-                className={`py-1.5 px-2 rounded-lg font-bold transition-all flex items-center justify-center gap-1.5 ${
+                className={`py-1.5 px-1.5 rounded-lg font-bold transition-all flex items-center justify-center gap-1 ${
                   rightPanelTab === "project"
                     ? "bg-purple-950/80 text-purple-300 border border-purple-500/40 shadow-sm"
                     : "text-zinc-400 hover:text-white"
                 }`}
               >
-                <span>Project Scan</span>
+                <span>Project</span>
                 {workspaceReport && (
                   <span className="px-1.5 py-0.2 rounded-full bg-purple-900/60 text-[9px] text-purple-200">
                     {workspaceReport.total_ghost_lines}
                   </span>
                 )}
               </button>
+              <button
+                onClick={() => setRightPanelTab("clones")}
+                className={`py-1.5 px-1.5 rounded-lg font-bold transition-all flex items-center justify-center gap-1 ${
+                  rightPanelTab === "clones"
+                    ? "bg-fuchsia-950/80 text-fuchsia-300 border border-fuchsia-500/40 shadow-sm"
+                    : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                <span>Clones</span>
+                {structuralCloneGroups.length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-fuchsia-900/60 text-[9px] text-fuchsia-200">
+                    {structuralCloneGroups.length}
+                  </span>
+                )}
+              </button>
             </div>
 
-            {rightPanelTab === "project" ? (
+            {rightPanelTab === "clones" ? (
+              /* Structural Clones View */
+              <div className="space-y-4">
+                {/* Clone Summary Metrics */}
+                <div className="p-3 bg-[#050505] rounded-xl border border-[#1f1f1f] space-y-2 font-mono text-xs shadow-inner">
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Clone Groups:</span>
+                    <span className="text-fuchsia-400 font-bold">{structuralCloneGroups.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Total Occurrences:</span>
+                    <span className="text-purple-400 font-bold">
+                      {structuralCloneGroups.reduce((acc, g) => acc + g.occurrences.length, 0)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">AST Normalization:</span>
+                    <span className="text-emerald-400 font-bold">Canonical</span>
+                  </div>
+                </div>
+
+                {/* Clone Groups List */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs font-mono text-zinc-400 uppercase tracking-widest font-bold">
+                    <span>Structural Clone Groups</span>
+                    <span className="text-[10px] text-zinc-500 lowercase">by occurrences</span>
+                  </div>
+
+                  <div className="space-y-2.5 max-h-72 overflow-y-auto font-mono text-xs pr-1">
+                    {structuralCloneGroups.length > 0 ? (
+                      structuralCloneGroups.map((group, gIdx) => (
+                        <div
+                          key={gIdx}
+                          className="p-3 bg-[#050505] rounded-xl border border-zinc-800 space-y-2"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span
+                              className="text-[11px] font-bold text-fuchsia-300 truncate max-w-[170px]"
+                              title={group.fingerprint}
+                            >
+                              {group.fingerprint}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded border font-bold bg-fuchsia-950/80 text-fuchsia-300 border-fuchsia-500/40">
+                              {group.occurrences_count} {group.occurrences_count === 1 ? "match" : "matches"}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            {group.occurrences.map((occ, oIdx) => (
+                              <button
+                                key={oIdx}
+                                onClick={() => handleOpenCloneOccurrence(occ)}
+                                className="w-full text-left p-2 bg-[#0d0d0d] hover:bg-zinc-900/70 hover:border-fuchsia-400/80 transition-all rounded-lg border border-zinc-800/80 space-y-1 group"
+                              >
+                                <div className="flex items-center justify-between text-[11px]">
+                                  <span className="text-cyan-300 font-bold group-hover:text-cyan-200 truncate max-w-[140px]">
+                                    {occ.file}
+                                  </span>
+                                  <span className="text-[10px] text-zinc-500 group-hover:text-zinc-300">
+                                    L{occ.start_line}–L{occ.end_line}
+                                  </span>
+                                </div>
+                                <div className="text-zinc-300 font-mono bg-[#050505] p-1.5 rounded border border-zinc-900 truncate text-[10px]">
+                                  {occ.code}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="p-4 bg-[#050505] rounded-xl border border-[#1f1f1f] text-center text-zinc-500 text-xs font-mono space-y-2">
+                        <p>No structural clones scanned yet.</p>
+                        <button
+                          onClick={handleScanStructuralClones}
+                          disabled={structuralCloneLoading}
+                          className="px-3 py-1.5 rounded-lg bg-fuchsia-950 text-fuchsia-300 border border-fuchsia-500/40 text-[11px] font-bold hover:bg-fuchsia-900 transition-all"
+                        >
+                          {structuralCloneLoading ? "Scanning..." : "Find Clones"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : rightPanelTab === "project" ? (
               /* Project Scan View */
               <div className="space-y-4">
                 {/* Project Summary Metrics */}

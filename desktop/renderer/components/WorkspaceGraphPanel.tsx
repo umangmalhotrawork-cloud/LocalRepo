@@ -202,11 +202,11 @@ export default function WorkspaceGraphPanel({
         };
       case "clone":
         return {
-          bg: "fill-[#500724]",
-          border: "stroke-pink-500",
-          text: "text-pink-300",
-          badgeBg: "bg-pink-950 text-pink-300 border-pink-500/40",
-          edgeStroke: "#ec4899",
+          bg: "fill-[#3b0764]",
+          border: "stroke-purple-400",
+          text: "text-purple-300",
+          badgeBg: "bg-purple-950 text-purple-300 border-purple-500/40",
+          edgeStroke: "#a855f7",
         };
       case "semantic_clone":
         return {
@@ -227,6 +227,10 @@ export default function WorkspaceGraphPanel({
     }
   };
 
+  const cloneCount = useMemo(() => {
+    return filteredNodes.filter((n) => n.kind === "clone").length;
+  }, [filteredNodes]);
+
   return (
     <div className="flex-1 flex flex-col h-full bg-[#050505] text-zinc-100 font-mono select-none overflow-hidden relative">
       
@@ -244,6 +248,12 @@ export default function WorkspaceGraphPanel({
             <span>{filteredNodes.length} nodes</span>
             <span>•</span>
             <span>{filteredEdges.length} edges</span>
+            {cloneCount > 0 && (
+              <>
+                <span>•</span>
+                <span className="text-purple-400 font-bold">{cloneCount} clones</span>
+              </>
+            )}
           </div>
         </div>
 
@@ -454,7 +464,7 @@ export default function WorkspaceGraphPanel({
               const tgtPos = nodePositions[edge.target];
               if (!srcPos || !tgtPos) return null;
 
-              const isCloneEdge = edge.type === "clone";
+              const isCloneEdge = edge.type === "clone" || edge.type === "structural-clone";
               const isSemanticClone = edge.type === "semantic_clone";
               const isGhostEdge = edge.type === "ghost_flow";
               const isCrossFile = edge.type === "cross_file_import";
@@ -470,7 +480,7 @@ export default function WorkspaceGraphPanel({
               const markerColor = isSemanticClone
                 ? "url(#arrow-cyan)"
                 : isCloneEdge
-                ? "url(#arrow-magenta)"
+                ? "url(#arrow-purple)"
                 : isGhostEdge
                 ? "url(#arrow-amber)"
                 : isCrossFile
@@ -480,7 +490,7 @@ export default function WorkspaceGraphPanel({
               const strokeColor = isSemanticClone
                 ? "#06b6d4"
                 : isCloneEdge
-                ? "#ec4899"
+                ? "#a855f7"
                 : isGhostEdge
                 ? "#f59e0b"
                 : isCrossFile

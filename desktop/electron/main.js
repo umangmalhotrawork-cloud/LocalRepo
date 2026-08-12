@@ -450,13 +450,58 @@ function createWindow() {
                                                                                       if (graphBtn) graphBtn.click();
                                                                                     })();
                                                                                   `);
-
                                                                                   setTimeout(async () => {
                                                                                     if (mainWindow) {
                                                                                       const semGraphImg = await mainWindow.capturePage();
                                                                                       const semGraphPath = path.join(screenshotDir, 'milestone13-semantic-graph.png');
                                                                                       fs.writeFileSync(semGraphPath, semGraphImg.toPNG());
                                                                                       console.log('[ELECTRON] Saved semantic graph screenshot to:', semGraphPath);
+
+                                                                                      // Milestone 14: Causal Luminance Scoring Engine
+                                                                                      setTimeout(async () => {
+                                                                                        if (mainWindow) {
+                                                                                          // 1. Run Luminance Scan and view Editor Heatmap
+                                                                                          await mainWindow.webContents.executeJavaScript(`
+                                                                                            (() => {
+                                                                                              const buttons = Array.from(document.querySelectorAll('button'));
+                                                                                              const closeBtn = buttons.find(b => b.title && b.title.includes('Return to Code Editor'));
+                                                                                              if (closeBtn) closeBtn.click();
+                                                                                              const lumScanBtn = buttons.find(b => b.textContent.includes('Run Luminance Scan'));
+                                                                                              if (lumScanBtn) lumScanBtn.click();
+                                                                                              const tabs = Array.from(document.querySelectorAll('div'));
+                                                                                              const editorTab = tabs.find(t => t.textContent && t.textContent.includes('cart_calculator.py'));
+                                                                                              if (editorTab) editorTab.click();
+                                                                                            })();
+                                                                                          `);
+
+                                                                                          setTimeout(async () => {
+                                                                                            if (mainWindow) {
+                                                                                              const heatmapImg = await mainWindow.capturePage();
+                                                                                              const heatmapPath = path.join(screenshotDir, 'milestone14-luminance-heatmap.png');
+                                                                                              fs.writeFileSync(heatmapPath, heatmapImg.toPNG());
+                                                                                              console.log('[ELECTRON] Saved luminance heatmap screenshot to:', heatmapPath);
+
+                                                                                              // 2. View Luminance Dashboard
+                                                                                              await mainWindow.webContents.executeJavaScript(`
+                                                                                                (() => {
+                                                                                                  const buttons = Array.from(document.querySelectorAll('button'));
+                                                                                                  const lumBtn = buttons.find(b => b.textContent.trim() === 'Luminance');
+                                                                                                  if (lumBtn) lumBtn.click();
+                                                                                                })();
+                                                                                              `);
+
+                                                                                              setTimeout(async () => {
+                                                                                                if (mainWindow) {
+                                                                                                  const dashImg = await mainWindow.capturePage();
+                                                                                                  const dashPath = path.join(screenshotDir, 'milestone14-luminance-dashboard.png');
+                                                                                                  fs.writeFileSync(dashPath, dashImg.toPNG());
+                                                                                                  console.log('[ELECTRON] Saved luminance dashboard screenshot to:', dashPath);
+                                                                                                }
+                                                                                              }, 1200);
+                                                                                            }
+                                                                                          }, 1500);
+                                                                                        }
+                                                                                      }, 1500);
                                                                                     }
                                                                                   }, 1200);
                                                                                 }
@@ -899,6 +944,30 @@ ipcMain.handle('workspace:search', async (_, payload) => {
   });
 });
 
+function runStructuralCloneScan(workspacePath) {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'python', 'clone_engine.py');
+    execFile('python3', [scriptPath, workspacePath], { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && !stdout) {
+        console.error('Python clone_engine error:', stderr || error.message);
+        resolve([]);
+        return;
+      }
+      try {
+        const jsonResult = JSON.parse(stdout);
+        resolve(jsonResult);
+      } catch (parseError) {
+        console.error('Failed to parse clone_engine JSON output:', parseError, stdout);
+        resolve([]);
+      }
+    });
+  });
+}
+
+ipcMain.handle('clone:scan', async (_, workspacePath) => {
+  return runStructuralCloneScan(workspacePath);
+});
+
 ipcMain.handle('engine:detect-clones', async (_, workspacePath) => {
   return new Promise((resolve) => {
     const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'detect_clones.py');
@@ -963,6 +1032,52 @@ ipcMain.handle('engine:detect-semantic-clones', async (_, workspacePath) => {
           total_clones: 0,
           groups: [],
           error: 'Failed to parse semantic clone detection JSON output',
+        });
+      }
+    });
+  });
+});
+
+ipcMain.handle('engine:calculate-luminance', async (_, workspacePath) => {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'calculate_luminance.py');
+    execFile('python3', [scriptPath, workspacePath], { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && !stdout) {
+        console.error('Python calculate_luminance error:', stderr || error.message);
+        resolve({
+          workspace: workspacePath,
+          total_files: 0,
+          total_statements: 0,
+          mean_luminance: 0.0,
+          median_luminance: 0.0,
+          dark_code_ratio: 0.0,
+          bright_code_ratio: 0.0,
+          causal_entropy_index: 0.0,
+          histogram: [],
+          darkest_statements: [],
+          files: [],
+          error: stderr || error.message,
+        });
+        return;
+      }
+      try {
+        const jsonResult = JSON.parse(stdout);
+        resolve(jsonResult);
+      } catch (parseError) {
+        console.error('Failed to parse calculate_luminance JSON output:', parseError, stdout);
+        resolve({
+          workspace: workspacePath,
+          total_files: 0,
+          total_statements: 0,
+          mean_luminance: 0.0,
+          median_luminance: 0.0,
+          dark_code_ratio: 0.0,
+          bright_code_ratio: 0.0,
+          causal_entropy_index: 0.0,
+          histogram: [],
+          darkest_statements: [],
+          files: [],
+          error: 'Failed to parse calculate_luminance JSON output',
         });
       }
     });

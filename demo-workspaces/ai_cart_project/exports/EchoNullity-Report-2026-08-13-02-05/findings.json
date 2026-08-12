@@ -1,0 +1,38 @@
+[
+  {
+    "file": "cart_calculator.py",
+    "line": 9,
+    "type": "Verified Ghost Line",
+    "title": "Identity Operation",
+    "code": "subtotal = subtotal * 1",
+    "description": "Mathematical identity operation detected.",
+    "causal_impact": 100
+  },
+  {
+    "file": "cart_calculator.py",
+    "line": 10,
+    "type": "Verified Ghost Line",
+    "title": "Identity Operation",
+    "code": "subtotal = subtotal + 0",
+    "description": "Mathematical identity operation detected.",
+    "causal_impact": 100
+  },
+  {
+    "file": "cart_calculator.py",
+    "line": 11,
+    "type": "Verified Ghost Line",
+    "title": "Identity Operation",
+    "code": "subtotal = subtotal - 0",
+    "description": "Mathematical identity operation detected.",
+    "causal_impact": 100
+  },
+  {
+    "file": "cart_calculator.py",
+    "line": 12,
+    "type": "Verified Ghost Line",
+    "title": "Identity Operation",
+    "code": "subtotal = subtotal / 1",
+    "description": "Mathematical identity operation detected.",
+    "causal_impact": 100
+  }
+]

@@ -64,12 +64,21 @@ export interface ReportExportPayload {
   findings: FindingItem[];
   clones?: CloneReportItem[];
   semanticClones?: SemanticCloneReportItem[];
+  luminanceReport?: {
+    mean_luminance: number;
+    median_luminance: number;
+    dark_code_ratio: number;
+    bright_code_ratio: number;
+    causal_entropy_index: number;
+    histogram: Array<{ range: string; count: number; percentage: number; color: string }>;
+    darkest_statements: Array<{ file: string; line: number; code: string; luminance: number; reason: string }>;
+  } | null;
   graphSvg?: string;
   activeFinding?: FindingItem | null;
 }
 
 export function buildWorkspaceReport(data: ReportExportPayload): string {
-  const { workspacePath, timestamp, metrics, findings, clones, semanticClones, graphSvg, activeFinding } = data;
+  const { workspacePath, timestamp, metrics, findings, clones, semanticClones, luminanceReport, graphSvg, activeFinding } = data;
   const projectName = workspacePath.split("/").pop() || "Workspace Project";
   const ghostRatioPct = (metrics.ghost_ratio * 100).toFixed(1);
   const avgLum = ((metrics.average_causal_luminance ?? 0) * 100).toFixed(1);
@@ -183,6 +192,83 @@ export function buildWorkspaceReport(data: ReportExportPayload): string {
           )
           .join("")}
       </div>
+    </div>
+    `
+    : "";
+
+  const luminanceSection = luminanceReport
+    ? `
+    <div style="margin-top: 36px;">
+      <h2 style="font-size: 14px; text-transform: uppercase; color: #22d3ee; margin-bottom: 12px; letter-spacing: 0.05em;">
+        Causal Luminance Analysis & Entropy
+      </h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px;">
+        <div style="background: #0a0a0a; border: 1px solid #1f1f1f; border-radius: 8px; padding: 14px;">
+          <div style="font-size: 11px; color: #71717a; text-transform: uppercase;">Mean Luminance</div>
+          <div style="font-size: 20px; font-weight: bold; color: #22d3ee; margin-top: 4px;">${(luminanceReport.mean_luminance * 100).toFixed(1)}%</div>
+        </div>
+        <div style="background: #0a0a0a; border: 1px solid #1f1f1f; border-radius: 8px; padding: 14px;">
+          <div style="font-size: 11px; color: #71717a; text-transform: uppercase;">Median Luminance</div>
+          <div style="font-size: 20px; font-weight: bold; color: #a855f7; margin-top: 4px;">${(luminanceReport.median_luminance * 100).toFixed(1)}%</div>
+        </div>
+        <div style="background: #0a0a0a; border: 1px solid #1f1f1f; border-radius: 8px; padding: 14px;">
+          <div style="font-size: 11px; color: #71717a; text-transform: uppercase;">Dark Code Ratio</div>
+          <div style="font-size: 20px; font-weight: bold; color: #f87171; margin-top: 4px;">${(luminanceReport.dark_code_ratio * 100).toFixed(1)}%</div>
+        </div>
+        <div style="background: #0a0a0a; border: 1px solid #1f1f1f; border-radius: 8px; padding: 14px;">
+          <div style="font-size: 11px; color: #71717a; text-transform: uppercase;">Causal Entropy</div>
+          <div style="font-size: 20px; font-weight: bold; color: #34d399; margin-top: 4px;">${luminanceReport.causal_entropy_index.toFixed(2)}</div>
+        </div>
+      </div>
+
+      <!-- Histogram Bars -->
+      <div style="background: #0a0a0a; border: 1px solid #1f1f1f; border-radius: 10px; padding: 16px; margin-bottom: 20px;">
+        <h3 style="margin: 0 0 12px 0; font-size: 12px; color: #e2e8f0; text-transform: uppercase;">Luminance Distribution</h3>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          ${luminanceReport.histogram
+            .map(
+              (bin) => `
+            <div>
+              <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px;">
+                <span style="color: #a1a1aa;">${escapeHtml(bin.range)}</span>
+                <span style="color: #e2e8f0; font-weight: bold;">${bin.count} statements (${bin.percentage}%)</span>
+              </div>
+              <div style="background: #141414; border-radius: 4px; height: 8px; overflow: hidden;">
+                <div style="background: ${bin.color || '#06b6d4'}; width: ${Math.max(2, bin.percentage)}%; height: 100%;"></div>
+              </div>
+            </div>
+          `
+            )
+            .join("")}
+        </div>
+      </div>
+
+      <!-- Darkest Statements -->
+      ${
+        luminanceReport.darkest_statements && luminanceReport.darkest_statements.length > 0
+          ? `
+      <div style="background: #0a0a0a; border: 1px solid #1f1f1f; border-radius: 10px; padding: 16px;">
+        <h3 style="margin: 0 0 12px 0; font-size: 12px; color: #f87171; text-transform: uppercase;">Lowest Luminance Statements (Dark Code)</h3>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          ${luminanceReport.darkest_statements
+            .map(
+              (s) => `
+            <div style="background: #060606; border: 1px solid #1f1f1f; border-left: 3px solid #ef4444; border-radius: 4px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span style="color: #38bdf8; font-weight: bold; font-size: 11px;">${escapeHtml(s.file)}:L${s.line}</span>
+                <code style="margin-left: 8px; color: #fca5a5; font-size: 11px;">${escapeHtml(s.code)}</code>
+                <span style="margin-left: 8px; color: #71717a; font-size: 10px;">— ${escapeHtml(s.reason)}</span>
+              </div>
+              <span style="padding: 2px 6px; border-radius: 4px; background: rgba(239, 68, 68, 0.15); color: #f87171; font-weight: bold; font-size: 10px;">${s.luminance.toFixed(2)}</span>
+            </div>
+          `
+            )
+            .join("")}
+        </div>
+      </div>
+      `
+          : ""
+      }
     </div>
     `
     : "";
@@ -397,6 +483,9 @@ export function buildWorkspaceReport(data: ReportExportPayload): string {
 
     <!-- Semantic Clone Groups Section -->
     ${semanticClonesSection}
+
+    <!-- Causal Luminance Analysis Section -->
+    ${luminanceSection}
 
     <!-- Cross-File Graph SVG Placeholder / Embed -->
     ${
