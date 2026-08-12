@@ -14,3 +14,13 @@ def process_checkout(cart_id, payment_method, shipping_address):
         "status": order_status,
         "shipping_address": shipping_address,
     }
+
+
+def compute_order_total(items):
+    """
+    Loop accumulation equivalent to sum(item['price'] * item['quantity'] for item in items).
+    """
+    total = 0.0
+    for item in items:
+        total += item["price"] * item["quantity"]
+    return total

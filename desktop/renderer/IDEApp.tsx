@@ -21,6 +21,7 @@ import StartupModal from "./components/StartupModal";
 import SurgeryDiffPreview from "./components/SurgeryDiffPreview";
 import WorkspaceSearchModal, { SearchMode, SearchResultItem } from "./components/WorkspaceSearchModal";
 import ClonePanel, { CloneReport, CloneInstance } from "./components/ClonePanel";
+import SemanticClonePanel, { SemanticCloneReport, SemanticCloneInstance } from "./components/SemanticClonePanel";
 import { useWorkspaceState, EditorViewState, WorkspacePersistedState } from "./hooks/useWorkspaceState";
 import { buildWorkspaceReport, ReportExportPayload } from "./utils/reportBuilder";
 import { exportGraphSvg } from "./utils/exportGraphSvg";
@@ -58,6 +59,7 @@ declare global {
       undoSurgery: (payload: { file: string }) => Promise<{ success: boolean; file: string; restored_content: string; backup_path: string; error?: string }>;
       searchWorkspace: (payload: { workspace: string; query?: string; mode?: string; limit?: number }) => Promise<{ workspace: string; query: string; mode: string; results_count: number; results: SearchResultItem[]; error?: string }>;
       detectClones: (workspacePath: string) => Promise<CloneReport>;
+      detectSemanticClones: (workspacePath: string) => Promise<SemanticCloneReport>;
     };
   }
 }
@@ -281,7 +283,7 @@ export default function IDEApp() {
       return_sink_line: 24,
     },
   ]);
-  type MainView = "editor" | "dashboard" | "graph" | "clones";
+  type MainView = "editor" | "dashboard" | "graph" | "clones" | "semantic_clones";
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(findings[0] || null);
   const [workspaceReport, setWorkspaceReport] = useState<WorkspaceReport | null>(null);
   const [workspaceSummary, setWorkspaceSummary] = useState<WorkspaceReport | null>(null);
@@ -290,6 +292,8 @@ export default function IDEApp() {
   const [mainView, setMainView] = useState<MainView>("editor");
   const [cloneReport, setCloneReport] = useState<CloneReport | null>(null);
   const [cloneLoading, setCloneLoading] = useState(false);
+  const [semanticCloneReport, setSemanticCloneReport] = useState<SemanticCloneReport | null>(null);
+  const [semanticCloneLoading, setSemanticCloneLoading] = useState(false);
   const [workspaceGraph, setWorkspaceGraph] = useState<WorkspaceGraph | null>(null);
   const [graphLoading, setGraphLoading] = useState(false);
   const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
@@ -1164,6 +1168,21 @@ export default function IDEApp() {
           code: i.code,
         })),
       })),
+      semanticClones: semanticCloneReport?.groups?.map((g) => ({
+        group_id: g.group_id,
+        semantic_pattern: g.semantic_pattern,
+        similarity: g.similarity,
+        similarity_label: g.similarity_label,
+        files: g.files,
+        instances_count: g.instances_count,
+        instances: g.instances.map((i) => ({
+          file: i.file,
+          start_line: i.start_line,
+          end_line: i.end_line,
+          code: i.code,
+          implementation_style: i.implementation_style,
+        })),
+      })),
       activeFinding: selectedFinding ? {
         file: (selectedFinding as any).file || (activeTab ? activeTab.name : "cart_calculator.py"),
         line: selectedFinding.line,
@@ -1380,6 +1399,172 @@ export default function IDEApp() {
   const handleSelectCloneInstance = async (instance: CloneInstance) => {
     console.log('[CLONES] selecting instance', instance.file, instance.start_line);
     addLog(`[CLONES] Opening ${instance.file} at line ${instance.start_line}...`);
+
+    const targetPath = instance.absolute_path || (folderPath ? `${folderPath}/${instance.file}` : instance.file);
+    const fileName = instance.file.split("/").pop() || instance.file;
+
+    await handleOpenFile({
+      name: fileName,
+      path: targetPath,
+      isDirectory: false,
+    });
+
+    setMainView("editor");
+
+    setTimeout(() => {
+      if (editorRef.current) {
+        try {
+          editorRef.current.revealLineInCenter(instance.start_line);
+          editorRef.current.setPosition({ lineNumber: instance.start_line, column: 1 });
+          editorRef.current.focus();
+        } catch (e) {}
+      }
+    }, 150);
+  };
+
+  const handleRunSemanticCloneScan = async () => {
+    const ws = folderPath || ".";
+    setSemanticCloneLoading(true);
+    setMainView("semantic_clones");
+    addLog(`[SEMANTIC-CLONES] Initiating Behavioral Semantic Clone detection for: ${ws}`);
+    console.log('[SEMANTIC-CLONES] run scan for', ws);
+
+    if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.detectSemanticClones) {
+      try {
+        const result = await window.electronAPI.detectSemanticClones(ws);
+        setSemanticCloneReport(result);
+        addLog(`[SEMANTIC-CLONES] Detection complete. Found ${result.total_groups} semantic clone groups (${result.total_clones} isomorphic blocks) across ${result.total_files} files.`);
+        console.log('[SEMANTIC-CLONES] result groups count:', result.total_groups);
+      } catch (err: any) {
+        addLog(`[SEMANTIC-CLONES] Error during scan: ${err.message || String(err)}`);
+      }
+    } else {
+      // Browser fallback simulation
+      const fallbackReport: SemanticCloneReport = {
+        workspace: ws,
+        threshold: 0.82,
+        total_files: 3,
+        total_groups: 2,
+        total_clones: 4,
+        groups: [
+          {
+            group_id: "semantic-clone-1",
+            semantic_pattern: "Sum / Aggregation Reduction",
+            semantic_role: "SUM_REDUCTION",
+            similarity: 0.93,
+            similarity_label: "93% Semantic Match",
+            files_count: 2,
+            files: ["src/cart_calculator.py", "src/checkout_engine.py"],
+            instances_count: 2,
+            fingerprint: {
+              role: "SUM_REDUCTION",
+              target_aggregation: "SUM",
+              data_flow: "iterable_to_scalar",
+            },
+            instances: [
+              {
+                id: "src/cart_calculator.py::L6::sum_builtin",
+                file: "src/cart_calculator.py",
+                absolute_path: `${ws}/src/cart_calculator.py`,
+                start_line: 6,
+                end_line: 6,
+                code: "subtotal = sum(item[\"price\"] * item[\"quantity\"] for item in items)",
+                semantic_role: "SUM_REDUCTION",
+                pattern_name: "Sum / Aggregation Reduction",
+                implementation_style: "Built-in sum() Aggregator",
+                features: {
+                  agg_type: "SUM",
+                  has_loop: false,
+                  has_call: true,
+                  data_flow: "iterable_to_scalar",
+                  ops: ["sum", "mult", "add"],
+                },
+              },
+              {
+                id: "src/checkout_engine.py::L24::loop_sum",
+                file: "src/checkout_engine.py",
+                absolute_path: `${ws}/src/checkout_engine.py`,
+                start_line: 24,
+                end_line: 25,
+                code: "for item in items:\n        total += item[\"price\"] * item[\"quantity\"]",
+                semantic_role: "SUM_REDUCTION",
+                pattern_name: "Sum / Aggregation Reduction",
+                implementation_style: "Imperative Loop Accumulator",
+                features: {
+                  agg_type: "SUM",
+                  has_loop: true,
+                  has_call: false,
+                  data_flow: "iterable_to_scalar",
+                  ops: ["loop", "add", "accumulate"],
+                },
+              },
+            ],
+          },
+          {
+            group_id: "semantic-clone-2",
+            semantic_pattern: "Max / Boundary Reduction",
+            semantic_role: "EXTREMUM_REDUCTION",
+            similarity: 0.94,
+            similarity_label: "94% Semantic Match",
+            files_count: 2,
+            files: ["src/cart_calculator.py", "src/invoice_processor.py"],
+            instances_count: 2,
+            fingerprint: {
+              role: "EXTREMUM_REDUCTION",
+              target_aggregation: "MAX",
+              data_flow: "iterable_to_scalar",
+            },
+            instances: [
+              {
+                id: "src/cart_calculator.py::L20::max_builtin",
+                file: "src/cart_calculator.py",
+                absolute_path: `${ws}/src/cart_calculator.py`,
+                start_line: 20,
+                end_line: 20,
+                code: "taxable_amount = max(0.0, subtotal - discount_amount)",
+                semantic_role: "EXTREMUM_REDUCTION",
+                pattern_name: "Max / Boundary Reduction",
+                implementation_style: "Built-in max() Aggregator",
+                features: {
+                  agg_type: "MAX",
+                  has_loop: false,
+                  has_call: true,
+                  data_flow: "iterable_to_scalar",
+                  ops: ["max", "compare"],
+                },
+              },
+              {
+                id: "src/invoice_processor.py::L20::loop_max",
+                file: "src/invoice_processor.py",
+                absolute_path: `${ws}/src/invoice_processor.py`,
+                start_line: 20,
+                end_line: 22,
+                code: "for item in items:\n        if item[\"price\"] > highest:\n            highest = item[\"price\"]",
+                semantic_role: "EXTREMUM_REDUCTION",
+                pattern_name: "Max / Boundary Reduction",
+                implementation_style: "Imperative Iterative Extremum Search",
+                features: {
+                  agg_type: "MAX",
+                  has_loop: true,
+                  has_call: false,
+                  data_flow: "iterable_to_scalar",
+                  ops: ["loop", "compare", "update"],
+                },
+              },
+            ],
+          },
+        ],
+      };
+      setSemanticCloneReport(fallbackReport);
+      addLog(`[SEMANTIC-CLONES] Simulation complete. Found ${fallbackReport.total_groups} semantic clone groups.`);
+    }
+
+    setSemanticCloneLoading(false);
+  };
+
+  const handleSelectSemanticCloneInstance = async (instance: SemanticCloneInstance) => {
+    console.log('[SEMANTIC-CLONES] selecting instance', instance.file, instance.start_line);
+    addLog(`[SEMANTIC-CLONES] Opening ${instance.file} at line ${instance.start_line}...`);
 
     const targetPath = instance.absolute_path || (folderPath ? `${folderPath}/${instance.file}` : instance.file);
     const fileName = instance.file.split("/").pop() || instance.file;
@@ -1843,6 +2028,25 @@ export default function IDEApp() {
           </button>
 
           <button
+            onClick={() => {
+              const next = mainView === "semantic_clones" ? "editor" : "semantic_clones";
+              setMainView(next);
+              if (next === "semantic_clones" && !semanticCloneReport) {
+                handleRunSemanticCloneScan();
+              }
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all ${
+              mainView === "semantic_clones"
+                ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 shadow-cyan-glow font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300"
+            }`}
+            title="Toggle Semantic Clone Detection (Behavioral Equivalence)"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Semantic</span>
+          </button>
+
+          <button
             onClick={() => setStartupModalOpen(true)}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-zinc-400 hover:text-white transition-all"
             title="Open Workspace Hub / Recent Projects"
@@ -1906,9 +2110,23 @@ export default function IDEApp() {
             {cloneLoading ? (
               <Activity className="w-3.5 h-3.5 animate-spin text-pink-400" />
             ) : (
-              <Sparkles className="w-3.5 h-3.5 text-pink-400" />
+              <Layers className="w-3.5 h-3.5 text-pink-400" />
             )}
             <span>{cloneLoading ? "Scanning clones..." : "Run Clone Scan"}</span>
+          </button>
+
+          <button
+            onClick={handleRunSemanticCloneScan}
+            disabled={semanticCloneLoading}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-cyan-500/40 text-cyan-300 font-bold transition-all shadow-sm disabled:opacity-50"
+            title="Scan workspace for behavioral/semantic code clones"
+          >
+            {semanticCloneLoading ? (
+              <Activity className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+            )}
+            <span>{semanticCloneLoading ? "Scanning semantics..." : "Run Semantic Scan"}</span>
           </button>
 
           <button
@@ -2010,6 +2228,14 @@ export default function IDEApp() {
               loading={cloneLoading}
               onRunScan={handleRunCloneScan}
               onSelectInstance={handleSelectCloneInstance}
+              onClose={() => setMainView("editor")}
+            />
+          ) : mainView === "semantic_clones" ? (
+            <SemanticClonePanel
+              report={semanticCloneReport}
+              loading={semanticCloneLoading}
+              onRunScan={handleRunSemanticCloneScan}
+              onSelectInstance={handleSelectSemanticCloneInstance}
               onClose={() => setMainView("editor")}
             />
           ) : (

@@ -22,4 +22,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   undoSurgery: (payload) => ipcRenderer.invoke('surgery:undo', payload),
   searchWorkspace: (payload) => ipcRenderer.invoke('workspace:search', payload),
   detectClones: (workspacePath) => ipcRenderer.invoke('engine:detect-clones', workspacePath),
+  detectSemanticClones: (workspacePath) => ipcRenderer.invoke('engine:detect-semantic-clones', workspacePath),
 });

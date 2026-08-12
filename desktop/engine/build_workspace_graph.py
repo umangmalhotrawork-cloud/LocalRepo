@@ -12,6 +12,7 @@ if ENGINE_DIR not in sys.path:
 
 from analyze import analyze_source
 from detect_clones import detect_clones_in_workspace
+from detect_semantic_clones import detect_semantic_clones_in_workspace
 
 EXCLUDE_DIRS = {
     ".git",
@@ -265,6 +266,58 @@ def build_workspace_graph(workspace_path):
                         "source": node_a_id,
                         "target": node_b_id,
                         "type": "clone"
+                    })
+    except Exception as e:
+        pass
+
+    # Detect Semantic Clones and add dashed cyan semantic_clone edges
+    try:
+        semantic_result = detect_semantic_clones_in_workspace(abs_workspace)
+        for group in semantic_result.get("groups", []):
+            instances = group.get("instances", [])
+            for i in range(len(instances)):
+                for j in range(i + 1, len(instances)):
+                    inst_a = instances[i]
+                    inst_b = instances[j]
+                    
+                    node_a_id = None
+                    node_b_id = None
+                    for n in all_nodes:
+                        if n["file"] == inst_a["file"] and n.get("line") == inst_a["start_line"]:
+                            node_a_id = n["id"]
+                            break
+                    for n in all_nodes:
+                        if n["file"] == inst_b["file"] and n.get("line") == inst_b["start_line"]:
+                            node_b_id = n["id"]
+                            break
+
+                    if not node_a_id:
+                        node_a_id = f"{inst_a['file']}::L{inst_a['start_line']}::semantic_clone"
+                        all_nodes.append({
+                            "id": node_a_id,
+                            "file": inst_a["file"],
+                            "symbol": inst_a.get("pattern_name", "Semantic Clone"),
+                            "line": inst_a["start_line"],
+                            "kind": "semantic_clone",
+                            "code": inst_a["code"],
+                            "label": f"Semantic ({inst_a['file']}:L{inst_a['start_line']})"
+                        })
+                    if not node_b_id:
+                        node_b_id = f"{inst_b['file']}::L{inst_b['start_line']}::semantic_clone"
+                        all_nodes.append({
+                            "id": node_b_id,
+                            "file": inst_b["file"],
+                            "symbol": inst_b.get("pattern_name", "Semantic Clone"),
+                            "line": inst_b["start_line"],
+                            "kind": "semantic_clone",
+                            "code": inst_b["code"],
+                            "label": f"Semantic ({inst_b['file']}:L{inst_b['start_line']})"
+                        })
+
+                    all_edges.append({
+                        "source": node_a_id,
+                        "target": node_b_id,
+                        "type": "semantic_clone"
                     })
     except Exception as e:
         pass

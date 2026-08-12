@@ -10,3 +10,14 @@ def generate_invoice_pdf(order_id, customer_email, items, total_amount):
         "currency": "USD",
     }
     return invoice_data
+
+
+def find_max_item_charge(items):
+    """
+    Manual loop maximum equivalent to max(item['price'] for item in items).
+    """
+    highest = 0.0
+    for item in items:
+        if item["price"] > highest:
+            highest = item["price"]
+    return highest

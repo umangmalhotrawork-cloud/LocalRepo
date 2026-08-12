@@ -422,6 +422,47 @@ function createWindow() {
                                                                           const cloneGraphPath = path.join(screenshotDir, 'milestone12-clone-graph.png');
                                                                           fs.writeFileSync(cloneGraphPath, cloneGraphImg.toPNG());
                                                                           console.log('[ELECTRON] Saved clone graph screenshot to:', cloneGraphPath);
+
+                                                                          // Milestone 13: Semantic Clone Detection
+                                                                          setTimeout(async () => {
+                                                                            if (mainWindow) {
+                                                                              // 1. Run Semantic Clone Scan
+                                                                              await mainWindow.webContents.executeJavaScript(`
+                                                                                (() => {
+                                                                                  const buttons = Array.from(document.querySelectorAll('button'));
+                                                                                  const semBtn = buttons.find(b => b.textContent.includes('Run Semantic Scan') || b.textContent.includes('Semantic'));
+                                                                                  if (semBtn) semBtn.click();
+                                                                                })();
+                                                                              `);
+
+                                                                              setTimeout(async () => {
+                                                                                if (mainWindow) {
+                                                                                  const semPanelImg = await mainWindow.capturePage();
+                                                                                  const semPanelPath = path.join(screenshotDir, 'milestone13-semantic-panel.png');
+                                                                                  fs.writeFileSync(semPanelPath, semPanelImg.toPNG());
+                                                                                  console.log('[ELECTRON] Saved semantic panel screenshot to:', semPanelPath);
+
+                                                                                  // 2. View in Graph with dashed cyan edges
+                                                                                  await mainWindow.webContents.executeJavaScript(`
+                                                                                    (() => {
+                                                                                      const buttons = Array.from(document.querySelectorAll('button'));
+                                                                                      const graphBtn = buttons.find(b => b.textContent.includes('Graph'));
+                                                                                      if (graphBtn) graphBtn.click();
+                                                                                    })();
+                                                                                  `);
+
+                                                                                  setTimeout(async () => {
+                                                                                    if (mainWindow) {
+                                                                                      const semGraphImg = await mainWindow.capturePage();
+                                                                                      const semGraphPath = path.join(screenshotDir, 'milestone13-semantic-graph.png');
+                                                                                      fs.writeFileSync(semGraphPath, semGraphImg.toPNG());
+                                                                                      console.log('[ELECTRON] Saved semantic graph screenshot to:', semGraphPath);
+                                                                                    }
+                                                                                  }, 1200);
+                                                                                }
+                                                                              }, 1500);
+                                                                            }
+                                                                          }, 1500);
                                                                         }
                                                                       }, 1200);
                                                                     }
@@ -886,6 +927,42 @@ ipcMain.handle('engine:detect-clones', async (_, workspacePath) => {
           total_clones: 0,
           groups: [],
           error: 'Failed to parse clone detection JSON output',
+        });
+      }
+    });
+  });
+});
+
+ipcMain.handle('engine:detect-semantic-clones', async (_, workspacePath) => {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'detect_semantic_clones.py');
+    execFile('python3', [scriptPath, workspacePath], { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && !stdout) {
+        console.error('Python detect_semantic_clones error:', stderr || error.message);
+        resolve({
+          workspace: workspacePath,
+          threshold: 0.82,
+          total_files: 0,
+          total_groups: 0,
+          total_clones: 0,
+          groups: [],
+          error: stderr || error.message,
+        });
+        return;
+      }
+      try {
+        const jsonResult = JSON.parse(stdout);
+        resolve(jsonResult);
+      } catch (parseError) {
+        console.error('Failed to parse detect_semantic_clones JSON output:', parseError, stdout);
+        resolve({
+          workspace: workspacePath,
+          threshold: 0.82,
+          total_files: 0,
+          total_groups: 0,
+          total_clones: 0,
+          groups: [],
+          error: 'Failed to parse semantic clone detection JSON output',
         });
       }
     });

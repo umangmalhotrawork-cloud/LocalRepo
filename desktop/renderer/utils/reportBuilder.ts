@@ -41,18 +41,35 @@ export interface CloneReportItem {
   }>;
 }
 
+export interface SemanticCloneReportItem {
+  group_id: string;
+  semantic_pattern: string;
+  similarity: number;
+  similarity_label?: string;
+  files: string[];
+  instances_count: number;
+  instances: Array<{
+    file: string;
+    start_line: number;
+    end_line: number;
+    code: string;
+    implementation_style?: string;
+  }>;
+}
+
 export interface ReportExportPayload {
   workspacePath: string;
   timestamp: string;
   metrics: ReportMetrics;
   findings: FindingItem[];
   clones?: CloneReportItem[];
+  semanticClones?: SemanticCloneReportItem[];
   graphSvg?: string;
   activeFinding?: FindingItem | null;
 }
 
 export function buildWorkspaceReport(data: ReportExportPayload): string {
-  const { workspacePath, timestamp, metrics, findings, graphSvg, activeFinding } = data;
+  const { workspacePath, timestamp, metrics, findings, clones, semanticClones, graphSvg, activeFinding } = data;
   const projectName = workspacePath.split("/").pop() || "Workspace Project";
   const ghostRatioPct = (metrics.ghost_ratio * 100).toFixed(1);
   const avgLum = ((metrics.average_causal_luminance ?? 0) * 100).toFixed(1);
@@ -108,6 +125,54 @@ export function buildWorkspaceReport(data: ReportExportPayload): string {
                     <span style="color: #71717a;">Lines ${inst.start_line}–${inst.end_line}</span>
                   </div>
                   <code style="color: #e2e8f0; font-size: 11px; white-space: pre-wrap;">${escapeHtml(inst.code)}</code>
+                </div>
+              `
+                )
+                .join("")}
+            </div>
+          </div>
+        `
+          )
+          .join("")}
+      </div>
+    </div>
+    `
+    : "";
+
+  const semanticClonesSection = semanticClones && semanticClones.length > 0
+    ? `
+    <div style="margin-top: 36px;">
+      <h2 style="font-size: 14px; text-transform: uppercase; color: #22d3ee; margin-bottom: 12px; letter-spacing: 0.05em;">
+        Semantic Clone Groups (${semanticClones.length})
+      </h2>
+      <p style="font-size: 12px; color: #a1a1aa; margin-bottom: 16px;">
+        Behaviorally isomorphic patterns detected across differing AST control flows and syntactic structures.
+      </p>
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        ${semanticClones
+          .map(
+            (g) => `
+          <div style="background: #0a0a0a; border: 1px solid #1f1f1f; border-left: 4px solid #06b6d4; border-radius: 10px; padding: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <div>
+                <span style="font-weight: bold; color: #ffffff; font-size: 13px;">${escapeHtml(g.semantic_pattern)}</span>
+                <span style="margin-left: 8px; font-size: 10px; color: #71717a; text-transform: uppercase;">[${escapeHtml(g.group_id)}]</span>
+              </div>
+              <span style="padding: 2px 8px; border-radius: 9999px; background: rgba(6, 182, 212, 0.15); border: 1px solid rgba(6, 182, 212, 0.4); color: #22d3ee; font-weight: bold; font-size: 10px;">
+                ${g.similarity_label || `${Math.round(g.similarity * 100)}% SEMANTIC MATCH`}
+              </span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px;">
+              ${g.instances
+                .map(
+                  (inst) => `
+                <div style="background: #060606; border: 1px solid #171717; border-radius: 6px; padding: 10px 12px;">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 11px;">
+                    <span style="color: #38bdf8; font-weight: 600;">${escapeHtml(inst.file)}</span>
+                    <span style="color: #71717a;">Lines ${inst.start_line}–${inst.end_line}</span>
+                  </div>
+                  ${inst.implementation_style ? `<div style="font-size: 10px; color: #c084fc; margin-bottom: 6px;">${escapeHtml(inst.implementation_style)}</div>` : ''}
+                  <pre style="margin: 0; background: #0c0c0e; border: 1px solid #1f1f23; border-radius: 4px; padding: 8px; font-size: 11px; color: #e2e8f0; overflow-x: auto;"><code>${escapeHtml(inst.code)}</code></pre>
                 </div>
               `
                 )
@@ -329,6 +394,9 @@ export function buildWorkspaceReport(data: ReportExportPayload): string {
 
     <!-- Structural Clones Section -->
     ${clonesSection}
+
+    <!-- Semantic Clone Groups Section -->
+    ${semanticClonesSection}
 
     <!-- Cross-File Graph SVG Placeholder / Embed -->
     ${
