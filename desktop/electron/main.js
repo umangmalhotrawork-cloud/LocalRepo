@@ -229,6 +229,72 @@ function createWindow() {
                                   console.error('[ELECTRON] Error searching for exported html report:', e);
                                 }
                               }
+
+                              // Milestone 10: Switch to Editor and open Surgery Diff Preview
+                              setTimeout(async () => {
+                                if (mainWindow) {
+                                  await mainWindow.webContents.executeJavaScript(`
+                                    (() => {
+                                      const buttons = Array.from(document.querySelectorAll('button'));
+                                      const graphBtn = buttons.find(b => b.textContent.includes('Graph'));
+                                      if (graphBtn) graphBtn.click();
+                                      setTimeout(() => {
+                                        const surgeryBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Safe Remove Surgery'));
+                                        if (surgeryBtn) surgeryBtn.click();
+                                      }, 600);
+                                    })();
+                                  `);
+
+                                  setTimeout(async () => {
+                                    if (mainWindow) {
+                                      const diffModalImg = await mainWindow.capturePage();
+                                      const diffScreenshotPath = path.join(screenshotDir, 'milestone10-surgery-diff-preview.png');
+                                      fs.writeFileSync(diffScreenshotPath, diffModalImg.toPNG());
+                                      console.log('[ELECTRON] Saved surgery diff preview screenshot to:', diffScreenshotPath);
+
+                                      // Deselect line 12 (hunk 4) and click Apply Surgery
+                                      await mainWindow.webContents.executeJavaScript(`
+                                        (() => {
+                                          const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+                                          if (checkboxes.length >= 4) {
+                                            checkboxes[3].click(); // uncheck line 12
+                                          }
+                                          setTimeout(() => {
+                                            const applyBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Apply Surgery'));
+                                            if (applyBtn) applyBtn.click();
+                                          }, 400);
+                                        })();
+                                      `);
+
+                                      setTimeout(async () => {
+                                        if (mainWindow) {
+                                          const afterApplyImg = await mainWindow.capturePage();
+                                          const afterApplyPath = path.join(screenshotDir, 'milestone10-after-apply.png');
+                                          fs.writeFileSync(afterApplyPath, afterApplyImg.toPNG());
+                                          console.log('[ELECTRON] Saved after-apply screenshot to:', afterApplyPath);
+
+                                          // Click Undo Surgery
+                                          await mainWindow.webContents.executeJavaScript(`
+                                            (() => {
+                                              const undoBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Undo Surgery'));
+                                              if (undoBtn) undoBtn.click();
+                                            })();
+                                          `);
+
+                                          setTimeout(async () => {
+                                            if (mainWindow) {
+                                              const afterUndoImg = await mainWindow.capturePage();
+                                              const afterUndoPath = path.join(screenshotDir, 'milestone10-after-undo.png');
+                                              fs.writeFileSync(afterUndoPath, afterUndoImg.toPNG());
+                                              console.log('[ELECTRON] Saved after-undo screenshot to:', afterUndoPath);
+                                            }
+                                          }, 1500);
+                                        }
+                                      }, 1500);
+                                    }
+                                  }, 1500);
+                                }
+                              }, 1500);
                             }
                           }, 1200);
                         }
@@ -544,4 +610,65 @@ ipcMain.handle('state:save', async (_, state) => {
 
 ipcMain.handle('report:export', async (_, payload) => {
   return exportWorkspaceReport(payload, mainWindow);
+});
+
+ipcMain.handle('surgery:preview', async (_, payload) => {
+  const { file, approved_lines = [] } = payload;
+  const absPath = path.isAbsolute(file) ? file : path.join(app.getAppPath(), file);
+  try {
+    const content = fs.readFileSync(absPath, 'utf-8');
+    const lines = content.split('\n');
+    const approvedSet = new Set(approved_lines);
+    const transformed = lines.filter((_, idx) => !approvedSet.has(idx + 1)).join('\n');
+    return {
+      success: true,
+      file: absPath,
+      original_source: content,
+      transformed_source: transformed,
+      approved_lines,
+    };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('surgery:apply', async (_, payload) => {
+  return new Promise((resolve) => {
+    const { file, approved_lines = [] } = payload;
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'apply_surgery.py');
+    const args = [scriptPath, file, '--lines', ...approved_lines.map(String)];
+    execFile('python3', args, { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && !stdout) {
+        console.error('Python apply_surgery error:', stderr || error.message);
+        resolve({ success: false, error: stderr || error.message });
+        return;
+      }
+      try {
+        const jsonResult = JSON.parse(stdout);
+        resolve(jsonResult);
+      } catch (parseError) {
+        resolve({ success: false, error: 'Failed to parse apply_surgery JSON output' });
+      }
+    });
+  });
+});
+
+ipcMain.handle('surgery:undo', async (_, payload) => {
+  return new Promise((resolve) => {
+    const { file } = payload;
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'undo_surgery.py');
+    execFile('python3', [scriptPath, file], { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && !stdout) {
+        console.error('Python undo_surgery error:', stderr || error.message);
+        resolve({ success: false, error: stderr || error.message });
+        return;
+      }
+      try {
+        const jsonResult = JSON.parse(stdout);
+        resolve(jsonResult);
+      } catch (parseError) {
+        resolve({ success: false, error: 'Failed to parse undo_surgery JSON output' });
+      }
+    });
+  });
 });

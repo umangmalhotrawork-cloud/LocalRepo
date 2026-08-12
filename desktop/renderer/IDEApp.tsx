@@ -18,6 +18,7 @@ import ProvenanceReplayPanel, { Finding, ProvenanceStep } from "./components/Pro
 import WorkspaceDashboard, { WorkspaceReport, WorkspaceFileReport } from "./components/WorkspaceDashboard";
 import WorkspaceGraphPanel, { WorkspaceGraph, GraphNode } from "./components/WorkspaceGraphPanel";
 import StartupModal from "./components/StartupModal";
+import SurgeryDiffPreview from "./components/SurgeryDiffPreview";
 import { useWorkspaceState, EditorViewState, WorkspacePersistedState } from "./hooks/useWorkspaceState";
 import { buildWorkspaceReport, ReportExportPayload } from "./utils/reportBuilder";
 import { exportGraphSvg } from "./utils/exportGraphSvg";
@@ -50,6 +51,9 @@ declare global {
       loadWorkspaceState: () => Promise<any>;
       saveWorkspaceState: (state: any) => Promise<any>;
       exportWorkspaceReport: (payload: any) => Promise<{ success: boolean; path: string; htmlPath?: string; error?: string }>;
+      previewSurgery: (payload: { file: string; approved_lines: number[] }) => Promise<any>;
+      applySurgery: (payload: { file: string; approved_lines: number[] }) => Promise<{ success: boolean; file: string; removed_count: number; backup_path: string; new_hash: string; transformed_content: string; error?: string }>;
+      undoSurgery: (payload: { file: string }) => Promise<{ success: boolean; file: string; restored_content: string; backup_path: string; error?: string }>;
     };
   }
 }
@@ -298,6 +302,9 @@ export default function IDEApp() {
 
   // Modals & Panels State
   const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
+  const [showSurgeryDiffModal, setShowSurgeryDiffModal] = useState(false);
+  const [undoAvailableForFile, setUndoAvailableForFile] = useState<Record<string, boolean>>({});
+  const [applyingSurgery, setApplyingSurgery] = useState(false);
   const [diffData, setDiffData] = useState<DiffPreviewData | null>(null);
   const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
   const [verifying, setVerifying] = useState(false);
@@ -1265,112 +1272,107 @@ export default function IDEApp() {
 
   const handleOpenDiffPreview = async () => {
     if (!activeTab || findings.length === 0) return;
-
-    addLog(`[SURGERY] Calling engine:preview-safe-remove for ${activeTab.name}...`);
-
-    if (typeof window !== "undefined" && window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
-      try {
-        console.log('[IDE-APP] handleOpenDiffPreview invoking previewSafeRemove for', activeTab.path);
-        const preview = await window.electronAPI.previewSafeRemove(activeTab.path);
-        if (preview && preview.transformed_source !== undefined) {
-          setDiffData(preview);
-          setDiffDrawerOpen(true);
-          runDifferentialVerification(activeTab.path, preview.transformed_source);
-        }
-      } catch (err) {
-        console.error("[IDE-APP] Error generating safe remove preview:", err);
-      }
-    } else {
-      const lines = activeTab.content.split("\n");
-      const changedLines: number[] = [];
-      const transformedLines = lines.map((l, idx) => {
-        if (/(\*\s*1|\+\s*0|-\s*0|\/\s*1)/.test(l)) {
-          changedLines.push(idx + 1);
-          return l.replace(/\*\s*1|\+\s*0|-\s*0|\/\s*1/g, "").trimEnd();
-        }
-        return l;
-      });
-
-      const transformedCode = transformedLines.join("\n");
-      setDiffData({
-        file: activeTab.path,
-        original_source: activeTab.content,
-        transformed_source: transformedCode,
-        changed_lines: changedLines,
-        ghost_count_before: findings.length,
-        ghost_count_after: 0,
-        causal_luminance_after: 1.0,
-      });
-      setDiffDrawerOpen(true);
-      runDifferentialVerification(activeTab.path, transformedCode);
-    }
+    addLog(`[SURGERY] Opening safe surgery diff preview for ${activeTab.name}...`);
+    setShowSurgeryDiffModal(true);
   };
 
-  const handleApplySafeRemove = async () => {
-    if (!activeTab || !diffData) return;
+  const handleApplySurgery = async (approvedLines: number[]) => {
+    if (!activeTab || approvedLines.length === 0) return;
 
-    const ghostRemoved = diffData.ghost_count_before;
-    addLog(`[SURGERY] Executing engine:apply-safe-remove on ${activeTab.name}...`);
+    // 1. Auto-save dirty file before surgery
+    if (activeTab.isDirty) {
+      await handleSaveFile();
+    }
 
-    if (typeof window !== "undefined" && window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
+    setApplyingSurgery(true);
+    addLog(`[SURGERY] Applying surgery to ${activeTab.name} (${approvedLines.length} approved lines)...`);
+
+    if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.applySurgery) {
       try {
-        console.log('[IDE-APP] handleApplySafeRemove invoking applySafeRemove for', activeTab.path);
-        const res = await window.electronAPI.applySafeRemove(activeTab.path, diffData.transformed_source);
-        if (res.success) {
+        const res = await window.electronAPI.applySurgery({
+          file: activeTab.path,
+          approved_lines: approvedLines,
+        });
+
+        if (res && res.success) {
+          const transformed = res.transformed_content;
           setOpenTabs((prev) =>
             prev.map((t) =>
               t.path === activeTab.path
-                ? { ...t, content: res.transformedContent, savedContent: res.transformedContent, isDirty: false }
+                ? { ...t, content: transformed, savedContent: transformed, isDirty: false }
                 : t
             )
           );
-          setFindings([]);
-          setLuminance(1.0);
-          setDiffDrawerOpen(false);
-          showToast(`Surgery complete · ${ghostRemoved} ghost lines removed.`);
+          setUndoAvailableForFile((prev) => ({ ...prev, [activeTab.path]: true }));
+          setShowSurgeryDiffModal(false);
+          showToast(`Removed ${res.removed_count} ghost ${res.removed_count === 1 ? "line" : "lines"}`);
+          addLog(`[SURGERY] Applied surgery to ${activeTab.name}: removed ${res.removed_count} ghost lines. Backup created at ${res.backup_path}`);
+          console.log('[SURGERY] Applied surgery to', activeTab.name, 'removed', res.removed_count, 'lines');
+
+          // Rerun single-file AST analysis
+          runAnalysis(activeTab.path, transformed);
+        } else {
+          showToast(`Surgery failed: ${res?.error || "Unknown error"}`);
+          addLog(`[ERROR] Surgery apply failed: ${res?.error || "Unknown error"}`);
         }
       } catch (err) {
-        console.error("[IDE-APP] Error applying safe remove surgery:", err);
+        console.error("[IDE-APP] Error applying surgery:", err);
+        showToast(`Surgery error: ${err}`);
       }
     } else {
-      const updated = diffData.transformed_source;
+      // Fallback for mock/browser testing
+      const lines = activeTab.content.split("\n");
+      const approvedSet = new Set(approvedLines);
+      const transformed = lines.filter((_, idx) => !approvedSet.has(idx + 1)).join("\n");
+
       setOpenTabs((prev) =>
         prev.map((t) =>
           t.path === activeTab.path
-            ? { ...t, content: updated, savedContent: updated, isDirty: false }
+            ? { ...t, content: transformed, savedContent: transformed, isDirty: false }
             : t
         )
       );
-      setFindings([]);
-      setLuminance(1.0);
-      setDiffDrawerOpen(false);
-      showToast(`Surgery complete · ${ghostRemoved} ghost lines removed.`);
+      setUndoAvailableForFile((prev) => ({ ...prev, [activeTab.path]: true }));
+      setShowSurgeryDiffModal(false);
+      showToast(`Removed ${approvedLines.length} ghost ${approvedLines.length === 1 ? "line" : "lines"}`);
+      runAnalysis(activeTab.path, transformed);
     }
+
+    setApplyingSurgery(false);
   };
 
-  const handleRestoreBackup = async () => {
+  const handleUndoSurgery = async () => {
     if (!activeTab) return;
-    addLog(`[RESTORE] Restoring latest .bak snapshot for ${activeTab.name}...`);
+    addLog(`[SURGERY] Restoring surgery backup for ${activeTab.name}...`);
 
-    if (typeof window !== "undefined" && window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
+    if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.undoSurgery) {
       try {
-        console.log('[IDE-APP] handleRestoreBackup invoking restoreBackup for', activeTab.path);
-        const res = await window.electronAPI.restoreBackup(activeTab.path);
-        if (res.success && res.restoredContent) {
+        const res = await window.electronAPI.undoSurgery({ file: activeTab.path });
+        if (res && res.success) {
+          const restored = res.restored_content;
           setOpenTabs((prev) =>
             prev.map((t) =>
               t.path === activeTab.path
-                ? { ...t, content: res.restoredContent, savedContent: res.restoredContent, isDirty: false }
+                ? { ...t, content: restored, savedContent: restored, isDirty: false }
                 : t
             )
           );
-          runAnalysis(activeTab.path, res.restoredContent);
-          showToast(`Backup restored`);
+          setUndoAvailableForFile((prev) => ({ ...prev, [activeTab.path]: false }));
+          showToast(`Surgery undone · Backup restored`);
+          addLog(`[SURGERY] Restored ${activeTab.name} from backup ${res.backup_path}`);
+          console.log('[SURGERY] Restored', activeTab.name, 'from backup');
+
+          // Rerun AST analysis
+          runAnalysis(activeTab.path, restored);
+        } else {
+          showToast(`Undo failed: ${res?.error || "No backup found"}`);
+          addLog(`[ERROR] Undo surgery failed: ${res?.error || "No backup found"}`);
         }
       } catch (err) {
-        console.error("[IDE-APP] Error restoring backup:", err);
+        console.error("[IDE-APP] Error undoing surgery:", err);
       }
     } else {
+      // Fallback
       setOpenTabs((prev) =>
         prev.map((t) =>
           t.path === activeTab.path
@@ -1378,8 +1380,9 @@ export default function IDEApp() {
             : t
         )
       );
+      setUndoAvailableForFile((prev) => ({ ...prev, [activeTab.path]: false }));
+      showToast(`Surgery undone · Backup restored`);
       runAnalysis(activeTab.path, defaultCartCalculatorCode);
-      showToast(`Backup restored`);
     }
   };
 
@@ -1699,6 +1702,17 @@ export default function IDEApp() {
             <Play className="w-3.5 h-3.5 fill-purple-400" />
             <span>{analyzing ? "Analyzing AST..." : "Run Tomography (F5)"}</span>
           </button>
+
+          {activeTabPath && undoAvailableForFile[activeTabPath] && (
+            <button
+              onClick={handleUndoSurgery}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-amber-950/80 hover:bg-amber-900 border border-amber-500/50 text-amber-300 font-bold transition-all shadow-sm"
+              title="Undo last surgery and restore .echo-nullity-backup"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+              <span>Undo Surgery</span>
+            </button>
+          )}
 
           <button
             onClick={handleOpenDiffPreview}
@@ -2205,7 +2219,7 @@ export default function IDEApp() {
               Cancel
             </button>
             <button
-              onClick={handleApplySafeRemove}
+              onClick={() => handleApplySurgery(findings.map((f) => f.line))}
               disabled={verifying || (verificationResult !== null && !verificationResult.verified)}
               className="px-5 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-black font-bold shadow-cyan-glow transition-all flex items-center gap-2 disabled:opacity-40"
             >
@@ -2243,7 +2257,7 @@ export default function IDEApp() {
         onOpenFolder={handleOpenFolder}
         onRunTomography={() => activeTabPath && runAnalysis(activeTabPath, activeTab.content)}
         onApplySafeRemove={handleOpenDiffPreview}
-        onRestoreBackup={handleRestoreBackup}
+        onRestoreBackup={handleUndoSurgery}
         onToggleExplorer={() => setShowExplorer((prev) => !prev)}
         onToggleConsole={() => setShowConsole((prev) => !prev)}
         openTabs={openTabs.map((t) => ({ path: t.path, name: t.name }))}
@@ -2259,6 +2273,18 @@ export default function IDEApp() {
         files={fileList}
         onSelectFile={(path, name) => handleOpenFile({ name, path, isDirectory: false })}
       />
+
+      {/* Safe Surgery Diff Preview Modal */}
+      {showSurgeryDiffModal && activeTab && (
+        <SurgeryDiffPreview
+          filePath={activeTab.path}
+          originalSource={activeTab.content}
+          findings={findings}
+          onApply={handleApplySurgery}
+          onCancel={() => setShowSurgeryDiffModal(false)}
+          isApplying={applyingSurgery}
+        />
+      )}
 
       {/* Startup Modal */}
       <StartupModal

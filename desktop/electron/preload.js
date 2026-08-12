@@ -17,4 +17,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadWorkspaceState: () => ipcRenderer.invoke('state:load'),
   saveWorkspaceState: (state) => ipcRenderer.invoke('state:save', state),
   exportWorkspaceReport: (payload) => ipcRenderer.invoke('report:export', payload),
+  previewSurgery: (payload) => ipcRenderer.invoke('surgery:preview', payload),
+  applySurgery: (payload) => ipcRenderer.invoke('surgery:apply', payload),
+  undoSurgery: (payload) => ipcRenderer.invoke('surgery:undo', payload),
 });
