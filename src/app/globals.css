@@ -59,9 +59,23 @@
   background-size: 100% 4px;
 }
 
+/* Animated Top Edge Cyan Scanline */
+.top-scanline {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #22d3ee, #8b5cf6, transparent);
+  background-size: 200% 100%;
+  animation: scanlineMove 4s linear infinite;
+}
+
+@keyframes scanlineMove {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: #050505;
@@ -71,7 +85,7 @@
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #333333;
+  background: #22d3ee;
 }
 
 /* Glassmorphism */
@@ -91,17 +105,9 @@
   transform: translateY(-3px);
 }
 
-.text-cyan-glow-v2 {
-  text-shadow: 0 0 15px rgba(34, 211, 238, 0.6);
-}
-
-.text-purple-glow-v2 {
-  text-shadow: 0 0 15px rgba(139, 92, 246, 0.6);
-}
-
 /* Monaco Ghost Code Line Highlights */
 .ghost-code-line-bg {
-  background-color: rgba(8, 51, 68, 0.4) !important;
+  background-color: rgba(8, 51, 68, 0.45) !important;
 }
 
 .ghost-code-line-text {
@@ -119,4 +125,25 @@
 .ghost-code-line-decoration {
   border-left: 3px solid #22d3ee;
   background: rgba(34, 211, 238, 0.15);
+}
+
+/* Resizable Splitter Handles */
+.resizer-col {
+  width: 4px;
+  cursor: col-resize;
+  background: #121212;
+  transition: background 0.2s;
+}
+.resizer-col:hover, .resizer-col:active {
+  background: #22d3ee;
+}
+
+.resizer-row {
+  height: 4px;
+  cursor: row-resize;
+  background: #121212;
+  transition: background 0.2s;
+}
+.resizer-row:hover, .resizer-row:active {
+  background: #22d3ee;
 }

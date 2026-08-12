@@ -1,27 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" style="background:#050505;font-family:system-ui,-apple-system,sans-serif">
   <!-- Header -->
   <rect x="0" y="0" width="1440" height="48" fill="#0a0a0a" stroke="#1f1f1f"/>
-  <circle cx="20" cy="24" r="5" fill="#22d3ee"/>
+  <circle cx="20" cy="24" r="5" fill="#a855f7"/>
   <text x="35" y="29" fill="#ffffff" font-size="14" font-weight="bold">Echo Nullity Desktop IDE</text>
-  <rect x="180" y="14" width="120" height="20" rx="10" fill="rgba(34,211,238,0.1)" stroke="rgba(34,211,238,0.3)"/>
-  <text x="192" y="28" fill="#22d3ee" font-size="10" font-family="monospace">DEMO WORKSPACE</text>
+  <rect x="180" y="14" width="160" height="22" rx="6" fill="rgba(168,85,247,0.2)" stroke="rgba(168,85,247,0.4)"/>
+  <text x="190" y="29" fill="#c084fc" font-size="11" font-family="monospace">Backup restored</text>
 
-  <!-- Left Explorer (ai_cart_project) -->
+  <!-- Left Explorer -->
   <rect x="0" y="48" width="250" height="740" fill="#0a0a0a" stroke="#1f1f1f"/>
   <text x="15" y="75" fill="#6b7280" font-size="11" font-family="monospace" font-weight="bold">EXPLORER</text>
   <text x="15" y="105" fill="#22d3ee" font-size="12" font-family="monospace">v ai_cart_project</text>
   <text x="30" y="130" fill="#22d3ee" font-size="12" font-family="monospace">v src</text>
   <rect x="45" y="145" width="190" height="24" rx="4" fill="rgba(34,211,238,0.15)"/>
   <text x="50" y="161" fill="#22d3ee" font-size="12" font-family="monospace" font-weight="bold">cart_calculator.py</text>
-  <text x="50" y="185" fill="#a1a1aa" font-size="12" font-family="monospace">checkout_engine.py</text>
-  <text x="50" y="205" fill="#a1a1aa" font-size="12" font-family="monospace">invoice_processor.py</text>
-  <text x="30" y="230" fill="#a1a1aa" font-size="12" font-family="monospace">nullity.toml</text>
-  <text x="30" y="250" fill="#a1a1aa" font-size="12" font-family="monospace">README.md</text>
+  <text x="50" y="185" fill="#c084fc" font-size="12" font-family="monospace">cart_calculator.py.bak</text>
 
-  <!-- Center Monaco Editor (cart_calculator.py) -->
+  <!-- Center Monaco Editor -->
   <rect x="250" y="48" width="870" height="740" fill="#050505" stroke="#1f1f1f"/>
-  <text x="275" y="115" fill="#8b5cf6" font-size="13" font-family="monospace">def calculate_cart_total(items, discount_code=None, tax_rate=0.08):</text>
-  <text x="295" y="140" fill="#a1a1aa" font-size="13" font-family="monospace">subtotal = sum(item["price"] * item["quantity"] for item in items)</text>
+  <text x="275" y="115" fill="#8b5cf6" font-size="13" font-family="monospace">def calculate_cart_total(items, discount):</text>
+  <text x="295" y="140" fill="#a1a1aa" font-size="13" font-family="monospace">subtotal = sum(item.price for item in items)</text>
 
   <rect x="250" y="155" width="870" height="26" fill="rgba(8,51,68,0.6)"/>
   <rect x="250" y="155" width="4" height="26" fill="#22d3ee"/>
@@ -31,17 +28,7 @@
   <rect x="250" y="185" width="4" height="26" fill="#22d3ee"/>
   <text x="295" y="202" fill="#22d3ee" font-size="13" font-family="monospace" style="text-decoration:line-through">subtotal = subtotal + 0</text>
 
-  <rect x="250" y="215" width="870" height="26" fill="rgba(8,51,68,0.6)"/>
-  <rect x="250" y="215" width="4" height="26" fill="#22d3ee"/>
-  <text x="295" y="232" fill="#22d3ee" font-size="13" font-family="monospace" style="text-decoration:line-through">subtotal = subtotal - 0</text>
-
-  <rect x="250" y="245" width="870" height="26" fill="rgba(8,51,68,0.6)"/>
-  <rect x="250" y="245" width="4" height="26" fill="#22d3ee"/>
-  <text x="295" y="262" fill="#22d3ee" font-size="13" font-family="monospace" style="text-decoration:line-through">subtotal = subtotal / 1</text>
-
-  <text x="295" y="295" fill="#a1a1aa" font-size="13" font-family="monospace">discount_amount = 0.0</text>
-
-  <!-- Right Tomography Panel (4 Ghost Lines) -->
+  <!-- Right Tomography Panel (4 Ghost Lines Restored) -->
   <rect x="1120" y="48" width="320" height="740" fill="#0a0a0a" stroke="#1f1f1f"/>
   <text x="1140" y="80" fill="#ffffff" font-size="14" font-weight="bold">Tomography Panel</text>
   <rect x="1330" y="65" width="90" height="22" rx="11" fill="rgba(34,211,238,0.15)"/>
@@ -50,8 +37,4 @@
   <rect x="1140" y="100" width="280" height="60" rx="8" fill="#050505" stroke="#1f1f1f"/>
   <text x="1155" y="125" fill="#a1a1aa" font-size="12" font-family="monospace">Causal Impact: <tspan fill="#22d3ee" font-weight="bold">0.00%</tspan></text>
   <text x="1155" y="145" fill="#a1a1aa" font-size="12" font-family="monospace">Ghost Lines Detected: <tspan fill="#c084fc" font-weight="bold">4</tspan></text>
-
-  <rect x="1140" y="175" width="280" height="65" rx="8" fill="#050505" stroke="rgba(34,211,238,0.3)"/>
-  <text x="1155" y="195" fill="#22d3ee" font-size="12" font-family="monospace" font-weight="bold">Line 9: Identity Multiplication</text>
-  <text x="1155" y="215" fill="#6b7280" font-size="10" font-family="monospace">subtotal = subtotal * 1</text>
 </svg>

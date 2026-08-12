@@ -79,7 +79,6 @@ function createWindow() {
 
   loadWithRetry(startUrl);
 
-  // Open DevTools automatically for debugging
   mainWindow.webContents.openDevTools();
 
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
@@ -109,6 +108,15 @@ app.on('window-all-closed', () => {
 });
 
 // IPC Handlers
+ipcMain.handle('engine:get-default-demo-workspace', async () => {
+  const demoPath = path.join(app.getAppPath(), 'demo-workspaces', 'ai_cart_project');
+  if (fs.existsSync(demoPath)) {
+    const tree = buildFileTree(demoPath);
+    return { folderPath: demoPath, tree };
+  }
+  return null;
+});
+
 ipcMain.handle('dialog:open-folder', async () => {
   if (!mainWindow) return null;
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -133,6 +141,24 @@ ipcMain.handle('fs:read-file', async (_, filePath) => {
   }
 });
 
+ipcMain.handle('fs:write-file', async (_, filePath, content) => {
+  try {
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('fs:file-exists', async (_, filePath) => {
+  try {
+    const exists = fs.existsSync(filePath);
+    return { success: true, exists };
+  } catch (e) {
+    return { success: false, exists: false, error: e.message };
+  }
+});
+
 ipcMain.handle('fs:read-dir', async (_, dirPath) => {
   try {
     const tree = buildFileTree(dirPath);
@@ -145,7 +171,7 @@ ipcMain.handle('fs:read-dir', async (_, dirPath) => {
 ipcMain.handle('engine:analyze', async (_, filePath) => {
   return new Promise((resolve) => {
     const scriptPath = path.join(app.getAppPath(), 'app', 'engine', 'analyze.py');
-    execFile('python3', [scriptPath, filePath], (error, stdout, stderr) => {
+    execFile('python3', [scriptPath, filePath, '--mode', 'analyze'], (error, stdout, stderr) => {
       if (error) {
         console.error('Python analyze error:', stderr || error.message);
         resolve({
@@ -169,15 +195,68 @@ ipcMain.handle('engine:analyze', async (_, filePath) => {
   });
 });
 
-ipcMain.handle('engine:safe-remove', async (_, filePath, lines) => {
+ipcMain.handle('engine:preview-safe-remove', async (_, filePath) => {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(app.getAppPath(), 'app', 'engine', 'analyze.py');
+    execFile('python3', [scriptPath, filePath, '--mode', 'rewrite'], (error, stdout, stderr) => {
+      if (error) {
+        console.error('Python rewrite error:', stderr || error.message);
+        resolve({
+          error: stderr || error.message,
+          transformed_source: '',
+          changed_lines: [],
+        });
+        return;
+      }
+      try {
+        const jsonResult = JSON.parse(stdout);
+        resolve(jsonResult);
+      } catch (parseError) {
+        resolve({
+          error: 'Failed to parse rewrite JSON output',
+          transformed_source: '',
+          changed_lines: [],
+        });
+      }
+    });
+  });
+});
+
+ipcMain.handle('engine:apply-safe-remove', async (_, filePath, transformedContent) => {
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const contentLines = content.split('\n');
-    const linesToKeep = lines.map(l => l - 1);
-    const newLines = contentLines.filter((_, idx) => !linesToKeep.includes(idx));
+    let backupPath = `${filePath}.bak`;
+    if (fs.existsSync(backupPath)) backupPath = `${filePath}.${Date.now()}.bak`;
+
+    if (fs.existsSync(filePath)) {
+      const originalContent = fs.readFileSync(filePath, 'utf-8');
+      fs.writeFileSync(backupPath, originalContent, 'utf-8');
+    }
+
+    fs.writeFileSync(filePath, transformedContent, 'utf-8');
+    return { success: true, backupPath, transformedContent };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('engine:restore-backup', async (_, filePath) => {
+  try {
+    const dir = path.dirname(filePath);
+    const base = path.basename(filePath);
+    const files = fs.readdirSync(dir);
+    const bakFiles = files
+      .filter(f => f.startsWith(base) && f.endsWith('.bak'))
+      .sort((a, b) => b.localeCompare(a));
+
+    if (bakFiles.length === 0) {
+      return { success: false, error: `No backup file found for ${base}` };
+    }
+
+    const backupFile = path.join(dir, bakFiles[0]);
+    const restoredContent = fs.readFileSync(backupFile, 'utf-8');
+    fs.writeFileSync(filePath, restoredContent, 'utf-8');
     
-    fs.writeFileSync(filePath, newLines.join('\n'), 'utf-8');
-    return { success: true, newContent: newLines.join('\n') };
+    return { success: true, restoredContent, backupPath: backupFile };
   } catch (e) {
     return { success: false, error: e.message };
   }

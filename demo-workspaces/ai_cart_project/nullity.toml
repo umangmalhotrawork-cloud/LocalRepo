@@ -1,0 +1,13 @@
+[engine]
+target_languages = ["python", "tree-sitter"]
+causal_threshold = 0.05
+mutation_sandbox = true
+
+[rules]
+identity_multiplication = true
+identity_addition = true
+identity_subtraction = true
+identity_division = true
+
+[provenance]
+replay_trace = true
