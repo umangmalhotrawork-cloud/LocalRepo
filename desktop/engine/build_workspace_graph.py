@@ -11,6 +11,7 @@ if ENGINE_DIR not in sys.path:
     sys.path.insert(0, ENGINE_DIR)
 
 from analyze import analyze_source
+from detect_clones import detect_clones_in_workspace
 
 EXCLUDE_DIRS = {
     ".git",
@@ -215,6 +216,58 @@ def build_workspace_graph(workspace_path):
                                     "target": import_node_id,
                                     "type": "cross_file_import"
                                 })
+
+    # Detect Structural Clones and add dashed clone edges
+    try:
+        clones_result = detect_clones_in_workspace(abs_workspace)
+        for group in clones_result.get("groups", []):
+            instances = group.get("instances", [])
+            for i in range(len(instances)):
+                for j in range(i + 1, len(instances)):
+                    inst_a = instances[i]
+                    inst_b = instances[j]
+                    
+                    node_a_id = None
+                    node_b_id = None
+                    for n in all_nodes:
+                        if n["file"] == inst_a["file"] and n.get("line") == inst_a["start_line"]:
+                            node_a_id = n["id"]
+                            break
+                    for n in all_nodes:
+                        if n["file"] == inst_b["file"] and n.get("line") == inst_b["start_line"]:
+                            node_b_id = n["id"]
+                            break
+
+                    if not node_a_id:
+                        node_a_id = f"{inst_a['file']}::L{inst_a['start_line']}::clone"
+                        all_nodes.append({
+                            "id": node_a_id,
+                            "file": inst_a["file"],
+                            "symbol": inst_a["name"],
+                            "line": inst_a["start_line"],
+                            "kind": "clone",
+                            "code": inst_a["code"],
+                            "label": f"Clone ({inst_a['file']}:L{inst_a['start_line']})"
+                        })
+                    if not node_b_id:
+                        node_b_id = f"{inst_b['file']}::L{inst_b['start_line']}::clone"
+                        all_nodes.append({
+                            "id": node_b_id,
+                            "file": inst_b["file"],
+                            "symbol": inst_b["name"],
+                            "line": inst_b["start_line"],
+                            "kind": "clone",
+                            "code": inst_b["code"],
+                            "label": f"Clone ({inst_b['file']}:L{inst_b['start_line']})"
+                        })
+
+                    all_edges.append({
+                        "source": node_a_id,
+                        "target": node_b_id,
+                        "type": "clone"
+                    })
+    except Exception as e:
+        pass
 
     # Ensure unique edges
     seen_edges = set()

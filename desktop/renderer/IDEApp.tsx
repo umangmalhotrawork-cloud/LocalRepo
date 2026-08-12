@@ -20,6 +20,7 @@ import WorkspaceGraphPanel, { WorkspaceGraph, GraphNode } from "./components/Wor
 import StartupModal from "./components/StartupModal";
 import SurgeryDiffPreview from "./components/SurgeryDiffPreview";
 import WorkspaceSearchModal, { SearchMode, SearchResultItem } from "./components/WorkspaceSearchModal";
+import ClonePanel, { CloneReport, CloneInstance } from "./components/ClonePanel";
 import { useWorkspaceState, EditorViewState, WorkspacePersistedState } from "./hooks/useWorkspaceState";
 import { buildWorkspaceReport, ReportExportPayload } from "./utils/reportBuilder";
 import { exportGraphSvg } from "./utils/exportGraphSvg";
@@ -56,6 +57,7 @@ declare global {
       applySurgery: (payload: { file: string; approved_lines: number[] }) => Promise<{ success: boolean; file: string; removed_count: number; backup_path: string; new_hash: string; transformed_content: string; error?: string }>;
       undoSurgery: (payload: { file: string }) => Promise<{ success: boolean; file: string; restored_content: string; backup_path: string; error?: string }>;
       searchWorkspace: (payload: { workspace: string; query?: string; mode?: string; limit?: number }) => Promise<{ workspace: string; query: string; mode: string; results_count: number; results: SearchResultItem[]; error?: string }>;
+      detectClones: (workspacePath: string) => Promise<CloneReport>;
     };
   }
 }
@@ -279,13 +281,15 @@ export default function IDEApp() {
       return_sink_line: 24,
     },
   ]);
-  type MainView = "editor" | "dashboard" | "graph";
+  type MainView = "editor" | "dashboard" | "graph" | "clones";
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(findings[0] || null);
   const [workspaceReport, setWorkspaceReport] = useState<WorkspaceReport | null>(null);
   const [workspaceSummary, setWorkspaceSummary] = useState<WorkspaceReport | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceScanLoading, setWorkspaceScanLoading] = useState(false);
   const [mainView, setMainView] = useState<MainView>("editor");
+  const [cloneReport, setCloneReport] = useState<CloneReport | null>(null);
+  const [cloneLoading, setCloneLoading] = useState(false);
   const [workspaceGraph, setWorkspaceGraph] = useState<WorkspaceGraph | null>(null);
   const [graphLoading, setGraphLoading] = useState(false);
   const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
@@ -1146,6 +1150,20 @@ export default function IDEApp() {
         provenance_chain: f.provenance_chain,
       })),
       graphSvg,
+      clones: cloneReport?.groups?.map((g) => ({
+        group_id: g.group_id,
+        similarity: g.similarity,
+        similarity_label: g.similarity_label,
+        clone_type: g.clone_type,
+        files: g.files,
+        instances_count: g.instances_count,
+        instances: g.instances.map((i) => ({
+          file: i.file,
+          start_line: i.start_line,
+          end_line: i.end_line,
+          code: i.code,
+        })),
+      })),
       activeFinding: selectedFinding ? {
         file: (selectedFinding as any).file || (activeTab ? activeTab.name : "cart_calculator.py"),
         line: selectedFinding.line,
@@ -1258,6 +1276,127 @@ export default function IDEApp() {
         try {
           editorRef.current.revealLineInCenter(node.line);
           editorRef.current.setPosition({ lineNumber: node.line, column: 1 });
+          editorRef.current.focus();
+        } catch (e) {}
+      }
+    }, 150);
+  };
+
+  const handleRunCloneScan = async () => {
+    const ws = folderPath || ".";
+    setCloneLoading(true);
+    setMainView("clones");
+    addLog(`[CLONES] Initiating AST Structural Clone detection for: ${ws}`);
+    console.log('[CLONES] run scan for', ws);
+
+    if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.detectClones) {
+      try {
+        const result = await window.electronAPI.detectClones(ws);
+        setCloneReport(result);
+        addLog(`[CLONES] Detection complete. Found ${result.total_clone_groups} clone groups (${result.total_clones} instances) across ${result.total_files} files.`);
+        console.log('[CLONES] result groups count:', result.total_clone_groups);
+      } catch (err: any) {
+        addLog(`[CLONES] Error during clone scan: ${err.message || String(err)}`);
+      }
+    } else {
+      // Browser fallback simulation
+      const fallbackReport: CloneReport = {
+        workspace: ws,
+        total_files: 3,
+        total_clone_groups: 2,
+        total_clones: 4,
+        groups: [
+          {
+            group_id: "clone-group-1",
+            similarity: 1.0,
+            similarity_label: "100% Structural AST Match",
+            clone_type: "statement_block",
+            signature: "Assign(targets=[Name(id='VAR_1', ctx=Store())], value=BinOp(left=Name(id='VAR_2', ctx=Load()), op=Mult(), right=Constant(value=0)))",
+            signature_hash: "d2250956da6540d9",
+            files_count: 1,
+            files: ["src/cart_calculator.py"],
+            instances_count: 2,
+            instances: [
+              {
+                type: "statement_block",
+                name: "L16-16",
+                file: "src/cart_calculator.py",
+                absolute_path: `${ws}/src/cart_calculator.py`,
+                start_line: 16,
+                end_line: 16,
+                code: "discount_amount = subtotal * 0.10",
+              },
+              {
+                type: "statement_block",
+                name: "L18-18",
+                file: "src/cart_calculator.py",
+                absolute_path: `${ws}/src/cart_calculator.py`,
+                start_line: 18,
+                end_line: 18,
+                code: "discount_amount = subtotal * 0.20",
+              },
+            ],
+          },
+          {
+            group_id: "clone-group-2",
+            similarity: 1.0,
+            similarity_label: "100% Structural AST Match",
+            clone_type: "statement_block",
+            signature: "Assign(targets=[Name(id='VAR_1', ctx=Store())], value=Constant(value='STR'))",
+            signature_hash: "7b14c4fea706aadd",
+            files_count: 1,
+            files: ["src/checkout_engine.py"],
+            instances_count: 2,
+            instances: [
+              {
+                type: "statement_block",
+                name: "L6-6",
+                file: "src/checkout_engine.py",
+                absolute_path: `${ws}/src/checkout_engine.py`,
+                start_line: 6,
+                end_line: 6,
+                code: "order_status = \"PENDING_PAYMENT\"",
+              },
+              {
+                type: "statement_block",
+                name: "L10-10",
+                file: "src/checkout_engine.py",
+                absolute_path: `${ws}/src/checkout_engine.py`,
+                start_line: 10,
+                end_line: 10,
+                code: "order_status = \"CONFIRMED\"",
+              },
+            ],
+          },
+        ],
+      };
+      setCloneReport(fallbackReport);
+      addLog(`[CLONES] Simulation complete. Found ${fallbackReport.total_clone_groups} clone groups.`);
+    }
+
+    setCloneLoading(false);
+  };
+
+  const handleSelectCloneInstance = async (instance: CloneInstance) => {
+    console.log('[CLONES] selecting instance', instance.file, instance.start_line);
+    addLog(`[CLONES] Opening ${instance.file} at line ${instance.start_line}...`);
+
+    const targetPath = instance.absolute_path || (folderPath ? `${folderPath}/${instance.file}` : instance.file);
+    const fileName = instance.file.split("/").pop() || instance.file;
+
+    await handleOpenFile({
+      name: fileName,
+      path: targetPath,
+      isDirectory: false,
+    });
+
+    setMainView("editor");
+
+    setTimeout(() => {
+      if (editorRef.current) {
+        try {
+          editorRef.current.revealLineInCenter(instance.start_line);
+          editorRef.current.setPosition({ lineNumber: instance.start_line, column: 1 });
           editorRef.current.focus();
         } catch (e) {}
       }
@@ -1685,6 +1824,25 @@ export default function IDEApp() {
           </button>
 
           <button
+            onClick={() => {
+              const next = mainView === "clones" ? "editor" : "clones";
+              setMainView(next);
+              if (next === "clones" && !cloneReport) {
+                handleRunCloneScan();
+              }
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all ${
+              mainView === "clones"
+                ? "bg-pink-950 text-pink-300 border-pink-500/50 shadow-[0_0_15px_rgba(236,72,153,0.25)] font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300"
+            }`}
+            title="Toggle Structural Clone Detection"
+          >
+            <Layers className="w-3.5 h-3.5 text-pink-400" />
+            <span>Clones</span>
+          </button>
+
+          <button
             onClick={() => setStartupModalOpen(true)}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-zinc-400 hover:text-white transition-all"
             title="Open Workspace Hub / Recent Projects"
@@ -1737,6 +1895,20 @@ export default function IDEApp() {
           >
             <Download className="w-3.5 h-3.5 text-emerald-400" />
             <span>Export Report</span>
+          </button>
+
+          <button
+            onClick={handleRunCloneScan}
+            disabled={cloneLoading}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-pink-500/40 text-pink-300 font-bold transition-all shadow-sm disabled:opacity-50"
+            title="Scan workspace for duplicate/cloned AST structures"
+          >
+            {cloneLoading ? (
+              <Activity className="w-3.5 h-3.5 animate-spin text-pink-400" />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5 text-pink-400" />
+            )}
+            <span>{cloneLoading ? "Scanning clones..." : "Run Clone Scan"}</span>
           </button>
 
           <button
@@ -1830,6 +2002,14 @@ export default function IDEApp() {
               loading={graphLoading}
               onRefresh={() => handleLoadWorkspaceGraph()}
               onNodeClick={handleGraphNodeClick}
+              onClose={() => setMainView("editor")}
+            />
+          ) : mainView === "clones" ? (
+            <ClonePanel
+              report={cloneReport}
+              loading={cloneLoading}
+              onRunScan={handleRunCloneScan}
+              onSelectInstance={handleSelectCloneInstance}
               onClose={() => setMainView("editor")}
             />
           ) : (

@@ -387,6 +387,47 @@ function createWindow() {
                                                                   if (resultItem) resultItem.click();
                                                                 })();
                                                               `);
+
+                                                              // Milestone 12: Structural Clone Detection
+                                                              setTimeout(async () => {
+                                                                if (mainWindow) {
+                                                                  // 1. Run Clone Scan
+                                                                  await mainWindow.webContents.executeJavaScript(`
+                                                                    (() => {
+                                                                      const buttons = Array.from(document.querySelectorAll('button'));
+                                                                      const cloneBtn = buttons.find(b => b.textContent.includes('Run Clone Scan') || b.textContent.includes('Clones'));
+                                                                      if (cloneBtn) cloneBtn.click();
+                                                                    })();
+                                                                  `);
+
+                                                                  setTimeout(async () => {
+                                                                    if (mainWindow) {
+                                                                      const clonePanelImg = await mainWindow.capturePage();
+                                                                      const clonePanelPath = path.join(screenshotDir, 'milestone12-clone-panel.png');
+                                                                      fs.writeFileSync(clonePanelPath, clonePanelImg.toPNG());
+                                                                      console.log('[ELECTRON] Saved clone panel screenshot to:', clonePanelPath);
+
+                                                                      // 2. View in Graph with dashed magenta edges
+                                                                      await mainWindow.webContents.executeJavaScript(`
+                                                                        (() => {
+                                                                          const buttons = Array.from(document.querySelectorAll('button'));
+                                                                          const graphBtn = buttons.find(b => b.textContent.includes('Graph'));
+                                                                          if (graphBtn) graphBtn.click();
+                                                                        })();
+                                                                      `);
+
+                                                                      setTimeout(async () => {
+                                                                        if (mainWindow) {
+                                                                          const cloneGraphImg = await mainWindow.capturePage();
+                                                                          const cloneGraphPath = path.join(screenshotDir, 'milestone12-clone-graph.png');
+                                                                          fs.writeFileSync(cloneGraphPath, cloneGraphImg.toPNG());
+                                                                          console.log('[ELECTRON] Saved clone graph screenshot to:', cloneGraphPath);
+                                                                        }
+                                                                      }, 1200);
+                                                                    }
+                                                                  }, 1500);
+                                                                }
+                                                              }, 1500);
                                                             }
                                                           }, 1500);
                                                         }
@@ -811,6 +852,40 @@ ipcMain.handle('workspace:search', async (_, payload) => {
           results_count: 0,
           results: [],
           error: 'Failed to parse search_workspace JSON output',
+        });
+      }
+    });
+  });
+});
+
+ipcMain.handle('engine:detect-clones', async (_, workspacePath) => {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'detect_clones.py');
+    execFile('python3', [scriptPath, workspacePath], { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && !stdout) {
+        console.error('Python detect_clones error:', stderr || error.message);
+        resolve({
+          workspace: workspacePath,
+          total_files: 0,
+          total_clone_groups: 0,
+          total_clones: 0,
+          groups: [],
+          error: stderr || error.message,
+        });
+        return;
+      }
+      try {
+        const jsonResult = JSON.parse(stdout);
+        resolve(jsonResult);
+      } catch (parseError) {
+        console.error('Failed to parse detect_clones JSON output:', parseError, stdout);
+        resolve({
+          workspace: workspacePath,
+          total_files: 0,
+          total_clone_groups: 0,
+          total_clones: 0,
+          groups: [],
+          error: 'Failed to parse clone detection JSON output',
         });
       }
     });

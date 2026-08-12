@@ -200,6 +200,14 @@ export default function WorkspaceGraphPanel({
           badgeBg: "bg-emerald-950 text-emerald-300 border-emerald-500/40",
           edgeStroke: "#10b981",
         };
+      case "clone":
+        return {
+          bg: "fill-[#500724]",
+          border: "stroke-pink-500",
+          text: "text-pink-300",
+          badgeBg: "bg-pink-950 text-pink-300 border-pink-500/40",
+          edgeStroke: "#ec4899",
+        };
       default:
         return {
           bg: "fill-[#18181b]",
@@ -273,6 +281,7 @@ export default function WorkspaceGraphPanel({
               { id: "ghost_operation", label: "Ghosts", color: "text-amber-400" },
               { id: "use", label: "Uses", color: "text-purple-400" },
               { id: "return_sink", label: "Sinks", color: "text-emerald-400" },
+              { id: "clone", label: "Clones", color: "text-pink-400" },
             ].map((k) => (
               <button
                 key={k.id}
@@ -396,6 +405,17 @@ export default function WorkspaceGraphPanel({
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#34d399" />
             </marker>
             <marker
+              id="arrow-magenta"
+              viewBox="0 0 10 10"
+              refX="10"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#ec4899" />
+            </marker>
+            <marker
               id="arrow-default"
               viewBox="0 0 10 10"
               refX="10"
@@ -425,6 +445,7 @@ export default function WorkspaceGraphPanel({
               const tgtPos = nodePositions[edge.target];
               if (!srcPos || !tgtPos) return null;
 
+              const isCloneEdge = edge.type === "clone";
               const isGhostEdge = edge.type === "ghost_flow";
               const isCrossFile = edge.type === "cross_file_import";
 
@@ -436,13 +457,17 @@ export default function WorkspaceGraphPanel({
               const dx = Math.abs(x2 - x1) * 0.5;
               const d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
 
-              const markerColor = isGhostEdge
+              const markerColor = isCloneEdge
+                ? "url(#arrow-magenta)"
+                : isGhostEdge
                 ? "url(#arrow-amber)"
                 : isCrossFile
                 ? "url(#arrow-purple)"
                 : "url(#arrow-cyan)";
 
-              const strokeColor = isGhostEdge
+              const strokeColor = isCloneEdge
+                ? "#ec4899"
+                : isGhostEdge
                 ? "#f59e0b"
                 : isCrossFile
                 ? "#8b5cf6"
@@ -454,9 +479,9 @@ export default function WorkspaceGraphPanel({
                     d={d}
                     fill="none"
                     stroke={strokeColor}
-                    strokeWidth={isGhostEdge ? "2.5" : "1.8"}
-                    strokeDasharray={isCrossFile ? "5,5" : undefined}
-                    strokeOpacity={0.65}
+                    strokeWidth={isCloneEdge ? "2.2" : isGhostEdge ? "2.5" : "1.8"}
+                    strokeDasharray={isCloneEdge ? "4,4" : isCrossFile ? "5,5" : undefined}
+                    strokeOpacity={isCloneEdge ? 0.85 : 0.65}
                     markerEnd={markerColor}
                     className="hover:stroke-white transition-colors"
                   />

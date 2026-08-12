@@ -26,11 +26,27 @@ export interface ReportMetrics {
   scan_duration_ms?: number;
 }
 
+export interface CloneReportItem {
+  group_id: string;
+  similarity: number;
+  similarity_label?: string;
+  clone_type: string;
+  files: string[];
+  instances_count: number;
+  instances: Array<{
+    file: string;
+    start_line: number;
+    end_line: number;
+    code: string;
+  }>;
+}
+
 export interface ReportExportPayload {
   workspacePath: string;
   timestamp: string;
   metrics: ReportMetrics;
   findings: FindingItem[];
+  clones?: CloneReportItem[];
   graphSvg?: string;
   activeFinding?: FindingItem | null;
 }
@@ -61,6 +77,50 @@ export function buildWorkspaceReport(data: ReportExportPayload): string {
     `
     )
     .join("");
+
+  const clonesSection = data.clones && data.clones.length > 0
+    ? `
+    <div style="margin-top: 36px;">
+      <h2 style="font-size: 14px; text-transform: uppercase; color: #ec4899; margin-bottom: 12px; letter-spacing: 0.05em;">
+        Structural Clone Groups (${data.clones.length})
+      </h2>
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        ${data.clones
+          .map(
+            (g) => `
+          <div style="background: #0a0a0a; border: 1px solid #1f1f1f; border-left: 4px solid #ec4899; border-radius: 10px; padding: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <div>
+                <span style="font-weight: bold; color: #ffffff; font-size: 13px;">${escapeHtml(g.group_id)}</span>
+                <span style="margin-left: 8px; font-size: 10px; color: #71717a; text-transform: uppercase;">[${escapeHtml(g.clone_type)}]</span>
+              </div>
+              <span style="padding: 2px 8px; border-radius: 9999px; background: rgba(236, 72, 153, 0.15); border: 1px solid rgba(236, 72, 153, 0.4); color: #f472b6; font-weight: bold; font-size: 10px;">
+                ${Math.round(g.similarity * 100)}% STRUCTURAL MATCH
+              </span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              ${g.instances
+                .map(
+                  (inst) => `
+                <div style="background: #060606; border: 1px solid #171717; border-radius: 6px; padding: 8px 12px;">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 11px;">
+                    <span style="color: #38bdf8; font-weight: 600;">${escapeHtml(inst.file)}</span>
+                    <span style="color: #71717a;">Lines ${inst.start_line}–${inst.end_line}</span>
+                  </div>
+                  <code style="color: #e2e8f0; font-size: 11px; white-space: pre-wrap;">${escapeHtml(inst.code)}</code>
+                </div>
+              `
+                )
+                .join("")}
+            </div>
+          </div>
+        `
+          )
+          .join("")}
+      </div>
+    </div>
+    `
+    : "";
 
   const provenanceSection = activeFinding && activeFinding.provenance_chain && activeFinding.provenance_chain.length > 0
     ? `
@@ -266,6 +326,9 @@ export function buildWorkspaceReport(data: ReportExportPayload): string {
 
     <!-- Provenance Trace -->
     ${provenanceSection}
+
+    <!-- Structural Clones Section -->
+    ${clonesSection}
 
     <!-- Cross-File Graph SVG Placeholder / Embed -->
     ${

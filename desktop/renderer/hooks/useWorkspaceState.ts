@@ -13,7 +13,7 @@ export interface WorkspacePersistedState {
   folderPath: string;
   openTabs: Array<{ path: string; name: string }>;
   activeTabPath: string;
-  mainView: "editor" | "dashboard" | "graph";
+  mainView: "editor" | "dashboard" | "graph" | "clones";
   explorerWidth: number;
   analysisWidth: number;
   consoleHeight: number;
