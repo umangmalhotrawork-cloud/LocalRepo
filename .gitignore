@@ -20,3 +20,10 @@ Thumbs.db
 dist
 coverage
 *.log
+
+# Python cache
+__pycache__/
+*.pyc
+
+# TypeScript build cache
+tsconfig.tsbuildinfo
