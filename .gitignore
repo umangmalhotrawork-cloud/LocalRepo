@@ -27,3 +27,7 @@ __pycache__/
 
 # TypeScript build cache
 tsconfig.tsbuildinfo
+
+__pycache__/
+*.pyc
+tsconfig.tsbuildinfo
