@@ -13,6 +13,7 @@ import {
 import ConfirmDialog from "./components/ConfirmDialog";
 import CommandPalette from "./components/CommandPalette";
 import QuickOpen from "./components/QuickOpen";
+import ProvenanceReplayPanel, { Finding, ProvenanceStep } from "./components/ProvenanceReplayPanel";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -45,15 +46,6 @@ interface FileNode {
   path: string;
   isDirectory: boolean;
   children?: FileNode[];
-}
-
-interface Finding {
-  line: number;
-  code: string;
-  title: string;
-  reason: string;
-  luminance: number;
-  status: string;
 }
 
 interface TabItem {
@@ -182,6 +174,16 @@ export default function IDEApp() {
       reason: "Multiplying by 1 leaves output state identical.",
       luminance: 0.0,
       status: "Verified Ghost Line",
+      category: "vacuous_identity",
+      provenance_chain: [
+        { type: "definition", line: 6, code: "subtotal = sum(item[\"price\"] * item[\"quantity\"] for item in items)" },
+        { type: "ghost_operation", line: 9, code: "subtotal = subtotal * 1" },
+        { type: "use", line: 16, code: "discount_amount = subtotal * 0.10" },
+        { type: "use", line: 20, code: "taxable_amount = max(0.0, subtotal - discount_amount)" },
+        { type: "return_sink", line: 24, code: "return round(final_total, 2)" },
+      ],
+      causal_path_length: 5,
+      return_sink_line: 24,
     },
     {
       line: 10,
@@ -190,6 +192,16 @@ export default function IDEApp() {
       reason: "Adding 0 leaves value invariant.",
       luminance: 0.0,
       status: "Verified Ghost Line",
+      category: "vacuous_identity",
+      provenance_chain: [
+        { type: "definition", line: 6, code: "subtotal = sum(item[\"price\"] * item[\"quantity\"] for item in items)" },
+        { type: "ghost_operation", line: 10, code: "subtotal = subtotal + 0" },
+        { type: "use", line: 16, code: "discount_amount = subtotal * 0.10" },
+        { type: "use", line: 20, code: "taxable_amount = max(0.0, subtotal - discount_amount)" },
+        { type: "return_sink", line: 24, code: "return round(final_total, 2)" },
+      ],
+      causal_path_length: 5,
+      return_sink_line: 24,
     },
     {
       line: 11,
@@ -198,6 +210,16 @@ export default function IDEApp() {
       reason: "Subtracting 0 exerts zero state leverage.",
       luminance: 0.0,
       status: "Verified Ghost Line",
+      category: "vacuous_identity",
+      provenance_chain: [
+        { type: "definition", line: 6, code: "subtotal = sum(item[\"price\"] * item[\"quantity\"] for item in items)" },
+        { type: "ghost_operation", line: 11, code: "subtotal = subtotal - 0" },
+        { type: "use", line: 16, code: "discount_amount = subtotal * 0.10" },
+        { type: "use", line: 20, code: "taxable_amount = max(0.0, subtotal - discount_amount)" },
+        { type: "return_sink", line: 24, code: "return round(final_total, 2)" },
+      ],
+      causal_path_length: 5,
+      return_sink_line: 24,
     },
     {
       line: 12,
@@ -206,8 +228,19 @@ export default function IDEApp() {
       reason: "Dividing by 1 is mathematically redundant.",
       luminance: 0.0,
       status: "Verified Ghost Line",
+      category: "vacuous_identity",
+      provenance_chain: [
+        { type: "definition", line: 6, code: "subtotal = sum(item[\"price\"] * item[\"quantity\"] for item in items)" },
+        { type: "ghost_operation", line: 12, code: "subtotal = subtotal / 1" },
+        { type: "use", line: 16, code: "discount_amount = subtotal * 0.10" },
+        { type: "use", line: 20, code: "taxable_amount = max(0.0, subtotal - discount_amount)" },
+        { type: "return_sink", line: 24, code: "return round(final_total, 2)" },
+      ],
+      causal_path_length: 5,
+      return_sink_line: 24,
     },
   ]);
+  const [selectedFinding, setSelectedFinding] = useState<Finding | null>(findings[0] || null);
   const [luminance, setLuminance] = useState<number>(0.0);
   const [analyzing, setAnalyzing] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
@@ -485,7 +518,21 @@ export default function IDEApp() {
     }, 50);
   };
 
+  useEffect(() => {
+    if (findings.length > 0) {
+      setSelectedFinding((prev) => {
+        if (prev && findings.some((f) => f.line === prev.line)) {
+          return findings.find((f) => f.line === prev.line) || findings[0];
+        }
+        return findings[0];
+      });
+    } else {
+      setSelectedFinding(null);
+    }
+  }, [findings]);
+
   const handleFindingClick = (finding: Finding) => {
+    setSelectedFinding(finding);
     if (!editorRef.current) return;
     try {
       const editor = editorRef.current;
@@ -495,6 +542,19 @@ export default function IDEApp() {
       addLog(`[NAV] Jumped to Line ${finding.line}: ${finding.title}`);
     } catch (err) {
       console.error("[IDE-APP] Error focusing finding line:", err);
+    }
+  };
+
+  const handleProvenanceStepClick = (line: number, code: string) => {
+    if (!editorRef.current) return;
+    try {
+      const editor = editorRef.current;
+      editor.focus();
+      editor.revealLineInCenter(line);
+      editor.setPosition({ lineNumber: line, column: 1 });
+      addLog(`[PROVENANCE] Replay focus -> Line ${line}: ${code}`);
+    } catch (err) {
+      console.error("[IDE-APP] Error focusing provenance line:", err);
     }
   };
 
@@ -1086,34 +1146,52 @@ export default function IDEApp() {
                 Detected Vacuous Lines
               </span>
 
-              <div className="space-y-2 max-h-72 overflow-y-auto font-mono text-xs">
+              <div className="space-y-2 max-h-48 overflow-y-auto font-mono text-xs">
                 {findings.length > 0 ? (
-                  findings.map((f, i) => (
-                    <button
-                      key={i}
-                      onClick={() => handleFindingClick(f)}
-                      className="w-full text-left p-3 bg-[#050505] hover:bg-[#0d0d0d] hover:border-cyan-400 transition-all rounded-xl border border-cyan-500/30 space-y-1 group"
-                    >
-                      <div className="flex items-center justify-between text-cyan-400 font-bold group-hover:text-cyan-300">
-                        <span>Line {f.line}</span>
-                        <span className="text-[10px] bg-purple-950/80 px-1.5 py-0.5 rounded border border-purple-500/30">
-                          {f.title}
-                        </span>
-                      </div>
-                      <div className="text-zinc-300 font-mono bg-[#111111] p-1.5 rounded truncate">
-                        {f.code}
-                      </div>
-                      <p className="text-[11px] text-zinc-400 font-sans leading-tight">
-                        {f.reason}
-                      </p>
-                    </button>
-                  ))
+                  findings.map((f, i) => {
+                    const isSelected = selectedFinding?.line === f.line;
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => handleFindingClick(f)}
+                        className={`w-full text-left p-2.5 bg-[#050505] hover:bg-[#0d0d0d] transition-all rounded-xl border space-y-1 group ${
+                          isSelected
+                            ? "border-cyan-400 bg-cyan-950/20 shadow-cyan-glow/20"
+                            : "border-cyan-500/30 hover:border-cyan-400/80"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-cyan-400 font-bold group-hover:text-cyan-300">
+                          <span className="flex items-center gap-1.5">
+                            {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
+                            Line {f.line}
+                          </span>
+                          <span className="text-[10px] bg-purple-950/80 px-1.5 py-0.5 rounded border border-purple-500/30">
+                            {f.title}
+                          </span>
+                        </div>
+                        <div className="text-zinc-300 font-mono bg-[#111111] p-1.5 rounded truncate">
+                          {f.code}
+                        </div>
+                        <p className="text-[11px] text-zinc-400 font-sans leading-tight">
+                          {f.reason}
+                        </p>
+                      </button>
+                    );
+                  })
                 ) : (
                   <div className="p-4 bg-[#050505] rounded-xl border border-[#1f1f1f] text-center text-zinc-500 text-xs font-mono">
                     No vacuous ghost lines detected. Code is causally optimal.
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* Dynamic Provenance Replay Timeline Panel */}
+            <div className="pt-3 border-t border-[#1f1f1f]">
+              <ProvenanceReplayPanel
+                finding={selectedFinding}
+                onStepClick={handleProvenanceStepClick}
+              />
             </div>
 
           </div>
