@@ -14,4 +14,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   scanWorkspace: (workspacePath) => ipcRenderer.invoke('engine:scan-workspace', workspacePath),
   verifyEquivalence: (filePath, transformedContent) => ipcRenderer.invoke('engine:verify-equivalence', filePath, transformedContent),
   buildWorkspaceGraph: (workspacePath) => ipcRenderer.invoke('engine:build-workspace-graph', workspacePath),
+  loadWorkspaceState: () => ipcRenderer.invoke('state:load'),
+  saveWorkspaceState: (state) => ipcRenderer.invoke('state:save', state),
 });

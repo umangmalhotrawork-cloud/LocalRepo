@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
+const { loadState, saveState } = require('./state-store');
 
 let mainWindow = null;
 
@@ -473,4 +474,12 @@ ipcMain.handle('engine:build-workspace-graph', async (_, workspacePath) => {
       }
     });
   });
+});
+
+ipcMain.handle('state:load', async () => {
+  return loadState();
+});
+
+ipcMain.handle('state:save', async (_, state) => {
+  return saveState(state);
 });

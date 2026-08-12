@@ -18,6 +18,7 @@ import ProvenanceReplayPanel, { Finding, ProvenanceStep } from "./components/Pro
 import WorkspaceDashboard, { WorkspaceReport, WorkspaceFileReport } from "./components/WorkspaceDashboard";
 import WorkspaceGraphPanel, { WorkspaceGraph, GraphNode } from "./components/WorkspaceGraphPanel";
 import StartupModal from "./components/StartupModal";
+import { useWorkspaceState, EditorViewState, WorkspacePersistedState } from "./hooks/useWorkspaceState";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
   ssr: false,
@@ -44,6 +45,8 @@ declare global {
       scanWorkspace: (path: string) => Promise<any>;
       verifyEquivalence: (path: string, transformedContent: string) => Promise<any>;
       buildWorkspaceGraph: (path: string) => Promise<any>;
+      loadWorkspaceState: () => Promise<any>;
+      saveWorkspaceState: (state: any) => Promise<any>;
     };
   }
 }
@@ -285,6 +288,11 @@ export default function IDEApp() {
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [cursorPositions, setCursorPositions] = useState<Record<string, { line: number; col: number }>>({});
 
+  // Persistence Hook & Editor State Tracking
+  const { loadedState, requestSave, hasLoaded } = useWorkspaceState();
+  const editorStatesRef = useRef<Record<string, EditorViewState>>({});
+  const isStateRestoredRef = useRef<boolean>(false);
+
   // Modals & Panels State
   const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
   const [diffData, setDiffData] = useState<DiffPreviewData | null>(null);
@@ -344,9 +352,106 @@ export default function IDEApp() {
     }
   };
 
-  // On first launch, attempt to auto-load demo workspace from disk via IPC
+  // Trigger Debounced Auto-Save
+  const triggerAutoSave = () => {
+    if (!hasLoaded || !folderPath) return;
+
+    if (editorRef.current && activeTabPath) {
+      try {
+        const pos = editorRef.current.getPosition();
+        const sTop = editorRef.current.getScrollTop();
+        const sLeft = editorRef.current.getScrollLeft();
+        if (pos) {
+          editorStatesRef.current[activeTabPath] = {
+            cursorLine: pos.lineNumber,
+            cursorColumn: pos.column,
+            scrollTop: sTop,
+            scrollLeft: sLeft,
+          };
+        }
+      } catch (e) {}
+    }
+
+    const stateToPersist: WorkspacePersistedState = {
+      folderPath,
+      openTabs: openTabs.map((t) => ({ path: t.path, name: t.name })),
+      activeTabPath: activeTabPath || (openTabs[0]?.path || ""),
+      mainView,
+      explorerWidth,
+      analysisWidth,
+      consoleHeight,
+      editorStates: editorStatesRef.current,
+    };
+
+    requestSave(stateToPersist);
+  };
+
+  // Auto-save effect when state changes
   useEffect(() => {
-    console.log('[IDE-APP] useEffect: starting loadDemoWorkspace');
+    if (hasLoaded && isStateRestoredRef.current && folderPath) {
+      triggerAutoSave();
+    }
+  }, [folderPath, openTabs, activeTabPath, mainView, explorerWidth, analysisWidth, consoleHeight]);
+
+  // Load demo workspace helper
+  const loadDemoWorkspace = async () => {
+    try {
+      if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.getDefaultDemoWorkspace) {
+        console.log('[IDE-APP] invoking getDefaultDemoWorkspace');
+        const demo = await window.electronAPI.getDefaultDemoWorkspace();
+        if (demo && demo.tree) {
+          setFolderPath(demo.folderPath);
+          setFileTree(demo.tree);
+          saveRecentWorkspace(demo.folderPath);
+          addLog(`[DEMO] Loaded workspace from disk: ${demo.folderPath}`);
+          
+          const targetPath = `${demo.folderPath}/src/cart_calculator.py`;
+          console.log('[IDE-APP] invoking readFile for', targetPath);
+          const fileRes = await window.electronAPI.readFile(targetPath);
+          if (fileRes.success && fileRes.content) {
+            console.log('[IDE-APP] readFile success, content length:', fileRes.content.length);
+            const newTab = {
+              path: targetPath,
+              name: "cart_calculator.py",
+              content: fileRes.content,
+              savedContent: fileRes.content,
+              isDirty: false,
+            };
+            setOpenTabs([newTab]);
+            setActiveTabPath(targetPath);
+            runAnalysis(targetPath, fileRes.content);
+
+            console.log('[WORKSPACE] scan start', demo.folderPath);
+            setWorkspaceLoading(true);
+            setWorkspaceScanLoading(true);
+            try {
+              const scanRes = await window.electronAPI.scanWorkspace(demo.folderPath);
+              if (scanRes && !scanRes.error) {
+                setWorkspaceSummary(scanRes);
+                setWorkspaceReport(scanRes);
+                console.log('[WORKSPACE] scan complete', scanRes);
+                console.log('[IDE-APP] Initial workspace scan loaded:', scanRes.files_scanned, 'files');
+              }
+            } catch (scanErr) {
+              console.error('[WORKSPACE] scan error:', scanErr);
+            } finally {
+              setWorkspaceLoading(false);
+              setWorkspaceScanLoading(false);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[IDE-APP] Error loading demo workspace via IPC:", err);
+    }
+  };
+
+  // Startup Session Restoration
+  useEffect(() => {
+    if (!hasLoaded) return;
+    if (isStateRestoredRef.current) return;
+    isStateRestoredRef.current = true;
+
     if (typeof window !== "undefined") {
       try {
         const stored = localStorage.getItem("echo_recent_workspaces");
@@ -356,74 +461,109 @@ export default function IDEApp() {
       } catch (e) {}
     }
 
-    async function loadDemoWorkspace() {
-      try {
-        if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.getDefaultDemoWorkspace) {
-          console.log('[IDE-APP] invoking getDefaultDemoWorkspace');
-          const demo = await window.electronAPI.getDefaultDemoWorkspace();
-          if (demo && demo.tree) {
-            setFolderPath(demo.folderPath);
-            setFileTree(demo.tree);
-            saveRecentWorkspace(demo.folderPath);
-            addLog(`[DEMO] Loaded workspace from disk: ${demo.folderPath}`);
-            
-            const targetPath = `${demo.folderPath}/src/cart_calculator.py`;
-            console.log('[IDE-APP] invoking readFile for', targetPath);
-            const fileRes = await window.electronAPI.readFile(targetPath);
-            if (fileRes.success && fileRes.content) {
-              console.log('[IDE-APP] readFile success, content length:', fileRes.content.length);
-              const newTab = {
-                path: targetPath,
-                name: "cart_calculator.py",
-                content: fileRes.content,
-                savedContent: fileRes.content,
-                isDirty: false,
-              };
-              setOpenTabs([newTab]);
-              setActiveTabPath(targetPath);
-              runAnalysis(targetPath, fileRes.content);
+    async function restoreSession() {
+      if (loadedState && loadedState.folderPath) {
+        console.log('[STATE] restored workspace', loadedState.folderPath);
+        addLog(`[STATE] Restoring previous workspace session: ${loadedState.folderPath}`);
 
-              console.log('[WORKSPACE] scan start', demo.folderPath);
-              setWorkspaceLoading(true);
-              setWorkspaceScanLoading(true);
-              try {
-                const scanRes = await window.electronAPI.scanWorkspace(demo.folderPath);
-                if (scanRes && !scanRes.error) {
-                  setWorkspaceSummary(scanRes);
-                  setWorkspaceReport(scanRes);
-                  console.log('[WORKSPACE] scan complete', scanRes);
-                  console.log('[IDE-APP] Initial workspace scan loaded:', scanRes.files_scanned, 'files');
+        // 1. Check if folder exists or is valid
+        let folderValid = true;
+        if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.readDir) {
+          try {
+            const tree = await window.electronAPI.readDir(loadedState.folderPath);
+            if (tree) {
+              setFileTree(tree);
+            } else {
+              folderValid = false;
+            }
+          } catch (e) {
+            folderValid = false;
+          }
+        }
+
+        if (!folderValid) {
+          console.warn("[STATE] Saved workspace path not found on disk, falling back to demo workspace.");
+          await loadDemoWorkspace();
+          return;
+        }
+
+        setFolderPath(loadedState.folderPath);
+        saveRecentWorkspace(loadedState.folderPath);
+
+        // 2. Restore panel dimensions & views
+        if (loadedState.explorerWidth) setExplorerWidth(loadedState.explorerWidth);
+        if (loadedState.analysisWidth) setAnalysisWidth(loadedState.analysisWidth);
+        if (loadedState.consoleHeight) setConsoleHeight(loadedState.consoleHeight);
+        if (loadedState.mainView) setMainView(loadedState.mainView);
+        if (loadedState.editorStates) editorStatesRef.current = { ...loadedState.editorStates };
+
+        // 3. Restore tabs
+        const restoredTabs: TabItem[] = [];
+        if (loadedState.openTabs && loadedState.openTabs.length > 0) {
+          for (const tab of loadedState.openTabs) {
+            try {
+              if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.readFile) {
+                const res = await window.electronAPI.readFile(tab.path);
+                if (res.success && res.content !== undefined) {
+                  restoredTabs.push({
+                    path: tab.path,
+                    name: tab.name || tab.path.split("/").pop() || "file",
+                    content: res.content,
+                    savedContent: res.content,
+                    isDirty: false,
+                  });
                 }
-              } catch (scanErr) {
-                console.error('[WORKSPACE] scan error:', scanErr);
-              } finally {
-                setWorkspaceLoading(false);
-                setWorkspaceScanLoading(false);
               }
+            } catch (tabErr) {
+              console.warn("[STATE] Could not reopen file:", tab.path, tabErr);
             }
           }
         }
-      } catch (err) {
-        console.error("[IDE-APP] Error loading demo workspace via IPC:", err);
-      }
-    }
-    loadDemoWorkspace();
-  }, []);
 
-  // Save pane sizes safely
-  const savePaneSizes = (expW: number, anaW: number, conH: number) => {
-    if (typeof window === "undefined") return;
-    try {
-      console.log('[IDE-APP] saving pane sizes to localStorage');
-      localStorage.setItem("echo_ide_pane_sizes", JSON.stringify({
-        explorerWidth: expW,
-        analysisWidth: anaW,
-        consoleHeight: conH,
-      }));
-    } catch (e) {
-      console.warn("[IDE-APP] Failed to save pane sizes to localStorage:", e);
+        if (restoredTabs.length > 0) {
+          setOpenTabs(restoredTabs);
+          console.log('[STATE] restored tabs', restoredTabs.length);
+          addLog(`[STATE] Restored ${restoredTabs.length} tabs.`);
+
+          const activePath = loadedState.activeTabPath && restoredTabs.some((t) => t.path === loadedState.activeTabPath)
+            ? loadedState.activeTabPath
+            : restoredTabs[0].path;
+
+          setActiveTabPath(activePath);
+          const activeTabObj = restoredTabs.find((t) => t.path === activePath) || restoredTabs[0];
+          runAnalysis(activePath, activeTabObj.content);
+        }
+
+        // 4. Background workspace scan
+        if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.scanWorkspace) {
+          setWorkspaceLoading(true);
+          setWorkspaceScanLoading(true);
+          try {
+            const scanRes = await window.electronAPI.scanWorkspace(loadedState.folderPath);
+            if (scanRes && !scanRes.error) {
+              setWorkspaceSummary(scanRes);
+              setWorkspaceReport(scanRes);
+            }
+          } catch (e) {
+          } finally {
+            setWorkspaceLoading(false);
+            setWorkspaceScanLoading(false);
+          }
+        }
+
+        if (loadedState.mainView === "graph") {
+          handleLoadWorkspaceGraph(loadedState.folderPath);
+        }
+
+        return;
+      }
+
+      // Fresh session fallback
+      await loadDemoWorkspace();
     }
-  };
+
+    restoreSession();
+  }, [hasLoaded, loadedState]);
 
   // Layout & focus editor on tab change or container resize
   useEffect(() => {
@@ -647,9 +787,22 @@ export default function IDEApp() {
   const restoreTabCursor = (path: string) => {
     setTimeout(() => {
       try {
-        const savedPos = cursorPositions[path];
+        const savedPos = editorStatesRef.current[path] || (cursorPositions[path] ? {
+          cursorLine: cursorPositions[path].line,
+          cursorColumn: cursorPositions[path].col,
+          scrollTop: 0,
+          scrollLeft: 0,
+        } : null);
+
         if (savedPos && editorRef.current) {
-          editorRef.current.setPosition({ lineNumber: savedPos.line, column: savedPos.col });
+          editorRef.current.setPosition({ lineNumber: savedPos.cursorLine, column: savedPos.cursorColumn });
+          if (savedPos.scrollTop !== undefined) {
+            editorRef.current.setScrollTop(savedPos.scrollTop);
+          }
+          if (savedPos.scrollLeft !== undefined) {
+            editorRef.current.setScrollLeft(savedPos.scrollLeft);
+          }
+          editorRef.current.revealPositionInCenter({ lineNumber: savedPos.cursorLine, column: savedPos.cursorColumn });
           editorRef.current.focus();
         }
       } catch (e) {}
@@ -1177,7 +1330,42 @@ export default function IDEApp() {
 
       editor.onDidChangeCursorPosition((e: any) => {
         setCursorPos({ line: e.position.lineNumber, col: e.position.column });
+        if (activeTabPath) {
+          editorStatesRef.current[activeTabPath] = {
+            cursorLine: e.position.lineNumber,
+            cursorColumn: e.position.column,
+            scrollTop: editor.getScrollTop ? editor.getScrollTop() : 0,
+            scrollLeft: editor.getScrollLeft ? editor.getScrollLeft() : 0,
+          };
+          triggerAutoSave();
+        }
       });
+
+      editor.onDidScrollChange((e: any) => {
+        if (activeTabPath) {
+          const pos = editor.getPosition();
+          editorStatesRef.current[activeTabPath] = {
+            cursorLine: pos ? pos.lineNumber : 1,
+            cursorColumn: pos ? pos.column : 1,
+            scrollTop: e.scrollTop !== undefined ? e.scrollTop : editor.getScrollTop(),
+            scrollLeft: e.scrollLeft !== undefined ? e.scrollLeft : editor.getScrollLeft(),
+          };
+          triggerAutoSave();
+        }
+      });
+
+      // Restore saved view state if available
+      if (activeTabPath && editorStatesRef.current[activeTabPath]) {
+        const saved = editorStatesRef.current[activeTabPath];
+        setTimeout(() => {
+          try {
+            editor.setPosition({ lineNumber: saved.cursorLine, column: saved.cursorColumn });
+            if (saved.scrollTop !== undefined) editor.setScrollTop(saved.scrollTop);
+            if (saved.scrollLeft !== undefined) editor.setScrollLeft(saved.scrollLeft);
+            editor.revealPositionInCenter({ lineNumber: saved.cursorLine, column: saved.cursorColumn });
+          } catch (e) {}
+        }, 50);
+      }
       
       monaco.editor.defineTheme("echo-dark", {
         base: "vs-dark",
@@ -1211,7 +1399,6 @@ export default function IDEApp() {
     const onMouseMove = (moveEvt: MouseEvent) => {
       const newW = Math.max(160, Math.min(400, startW + (moveEvt.clientX - startX)));
       setExplorerWidth(newW);
-      savePaneSizes(newW, analysisWidth, consoleHeight);
     };
 
     const onMouseUp = () => {
@@ -1231,7 +1418,6 @@ export default function IDEApp() {
     const onMouseMove = (moveEvt: MouseEvent) => {
       const newW = Math.max(200, Math.min(450, startW - (moveEvt.clientX - startX)));
       setAnalysisWidth(newW);
-      savePaneSizes(explorerWidth, newW, consoleHeight);
     };
 
     const onMouseUp = () => {
@@ -1251,7 +1437,6 @@ export default function IDEApp() {
     const onMouseMove = (moveEvt: MouseEvent) => {
       const newH = Math.max(60, Math.min(300, startH - (moveEvt.clientY - startY)));
       setConsoleHeight(newH);
-      savePaneSizes(explorerWidth, analysisWidth, newH);
     };
 
     const onMouseUp = () => {
