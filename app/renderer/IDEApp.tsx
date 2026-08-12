@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import Editor, { OnMount } from "@monaco-editor/react";
+import dynamic from "next/dynamic";
 import { 
   FolderOpen, FileText, ChevronRight, ChevronDown, Play, Sparkles, 
   Terminal as TerminalIcon, Zap, X, Check, Save, RotateCcw, ArrowRight, 
@@ -11,6 +11,19 @@ import {
 import ConfirmDialog from "./components/ConfirmDialog";
 import CommandPalette from "./components/CommandPalette";
 import QuickOpen from "./components/QuickOpen";
+
+// Dynamically import Monaco Editor to prevent SSR/module evaluation blocking
+const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full bg-[#050505] text-cyan-400 flex items-center justify-center font-mono text-xs p-4">
+      <div className="flex items-center gap-2">
+        <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
+        <span>Initializing Monaco Code Editor...</span>
+      </div>
+    </div>
+  ),
+});
 
 declare global {
   interface Window {
@@ -139,6 +152,8 @@ function extractFileList(node: FileNode): { name: string; path: string }[] {
 }
 
 export default function IDEApp() {
+  console.log("[IDE-APP] Component render starting...");
+
   const [folderPath, setFolderPath] = useState<string | null>("demo-workspaces/ai_cart_project");
   const [fileTree, setFileTree] = useState<FileNode | null>(defaultDemoTree);
   const [openTabs, setOpenTabs] = useState<TabItem[]>([
@@ -234,48 +249,59 @@ export default function IDEApp() {
 
   // On first launch, attempt to auto-load demo workspace from disk via IPC
   useEffect(() => {
+    console.log("[IDE-APP] useEffect: checking electronAPI and demo workspace...");
     async function loadDemoWorkspace() {
-      if (window.electronAPI) {
-        const demo = await window.electronAPI.getDefaultDemoWorkspace();
-        if (demo && demo.tree) {
-          setFolderPath(demo.folderPath);
-          setFileTree(demo.tree);
-          addLog(`[DEMO] Loaded workspace from disk: ${demo.folderPath}`);
-          
-          // Load cart_calculator.py from disk
-          const targetPath = `${demo.folderPath}/src/cart_calculator.py`;
-          const fileRes = await window.electronAPI.readFile(targetPath);
-          if (fileRes.success && fileRes.content) {
-            const newTab = {
-              path: targetPath,
-              name: "cart_calculator.py",
-              content: fileRes.content,
-              savedContent: fileRes.content,
-              isDirty: false,
-            };
-            setOpenTabs([newTab]);
-            setActiveTabPath(targetPath);
-            runAnalysis(targetPath, fileRes.content);
+      try {
+        if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.getDefaultDemoWorkspace) {
+          console.log("[IDE-APP] Invoking getDefaultDemoWorkspace...");
+          const demo = await window.electronAPI.getDefaultDemoWorkspace();
+          if (demo && demo.tree) {
+            setFolderPath(demo.folderPath);
+            setFileTree(demo.tree);
+            addLog(`[DEMO] Loaded workspace from disk: ${demo.folderPath}`);
+            
+            const targetPath = `${demo.folderPath}/src/cart_calculator.py`;
+            const fileRes = await window.electronAPI.readFile(targetPath);
+            if (fileRes.success && fileRes.content) {
+              const newTab = {
+                path: targetPath,
+                name: "cart_calculator.py",
+                content: fileRes.content,
+                savedContent: fileRes.content,
+                isDirty: false,
+              };
+              setOpenTabs([newTab]);
+              setActiveTabPath(targetPath);
+              runAnalysis(targetPath, fileRes.content);
+            }
           }
         }
+      } catch (err) {
+        console.error("[IDE-APP] Error loading demo workspace via IPC:", err);
       }
     }
     loadDemoWorkspace();
   }, []);
 
-  // Save pane sizes
+  // Save pane sizes safely
   const savePaneSizes = (expW: number, anaW: number, conH: number) => {
+    if (typeof window === "undefined") return;
     try {
       localStorage.setItem("echo_ide_pane_sizes", JSON.stringify({
         explorerWidth: expW,
         analysisWidth: anaW,
         consoleHeight: conH,
       }));
-    } catch (e) {}
+    } catch (e) {
+      console.warn("[IDE-APP] Failed to save pane sizes to localStorage:", e);
+    }
   };
 
   // Keyboard Shortcuts Listener (⌘S, ⌘W, ⌘P, ⌘K, F5)
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    console.log("[IDE-APP] useEffect: attaching keyboard shortcuts listener...");
+    
     const handleKeyDown = (e: KeyboardEvent) => {
       const isCmd = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
@@ -302,46 +328,53 @@ export default function IDEApp() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeTabPath, openTabs, activeTab]);
 
-  // Apply Monaco Line Highlights & Tooltips
+  // Apply Monaco Line Highlights & Tooltips safely
   useEffect(() => {
     if (!editorRef.current || !monacoRef.current) return;
-    const editor = editorRef.current;
-    
-    const newDecorations = findings.map((f) => ({
-      range: {
-        startLineNumber: f.line,
-        startColumn: 1,
-        endLineNumber: f.line,
-        endColumn: 100,
-      },
-      options: {
-        isWholeLine: true,
-        className: "ghost-code-line-bg",
-        inlineClassName: "ghost-code-line-text",
-        glyphMarginClassName: "ghost-code-glyph",
-        linesDecorationsClassName: "ghost-code-line-decoration",
-        hoverMessage: {
-          value: `**${f.title}** (Causal Luminance: 0.00)\n\n${f.reason}`,
+    try {
+      const editor = editorRef.current;
+      const newDecorations = findings.map((f) => ({
+        range: {
+          startLineNumber: f.line,
+          startColumn: 1,
+          endLineNumber: f.line,
+          endColumn: 100,
         },
-      },
-    }));
+        options: {
+          isWholeLine: true,
+          className: "ghost-code-line-bg",
+          inlineClassName: "ghost-code-line-text",
+          glyphMarginClassName: "ghost-code-glyph",
+          linesDecorationsClassName: "ghost-code-line-decoration",
+          hoverMessage: {
+            value: `**${f.title}** (Causal Luminance: 0.00)\n\n${f.reason}`,
+          },
+        },
+      }));
 
-    decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
+      decorationsRef.current = editor.deltaDecorations(decorationsRef.current, newDecorations);
+    } catch (err) {
+      console.error("[IDE-APP] Error applying line decorations:", err);
+    }
   }, [findings, activeTabPath, activeTab?.content]);
 
   // Open Folder Handler
   const handleOpenFolder = async () => {
-    if (!window.electronAPI) {
+    if (typeof window === "undefined" || !window.electronAPI) {
       addLog("[WARN] Running in web mode. Folder dialog requires Electron desktop app.");
       return;
     }
 
-    addLog("[IPC] Invoking dialog:open-folder...");
-    const res = await window.electronAPI.openFolder();
-    if (res && res.tree) {
-      setFolderPath(res.folderPath);
-      setFileTree(res.tree);
-      addLog(`[IPC] Opened directory: ${res.folderPath}`);
+    try {
+      addLog("[IPC] Invoking dialog:open-folder...");
+      const res = await window.electronAPI.openFolder();
+      if (res && res.tree) {
+        setFolderPath(res.folderPath);
+        setFileTree(res.tree);
+        addLog(`[IPC] Opened directory: ${res.folderPath}`);
+      }
+    } catch (err) {
+      console.error("[IDE-APP] Error in openFolder:", err);
     }
   };
 
@@ -350,13 +383,15 @@ export default function IDEApp() {
     if (file.isDirectory) return;
 
     if (activeTabPath && editorRef.current) {
-      const pos = editorRef.current.getPosition();
-      if (pos) {
-        setCursorPositions((prev) => ({
-          ...prev,
-          [activeTabPath]: { line: pos.lineNumber, col: pos.column },
-        }));
-      }
+      try {
+        const pos = editorRef.current.getPosition();
+        if (pos) {
+          setCursorPositions((prev) => ({
+            ...prev,
+            [activeTabPath]: { line: pos.lineNumber, col: pos.column },
+          }));
+        }
+      } catch (e) {}
     }
 
     const existing = openTabs.find((t) => t.path === file.path);
@@ -369,13 +404,17 @@ export default function IDEApp() {
 
     addLog(`[FS] Reading file from disk: ${file.name}`);
     let content = defaultCartCalculatorCode;
-    if (window.electronAPI && !file.path.startsWith("demo-workspaces/")) {
-      const res = await window.electronAPI.readFile(file.path);
-      if (res.success && res.content !== undefined) {
-        content = res.content;
-      } else if (res.error) {
-        addLog(`[ERROR] Failed to read file: ${res.error}`);
-        return;
+    if (typeof window !== "undefined" && window.electronAPI && !file.path.startsWith("demo-workspaces/")) {
+      try {
+        const res = await window.electronAPI.readFile(file.path);
+        if (res.success && res.content !== undefined) {
+          content = res.content;
+        } else if (res.error) {
+          addLog(`[ERROR] Failed to read file: ${res.error}`);
+          return;
+        }
+      } catch (err) {
+        console.error("[IDE-APP] Error reading file:", err);
       }
     }
 
@@ -394,22 +433,27 @@ export default function IDEApp() {
 
   const restoreTabCursor = (path: string) => {
     setTimeout(() => {
-      const savedPos = cursorPositions[path];
-      if (savedPos && editorRef.current) {
-        editorRef.current.setPosition({ lineNumber: savedPos.line, column: savedPos.col });
-        editorRef.current.focus();
-      }
+      try {
+        const savedPos = cursorPositions[path];
+        if (savedPos && editorRef.current) {
+          editorRef.current.setPosition({ lineNumber: savedPos.line, column: savedPos.col });
+          editorRef.current.focus();
+        }
+      } catch (e) {}
     }, 50);
   };
 
   const handleFindingClick = (finding: Finding) => {
     if (!editorRef.current) return;
-    const editor = editorRef.current;
-    editor.focus();
-    editor.revealLineInCenter(finding.line);
-    editor.setPosition({ lineNumber: finding.line, column: 1 });
-
-    addLog(`[NAV] Jumped to Line ${finding.line}: ${finding.title}`);
+    try {
+      const editor = editorRef.current;
+      editor.focus();
+      editor.revealLineInCenter(finding.line);
+      editor.setPosition({ lineNumber: finding.line, column: 1 });
+      addLog(`[NAV] Jumped to Line ${finding.line}: ${finding.title}`);
+    } catch (err) {
+      console.error("[IDE-APP] Error focusing finding line:", err);
+    }
   };
 
   const handleEditorChange = (newVal: string | undefined) => {
@@ -451,20 +495,24 @@ export default function IDEApp() {
     if (!activeTab) return;
     addLog(`[FS] Saving file: ${activeTab.name}`);
 
-    if (window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
-      const res = await window.electronAPI.writeFile(activeTab.path, activeTab.content);
-      if (res.success) {
-        setOpenTabs((prev) =>
-          prev.map((t) =>
-            t.path === activeTab.path
-              ? { ...t, savedContent: t.content, isDirty: false }
-              : t
-          )
-        );
-        showToast(`Saved ${activeTab.name}`);
-        addLog(`[FS] File saved successfully to disk.`);
-      } else {
-        addLog(`[ERROR] Save failed: ${res.error}`);
+    if (typeof window !== "undefined" && window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
+      try {
+        const res = await window.electronAPI.writeFile(activeTab.path, activeTab.content);
+        if (res.success) {
+          setOpenTabs((prev) =>
+            prev.map((t) =>
+              t.path === activeTab.path
+                ? { ...t, savedContent: t.content, isDirty: false }
+                : t
+            )
+          );
+          showToast(`Saved ${activeTab.name}`);
+          addLog(`[FS] File saved successfully to disk.`);
+        } else {
+          addLog(`[ERROR] Save failed: ${res.error}`);
+        }
+      } catch (err) {
+        console.error("[IDE-APP] Error saving file:", err);
       }
     } else {
       setOpenTabs((prev) =>
@@ -483,12 +531,16 @@ export default function IDEApp() {
     setAnalyzing(true);
     addLog(`[ENGINE] Running Python analyzer on ${path}...`);
 
-    if (window.electronAPI && !path.startsWith("demo-workspaces/")) {
-      const res = await window.electronAPI.analyzeFile(path);
-      if (res && res.findings) {
-        setFindings(res.findings);
-        setLuminance(res.causal_luminance !== undefined ? res.causal_luminance : (res.findings.length > 0 ? 0.0 : 1.0));
-        addLog(`[ENGINE] Analysis complete: ${res.findings.length} ghost lines detected.`);
+    if (typeof window !== "undefined" && window.electronAPI && !path.startsWith("demo-workspaces/")) {
+      try {
+        const res = await window.electronAPI.analyzeFile(path);
+        if (res && res.findings) {
+          setFindings(res.findings);
+          setLuminance(res.causal_luminance !== undefined ? res.causal_luminance : (res.findings.length > 0 ? 0.0 : 1.0));
+          addLog(`[ENGINE] Analysis complete: ${res.findings.length} ghost lines detected.`);
+        }
+      } catch (err) {
+        console.error("[IDE-APP] Error running AST analysis:", err);
       }
     } else {
       const lines = content.split("\n");
@@ -517,11 +569,15 @@ export default function IDEApp() {
 
     addLog(`[SURGERY] Calling engine:preview-safe-remove for ${activeTab.name}...`);
 
-    if (window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
-      const preview = await window.electronAPI.previewSafeRemove(activeTab.path);
-      if (preview && preview.transformed_source !== undefined) {
-        setDiffData(preview);
-        setDiffDrawerOpen(true);
+    if (typeof window !== "undefined" && window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
+      try {
+        const preview = await window.electronAPI.previewSafeRemove(activeTab.path);
+        if (preview && preview.transformed_source !== undefined) {
+          setDiffData(preview);
+          setDiffDrawerOpen(true);
+        }
+      } catch (err) {
+        console.error("[IDE-APP] Error generating safe remove preview:", err);
       }
     } else {
       const lines = activeTab.content.split("\n");
@@ -553,20 +609,24 @@ export default function IDEApp() {
     const ghostRemoved = diffData.ghost_count_before;
     addLog(`[SURGERY] Executing engine:apply-safe-remove on ${activeTab.name}...`);
 
-    if (window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
-      const res = await window.electronAPI.applySafeRemove(activeTab.path, diffData.transformed_source);
-      if (res.success) {
-        setOpenTabs((prev) =>
-          prev.map((t) =>
-            t.path === activeTab.path
-              ? { ...t, content: res.transformedContent, savedContent: res.transformedContent, isDirty: false }
-              : t
-          )
-        );
-        setFindings([]);
-        setLuminance(1.0);
-        setDiffDrawerOpen(false);
-        showToast(`Surgery complete · ${ghostRemoved} ghost lines removed.`);
+    if (typeof window !== "undefined" && window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
+      try {
+        const res = await window.electronAPI.applySafeRemove(activeTab.path, diffData.transformed_source);
+        if (res.success) {
+          setOpenTabs((prev) =>
+            prev.map((t) =>
+              t.path === activeTab.path
+                ? { ...t, content: res.transformedContent, savedContent: res.transformedContent, isDirty: false }
+                : t
+            )
+          );
+          setFindings([]);
+          setLuminance(1.0);
+          setDiffDrawerOpen(false);
+          showToast(`Surgery complete · ${ghostRemoved} ghost lines removed.`);
+        }
+      } catch (err) {
+        console.error("[IDE-APP] Error applying safe remove surgery:", err);
       }
     } else {
       const updated = diffData.transformed_source;
@@ -588,18 +648,22 @@ export default function IDEApp() {
     if (!activeTab) return;
     addLog(`[RESTORE] Restoring latest .bak snapshot for ${activeTab.name}...`);
 
-    if (window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
-      const res = await window.electronAPI.restoreBackup(activeTab.path);
-      if (res.success && res.restoredContent) {
-        setOpenTabs((prev) =>
-          prev.map((t) =>
-            t.path === activeTab.path
-              ? { ...t, content: res.restoredContent, savedContent: res.restoredContent, isDirty: false }
-              : t
-          )
-        );
-        runAnalysis(activeTab.path, res.restoredContent);
-        showToast(`Backup restored`);
+    if (typeof window !== "undefined" && window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
+      try {
+        const res = await window.electronAPI.restoreBackup(activeTab.path);
+        if (res.success && res.restoredContent) {
+          setOpenTabs((prev) =>
+            prev.map((t) =>
+              t.path === activeTab.path
+                ? { ...t, content: res.restoredContent, savedContent: res.restoredContent, isDirty: false }
+                : t
+            )
+          );
+          runAnalysis(activeTab.path, res.restoredContent);
+          showToast(`Backup restored`);
+        }
+      } catch (err) {
+        console.error("[IDE-APP] Error restoring backup:", err);
       }
     } else {
       setOpenTabs((prev) =>
@@ -618,37 +682,42 @@ export default function IDEApp() {
     setExpandedFolders((prev) => ({ ...prev, [path]: !prev[path] }));
   };
 
-  const handleEditorMount: OnMount = (editor, monaco) => {
+  const handleEditorMount = (editor: any, monaco: any) => {
+    console.log("[IDE-APP] Monaco Editor mounted successfully.");
     editorRef.current = editor;
     monacoRef.current = monaco;
 
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      handleSaveFile();
-    });
+    try {
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+        handleSaveFile();
+      });
 
-    editor.onDidChangeCursorPosition((e) => {
-      setCursorPos({ line: e.position.lineNumber, col: e.position.column });
-    });
-    
-    monaco.editor.defineTheme("echo-dark", {
-      base: "vs-dark",
-      inherit: true,
-      rules: [
-        { token: "keyword", foreground: "8b5cf6", fontStyle: "bold" },
-        { token: "identifier", foreground: "22d3ee" },
-        { token: "string", foreground: "10b981" },
-        { token: "comment", foreground: "6b7280", fontStyle: "italic" },
-      ],
-      colors: {
-        "editor.background": "#050505",
-        "editor.foreground": "#e5e7eb",
-        "editorLineNumber.foreground": "#4b5563",
-        "editorLineNumber.activeForeground": "#22d3ee",
-        "editor.lineHighlightBackground": "#0d0d0d",
-        "editorGutter.background": "#050505",
-      },
-    });
-    monaco.editor.setTheme("echo-dark");
+      editor.onDidChangeCursorPosition((e: any) => {
+        setCursorPos({ line: e.position.lineNumber, col: e.position.column });
+      });
+      
+      monaco.editor.defineTheme("echo-dark", {
+        base: "vs-dark",
+        inherit: true,
+        rules: [
+          { token: "keyword", foreground: "8b5cf6", fontStyle: "bold" },
+          { token: "identifier", foreground: "22d3ee" },
+          { token: "string", foreground: "10b981" },
+          { token: "comment", foreground: "6b7280", fontStyle: "italic" },
+        ],
+        colors: {
+          "editor.background": "#050505",
+          "editor.foreground": "#e5e7eb",
+          "editorLineNumber.foreground": "#4b5563",
+          "editorLineNumber.activeForeground": "#22d3ee",
+          "editor.lineHighlightBackground": "#0d0d0d",
+          "editorGutter.background": "#050505",
+        },
+      });
+      monaco.editor.setTheme("echo-dark");
+    } catch (err) {
+      console.error("[IDE-APP] Error setting up Monaco theme/events:", err);
+    }
   };
 
   const startExplorerResize = (e: React.MouseEvent) => {
@@ -893,7 +962,7 @@ export default function IDEApp() {
           {/* Monaco Editor Container */}
           <div className="flex-1 relative min-h-0">
             {activeTab && (
-              <Editor
+              <MonacoEditor
                 height="100%"
                 language={getLanguageFromPath(activeTab.path)}
                 theme="echo-dark"
