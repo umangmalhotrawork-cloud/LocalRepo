@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
 const { loadState, saveState } = require('./state-store');
+const { exportWorkspaceReport } = require('./report-export');
 
 let mainWindow = null;
 
@@ -173,6 +174,63 @@ function createWindow() {
                           const screenshotPath5 = path.join(screenshotDir, 'milestone7-workspace-graph.png');
                           fs.writeFileSync(screenshotPath5, image5.toPNG());
                           console.log('[ELECTRON] Saved verification screenshot to:', screenshotPath5);
+
+                          // Trigger Export Report
+                          await mainWindow.webContents.executeJavaScript(`
+                            (() => {
+                              const buttons = Array.from(document.querySelectorAll('button'));
+                              const exportBtn = buttons.find(b => b.textContent.includes('Export Report'));
+                              if (exportBtn) exportBtn.click();
+                            })();
+                          `);
+
+                          setTimeout(async () => {
+                            if (mainWindow) {
+                              const image6 = await mainWindow.capturePage();
+                              const screenshotPath6 = path.join(screenshotDir, 'milestone9-report-export.png');
+                              fs.writeFileSync(screenshotPath6, image6.toPNG());
+                              console.log('[ELECTRON] Saved export screenshot to:', screenshotPath6);
+
+                              // Open exported HTML report in a browser window to capture rendered report screenshot
+                              const possibleDirs = [
+                                path.join(app.getAppPath(), 'demo-workspaces', 'ai_cart_project', 'exports'),
+                                path.join(app.getAppPath(), 'exports'),
+                                path.join(app.getPath('downloads')),
+                              ];
+
+                              for (const exportBaseDir of possibleDirs) {
+                                try {
+                                  if (fs.existsSync(exportBaseDir)) {
+                                    const entries = fs.readdirSync(exportBaseDir).filter(f => f.startsWith('EchoNullity-Report-'));
+                                    if (entries.length > 0) {
+                                      entries.sort();
+                                      const latestExport = entries[entries.length - 1];
+                                      const htmlFilePath = path.join(exportBaseDir, latestExport, 'report.html');
+                                      if (fs.existsSync(htmlFilePath)) {
+                                        const reportWin = new BrowserWindow({
+                                          width: 1200,
+                                          height: 900,
+                                          show: false,
+                                          webPreferences: { nodeIntegration: false, contextIsolation: true },
+                                        });
+                                        await reportWin.loadFile(htmlFilePath);
+                                        setTimeout(async () => {
+                                          const reportImg = await reportWin.capturePage();
+                                          const reportScreenshotPath = path.join(screenshotDir, 'milestone9-rendered-html-report.png');
+                                          fs.writeFileSync(reportScreenshotPath, reportImg.toPNG());
+                                          console.log('[ELECTRON] Saved rendered report screenshot to:', reportScreenshotPath);
+                                          reportWin.close();
+                                        }, 800);
+                                        break;
+                                      }
+                                    }
+                                  }
+                                } catch (e) {
+                                  console.error('[ELECTRON] Error searching for exported html report:', e);
+                                }
+                              }
+                            }
+                          }, 1200);
                         }
                       }, 1000);
                     }
@@ -482,4 +540,8 @@ ipcMain.handle('state:load', async () => {
 
 ipcMain.handle('state:save', async (_, state) => {
   return saveState(state);
+});
+
+ipcMain.handle('report:export', async (_, payload) => {
+  return exportWorkspaceReport(payload, mainWindow);
 });

@@ -16,4 +16,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   buildWorkspaceGraph: (workspacePath) => ipcRenderer.invoke('engine:build-workspace-graph', workspacePath),
   loadWorkspaceState: () => ipcRenderer.invoke('state:load'),
   saveWorkspaceState: (state) => ipcRenderer.invoke('state:save', state),
+  exportWorkspaceReport: (payload) => ipcRenderer.invoke('report:export', payload),
 });
