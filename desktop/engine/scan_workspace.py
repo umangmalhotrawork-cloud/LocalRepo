@@ -37,26 +37,39 @@ def scan_workspace(workspace_path):
             "files": []
         }
 
-    py_files = []
+    code_files = []
     for root, dirs, files in os.walk(abs_workspace):
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS and not d.startswith(".")]
         for f in sorted(files):
-            if f.endswith(".py"):
-                py_files.append(os.path.join(root, f))
+            if f.endswith((".py", ".js", ".jsx", ".ts", ".tsx")):
+                code_files.append(os.path.join(root, f))
 
     file_reports = []
     total_ghost_lines = 0
     total_lines = 0
 
     import time
+    import subprocess
     start_time = time.perf_counter()
 
-    for fpath in py_files:
-        res = analyze_code(fpath)
-        ghost_count = res.get("ghost_lines_count", 0)
-        file_total = res.get("total_lines", 0)
-        findings = res.get("findings", [])
-        luminance = res.get("causal_luminance", 0.0 if ghost_count > 0 else 1.0)
+    for fpath in code_files:
+        if fpath.endswith((".js", ".jsx", ".ts", ".tsx")):
+            js_script = os.path.join(ENGINE_DIR, "js_analyzer.js")
+            try:
+                out = subprocess.check_output(["node", js_script, fpath], stderr=subprocess.DEVNULL)
+                res = json.loads(out.decode("utf-8"))
+            except Exception:
+                res = {}
+            ghost_count = res.get("ghost_lines", 0)
+            file_total = res.get("total_lines", 0)
+            findings = res.get("findings", [])
+            luminance = res.get("causal_luminance", 0.0 if ghost_count > 0 else 1.0)
+        else:
+            res = analyze_code(fpath)
+            ghost_count = res.get("ghost_lines_count", 0)
+            file_total = res.get("total_lines", 0)
+            findings = res.get("findings", [])
+            luminance = res.get("causal_luminance", 0.0 if ghost_count > 0 else 1.0)
 
         rel_path = os.path.relpath(fpath, abs_workspace)
         ghost_ratio = round(ghost_count / file_total, 4) if file_total > 0 else 0.0

@@ -27,4 +27,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   detectSemanticClones: (workspacePath) => ipcRenderer.invoke('engine:detect-semantic-clones', workspacePath),
   scanSemanticClones: (workspacePath) => ipcRenderer.invoke('semantic:scan', workspacePath),
   calculateLuminance: (workspacePath) => ipcRenderer.invoke('engine:calculate-luminance', workspacePath),
+  listHistory: () => ipcRenderer.invoke('history:list'),
+  getHistory: (id) => ipcRenderer.invoke('history:get', id),
+  restoreHistory: (id) => ipcRenderer.invoke('history:restore', id),
+  appendHistory: (entry) => ipcRenderer.invoke('history:append', entry),
+  exportPldiReport: (workspacePath) => ipcRenderer.invoke('report:export-pldi', workspacePath),
 });
