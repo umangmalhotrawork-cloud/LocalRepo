@@ -23,6 +23,8 @@ import WorkspaceSearchModal, { SearchMode, SearchResultItem } from "./components
 import ClonePanel, { CloneReport, CloneInstance } from "./components/ClonePanel";
 import SemanticClonePanel, { SemanticCloneReport, SemanticCloneInstance } from "./components/SemanticClonePanel";
 import CodeEditorPanel, { WorkspaceLuminanceReport, FileLuminanceReport, StatementLuminance } from "./components/CodeEditorPanel";
+import SurgeryHistoryDrawer from "./components/SurgeryHistoryDrawer";
+import RestoreConfirmModal from "./components/RestoreConfirmModal";
 import { useWorkspaceState, EditorViewState, WorkspacePersistedState } from "./hooks/useWorkspaceState";
 import { buildWorkspaceReport, ReportExportPayload } from "./utils/reportBuilder";
 import { exportGraphSvg } from "./utils/exportGraphSvg";
@@ -87,8 +89,27 @@ declare global {
       scanSemanticClones: (workspacePath: string) => Promise<SemanticCloneGroup[]>;
       detectSemanticClones: (workspacePath: string) => Promise<SemanticCloneReport>;
       calculateLuminance: (workspacePath: string) => Promise<WorkspaceLuminanceReport>;
+      listHistory: () => Promise<{ success: boolean; entries: HistoryEntry[]; error?: string }>;
+      getHistory: (id: string) => Promise<{ success: boolean; entry?: HistoryEntry; error?: string }>;
+      restoreHistory: (id: string) => Promise<{ success: boolean; file: string; restored_content: string; checkpoint_id: string; entry?: HistoryEntry; error?: string }>;
+      appendHistory: (entry: Partial<HistoryEntry>) => Promise<{ success: boolean; entry?: HistoryEntry; error?: string }>;
     };
   }
+}
+
+export interface HistoryEntry {
+  id: string;
+  timestamp: string;
+  file_path: string;
+  operation_type: "APPLY_SURGERY" | "UNDO_SURGERY" | "RESTORE_CHECKPOINT";
+  removed_lines: number[];
+  before_hash: string;
+  after_hash: string;
+  before_source: string;
+  after_source: string;
+  behavior_preserved: boolean;
+  luminance_before: number;
+  luminance_after: number;
 }
 
 export interface VerificationResult {
@@ -364,6 +385,63 @@ export default function IDEApp() {
   const [behaviorVerifying, setBehaviorVerifying] = useState(false);
   const [showForceApplyConfirm, setShowForceApplyConfirm] = useState(false);
 
+  // History & Time Travel State
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
+  const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
+  const [selectedHistoryEvent, setSelectedHistoryEvent] = useState<HistoryEntry | null>(null);
+  const [showRestoreConfirmModal, setShowRestoreConfirmModal] = useState(false);
+  const [restoringHistory, setRestoringHistory] = useState(false);
+
+  const refreshHistory = async () => {
+    if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.listHistory) {
+      try {
+        const res = await window.electronAPI.listHistory();
+        if (res && res.success) {
+          setHistoryEntries(res.entries || []);
+        }
+      } catch (e) {
+        console.error("Failed to list history:", e);
+      }
+    }
+  };
+
+  useEffect(() => {
+    refreshHistory();
+  }, []);
+
+  const handleRestoreCheckpoint = async (id: string) => {
+    if (!id || typeof window === "undefined" || !window.electronAPI || !window.electronAPI.restoreHistory) return;
+    setRestoringHistory(true);
+    addLog(`[HISTORY] Restoring surgery checkpoint: ${id}...`);
+    try {
+      const res = await window.electronAPI.restoreHistory(id);
+      if (res && res.success) {
+        addLog(`[HISTORY] Restored surgery checkpoint ${id}. Source reverted on disk.`);
+        setShowRestoreConfirmModal(false);
+        if (res.file && res.restored_content) {
+          const tabIndex = openTabs.findIndex(t => t.path === res.file);
+          if (tabIndex !== -1) {
+            setOpenTabs(prev => prev.map((t, idx) => idx === tabIndex ? { ...t, content: res.restored_content, isDirty: false } : t));
+          }
+          runAnalysis(res.file, res.restored_content);
+        }
+        handleRunWorkspaceScan();
+        handleLoadWorkspaceGraph();
+        handleScanStructuralClones();
+        handleScanSemanticClones();
+        handleRunLuminanceScan();
+        refreshHistory();
+      } else {
+        addLog(`[HISTORY] Restore failed: ${res?.error || "Unknown error"}`);
+      }
+    } catch (e: any) {
+      console.error("Failed to restore checkpoint:", e);
+      addLog(`[HISTORY] Error restoring checkpoint: ${e.message}`);
+    } finally {
+      setRestoringHistory(false);
+    }
+  };
+
   useEffect(() => {
     const handleMockFailure = () => {
       setBehaviorResult({
@@ -373,9 +451,53 @@ export default function IDEApp() {
         differences: ["stdout mismatch: original '6' vs transformed '5'"]
       });
     };
+    const handleMockHistory = () => {
+      setHistoryDrawerOpen(true);
+      refreshHistory();
+    };
+    const handleMockRestoreConfirm = () => {
+      const currentTab = openTabs.find(t => t.path === activeTabPath) || openTabs[0];
+      const fallbackEntry: HistoryEntry = {
+        id: "surg-1786568000-cart-v1",
+        timestamp: new Date().toISOString(),
+        file_path: currentTab?.path || "/Users/umangmalhotra/Documents/Echo Nullity/demo-workspaces/ai_cart_project/src/cart_calculator.py",
+        operation_type: "APPLY_SURGERY",
+        removed_lines: [9, 10, 11, 12],
+        before_hash: "a1b2c3d4e5f67890",
+        after_hash: "0987654321fedcba",
+        before_source: currentTab?.content || "def calculate_cart_total(items):\n    subtotal = sum(item['price'] * item['quantity'] for item in items)\n    subtotal = subtotal * 1\n    subtotal = subtotal + 0\n    subtotal = subtotal - 0\n    subtotal = subtotal / 1\n    return subtotal\n",
+        after_source: "def calculate_cart_total(items):\n    subtotal = sum(item['price'] * item['quantity'] for item in items)\n    return subtotal\n",
+        behavior_preserved: true,
+        luminance_before: 0.65,
+        luminance_after: 1.00
+      };
+      setSelectedHistoryEvent(historyEntries[0] || fallbackEntry);
+      setShowRestoreConfirmModal(true);
+    };
+    const handleMockExecuteRestore = () => {
+      if (historyEntries.length > 0) {
+        handleRestoreCheckpoint(historyEntries[0].id);
+      } else {
+        addLog("[HISTORY] Restored surgery checkpoint surg-1786568000-cart-v1.");
+        setShowRestoreConfirmModal(false);
+        handleRunWorkspaceScan();
+        handleLoadWorkspaceGraph();
+        handleScanStructuralClones();
+        handleScanSemanticClones();
+        handleRunLuminanceScan();
+      }
+    };
     window.addEventListener("mock-verify-failure", handleMockFailure);
-    return () => window.removeEventListener("mock-verify-failure", handleMockFailure);
-  }, []);
+    window.addEventListener("mock-history-drawer", handleMockHistory);
+    window.addEventListener("mock-restore-confirm", handleMockRestoreConfirm);
+    window.addEventListener("mock-execute-restore", handleMockExecuteRestore);
+    return () => {
+      window.removeEventListener("mock-verify-failure", handleMockFailure);
+      window.removeEventListener("mock-history-drawer", handleMockHistory);
+      window.removeEventListener("mock-restore-confirm", handleMockRestoreConfirm);
+      window.removeEventListener("mock-execute-restore", handleMockExecuteRestore);
+    };
+  }, [historyEntries, openTabs, activeTabPath]);
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [closeConfirmTab, setCloseConfirmTab] = useState<TabItem | null>(null);
@@ -926,8 +1048,41 @@ export default function IDEApp() {
   };
 
   // Open File Handler
-  const handleOpenFile = async (file: FileNode) => {
-    if (file.isDirectory) return;
+  const handleOpenFile = async (file: FileNode | any) => {
+    console.log("[OPEN-FILE] received:", file);
+    console.log("[OPEN-FILE] typeof:", typeof file);
+
+    if (!file) {
+      console.log("[OPEN-FILE] Invalid file payload");
+      return;
+    }
+
+    if (typeof file === "object" && file.isDirectory) return;
+
+    let targetPath = "";
+    if (typeof file === "string") {
+      targetPath = file;
+    } else if (typeof file === "object" && file !== null) {
+      targetPath = file.path || file.absolute_path || file.file_path || file.file || file.relativePath || "";
+    }
+
+    const filePath = typeof targetPath === "string" ? targetPath.trim() : "";
+    console.log("[OPEN-FILE] path:", filePath);
+
+    if (!filePath) {
+      console.error("[OPEN-FILE] Missing file path:", file);
+      return;
+    }
+
+    let targetName = "";
+    if (typeof file === "object" && file !== null) {
+      targetName = file.name || file.filename || "";
+    }
+    if (!targetName && filePath) {
+      targetName = filePath.split("/").pop() || "file.py";
+    }
+    const fileName = targetName || "file.py";
+    console.log("[OPEN-FILE] name:", fileName);
 
     if (activeTabPath && editorRef.current) {
       try {
@@ -941,20 +1096,20 @@ export default function IDEApp() {
       } catch (e) {}
     }
 
-    const existing = openTabs.find((t) => t.path === file.path);
+    const existing = openTabs.find((t) => t.path === filePath);
     if (existing) {
-      setActiveTabPath(file.path);
-      restoreTabCursor(file.path);
-      runAnalysis(file.path, existing.content);
+      setActiveTabPath(filePath);
+      restoreTabCursor(filePath);
+      runAnalysis(filePath, existing.content);
       return;
     }
 
-    addLog(`[FS] Reading file from disk: ${file.name}`);
+    addLog(`[FS] Reading file from disk: ${fileName}`);
     let content = defaultCartCalculatorCode;
-    if (typeof window !== "undefined" && window.electronAPI && !file.path.startsWith("demo-workspaces/")) {
+    if (typeof window !== "undefined" && window.electronAPI && !filePath.startsWith("demo-workspaces/")) {
       try {
-        console.log('[IDE-APP] handleOpenFile invoking readFile for', file.path);
-        const res = await window.electronAPI.readFile(file.path);
+        console.log('[IDE-APP] handleOpenFile invoking readFile for', filePath);
+        const res = await window.electronAPI.readFile(filePath);
         if (res.success && res.content !== undefined) {
           content = res.content;
         } else if (res.error) {
@@ -967,16 +1122,16 @@ export default function IDEApp() {
     }
 
     const newTab: TabItem = {
-      path: file.path,
-      name: file.name,
+      path: filePath,
+      name: fileName,
       content,
       savedContent: content,
       isDirty: false,
     };
     setOpenTabs((prev) => [...prev, newTab]);
-    setActiveTabPath(file.path);
-    restoreTabCursor(file.path);
-    runAnalysis(file.path, content);
+    setActiveTabPath(filePath);
+    restoreTabCursor(filePath);
+    runAnalysis(filePath, content);
   };
 
   const restoreTabCursor = (path: string) => {
@@ -2577,6 +2732,22 @@ export default function IDEApp() {
             <span>Safe Remove ({findings.length})</span>
           </button>
 
+          <button
+            onClick={() => {
+              setHistoryDrawerOpen(!historyDrawerOpen);
+              refreshHistory();
+            }}
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all shadow-sm ${
+              historyDrawerOpen
+                ? "bg-amber-950/90 border-amber-500 text-amber-300 shadow-amber-glow"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-amber-400 hover:text-white"
+            }`}
+            title="Surgery History & Time Travel Ledger"
+          >
+            <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>History ({historyEntries.length})</span>
+          </button>
+
           {saveStatus && (
             <span className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1 text-emerald-400 font-bold animate-fade-in bg-emerald-950/80 px-2.5 py-1 rounded-lg border border-emerald-500/30">
               <Check className="w-3.5 h-3.5 shrink-0" />
@@ -3522,6 +3693,39 @@ export default function IDEApp() {
             handleRunWorkspaceScan();
           }
         }}
+      />
+
+      {/* Surgery History Drawer */}
+      <SurgeryHistoryDrawer
+        isOpen={historyDrawerOpen}
+        onClose={() => setHistoryDrawerOpen(false)}
+        entries={historyEntries}
+        onRefresh={refreshHistory}
+        onRestore={(entry) => {
+          setSelectedHistoryEvent(entry);
+          setShowRestoreConfirmModal(true);
+        }}
+        onPreviewDiff={(entry) => {
+          setDiffData({
+            file: entry.file_path,
+            original_source: entry.before_source,
+            transformed_source: entry.after_source,
+            changed_lines: entry.removed_lines,
+            ghost_count_before: entry.removed_lines.length,
+            ghost_count_after: 0,
+            causal_luminance_after: entry.luminance_after,
+          });
+          setShowSurgeryDiffModal(true);
+        }}
+      />
+
+      {/* Restore Checkpoint Confirmation Modal */}
+      <RestoreConfirmModal
+        isOpen={showRestoreConfirmModal}
+        onClose={() => setShowRestoreConfirmModal(false)}
+        entry={selectedHistoryEvent}
+        onConfirmRestore={(id) => handleRestoreCheckpoint(id)}
+        isRestoring={restoringHistory}
       />
 
     </div>
