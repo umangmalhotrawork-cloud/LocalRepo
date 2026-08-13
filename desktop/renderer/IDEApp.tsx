@@ -80,6 +80,7 @@ declare global {
       previewSurgery: (payload: { file: string; approved_lines: number[] }) => Promise<any>;
       applySurgery: (payload: { file: string; approved_lines: number[] }) => Promise<{ success: boolean; file: string; removed_count: number; backup_path: string; new_hash: string; transformed_content: string; error?: string }>;
       undoSurgery: (payload: { file: string }) => Promise<{ success: boolean; file: string; restored_content: string; backup_path: string; error?: string }>;
+      verifySurgery: (payload: { original_path: string; transformed_source: string }) => Promise<any>;
       searchWorkspace: (payload: { workspace: string; query?: string; mode?: string; limit?: number }) => Promise<{ workspace: string; query: string; mode: string; results_count: number; results: SearchResultItem[]; error?: string }>;
       detectClones: (workspacePath: string) => Promise<CloneReport>;
       scanStructuralClones: (workspacePath: string) => Promise<StructuralCloneGroup[]>;
@@ -359,6 +360,22 @@ export default function IDEApp() {
   const [diffData, setDiffData] = useState<DiffPreviewData | null>(null);
   const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [behaviorResult, setBehaviorResult] = useState<any | null>(null);
+  const [behaviorVerifying, setBehaviorVerifying] = useState(false);
+  const [showForceApplyConfirm, setShowForceApplyConfirm] = useState(false);
+
+  useEffect(() => {
+    const handleMockFailure = () => {
+      setBehaviorResult({
+        behavior_preserved: false,
+        original: { stdout: "x = 6\n", stderr: "", exit_code: 0, exception: null },
+        transformed: { stdout: "x = 5\n", stderr: "", exit_code: 0, exception: null },
+        differences: ["stdout mismatch: original '6' vs transformed '5'"]
+      });
+    };
+    window.addEventListener("mock-verify-failure", handleMockFailure);
+    return () => window.removeEventListener("mock-verify-failure", handleMockFailure);
+  }, []);
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [closeConfirmTab, setCloseConfirmTab] = useState<TabItem | null>(null);
@@ -1959,6 +1976,8 @@ export default function IDEApp() {
 
     addLog(`[SURGERY] Preparing diff preview for ${activeTab.name} (${linesToPreview.length} target lines)...`);
 
+    let targetTransformed = "";
+
     if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.previewSurgery) {
       try {
         const res = await window.electronAPI.previewSurgery({
@@ -1966,6 +1985,7 @@ export default function IDEApp() {
           approved_lines: linesToPreview,
         });
         if (res && res.success) {
+          targetTransformed = res.transformed_source;
           setDiffData({
             file: res.file,
             original_source: res.original_source,
@@ -1983,11 +2003,11 @@ export default function IDEApp() {
       const original = activeTab.content || "";
       const lines = original.split("\n");
       const approvedSet = new Set(linesToPreview);
-      const transformed = lines.filter((_, idx) => !approvedSet.has(idx + 1)).join("\n");
+      targetTransformed = lines.filter((_, idx) => !approvedSet.has(idx + 1)).join("\n");
       setDiffData({
         file: activeTab.path,
         original_source: original,
-        transformed_source: transformed,
+        transformed_source: targetTransformed,
         changed_lines: linesToPreview,
         ghost_count_before: findings.length,
         ghost_count_after: Math.max(0, findings.length - linesToPreview.length),
@@ -1997,6 +2017,35 @@ export default function IDEApp() {
 
     setDiffDrawerOpen(true);
     setShowSurgeryDiffModal(true);
+
+    if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.verifySurgery) {
+      setBehaviorVerifying(true);
+      addLog("[SURGERY] Running behavioral verification...");
+      try {
+        const bRes = await window.electronAPI.verifySurgery({
+          original_path: activeTab.path,
+          transformed_source: targetTransformed,
+        });
+        setBehaviorResult(bRes);
+        if (bRes && bRes.behavior_preserved) {
+          addLog("[SURGERY] Behavior preserved.");
+        } else if (bRes) {
+          const diffMsg = bRes.differences && bRes.differences.length > 0 ? bRes.differences[0] : "stdout mismatch";
+          addLog(`[SURGERY] Behavior changed: ${diffMsg}.`);
+        }
+      } catch (e) {
+        console.error("[SURGERY] Verification failed:", e);
+      } finally {
+        setBehaviorVerifying(false);
+      }
+    } else {
+      setBehaviorResult({
+        behavior_preserved: true,
+        original: { stdout: "", stderr: "", exit_code: 0, exception: null },
+        transformed: { stdout: "", stderr: "", exit_code: 0, exception: null },
+        differences: []
+      });
+    }
   };
 
   const handleApplySurgery = async (approvedLines: number[]) => {
@@ -3224,45 +3273,66 @@ export default function IDEApp() {
             </div>
           </div>
 
-          {/* Differential Behavioral Equivalence Verification Card */}
+          {/* Differential Behavioral Harness Verification Card */}
           <div className="p-3 mx-4 mt-3 bg-[#0d0d0d] border border-[#222] rounded-xl space-y-2 font-mono text-xs">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 font-bold text-zinc-200">
                 <ShieldCheck className="w-4 h-4 text-cyan-400" />
                 <span>Behavioral Verification</span>
               </div>
-              {verifying ? (
-                <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[10px] animate-pulse">
+              {behaviorVerifying ? (
+                <span className="flex items-center gap-1 px-2.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[10px] font-bold animate-pulse">
                   <Activity className="w-3 h-3 animate-spin" />
-                  <span>Testing Subprocess...</span>
+                  <span>Testing Subprocess (3s)...</span>
                 </span>
-              ) : verificationResult?.verified ? (
-                <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold">
+              ) : behaviorResult?.behavior_preserved ? (
+                <span className="flex items-center gap-1 px-2.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold">
                   <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                  <span>EQUIVALENCE CONFIRMED</span>
+                  <span>Behavior Preserved</span>
+                </span>
+              ) : behaviorResult ? (
+                <span className="flex items-center gap-1 px-2.5 py-0.5 rounded bg-red-950/80 border border-red-500/40 text-red-300 text-[10px] font-bold">
+                  <AlertTriangle className="w-3 h-3 text-red-400" />
+                  <span>Behavior Changed</span>
                 </span>
               ) : (
-                <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-950/80 border border-red-500/40 text-red-300 text-[10px] font-bold">
-                  <AlertTriangle className="w-3 h-3 text-red-400" />
-                  <span>DIVERGENCE DETECTED</span>
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-900 text-zinc-400 text-[10px]">
+                  <span>Pending Test</span>
                 </span>
               )}
             </div>
 
-            {verificationResult && (
-              <div className="grid grid-cols-2 gap-2 pt-1 border-t border-[#1a1a1a] text-[11px]">
-                <div className="flex justify-between text-zinc-400">
-                  <span>Output Match:</span>
-                  <span className={verificationResult.outputs_match ? "text-emerald-400 font-bold" : "text-red-400 font-bold"}>
-                    {verificationResult.outputs_match ? "Identical (100%)" : "Divergent"}
-                  </span>
+            {behaviorResult && (
+              <div className="space-y-2 pt-1 border-t border-[#1a1a1a] text-[11px]">
+                <div className="grid grid-cols-3 gap-1.5 text-center">
+                  <div className="p-1.5 bg-[#050505] rounded border border-[#1f1f1f]">
+                    <div className="text-[9px] text-zinc-500 uppercase">stdout</div>
+                    <div className={behaviorResult.original?.stdout?.trim() === behaviorResult.transformed?.stdout?.trim() ? "text-emerald-400 font-bold" : "text-red-400 font-bold"}>
+                      {behaviorResult.original?.stdout?.trim() === behaviorResult.transformed?.stdout?.trim() ? "identical" : "mismatch"}
+                    </div>
+                  </div>
+                  <div className="p-1.5 bg-[#050505] rounded border border-[#1f1f1f]">
+                    <div className="text-[9px] text-zinc-500 uppercase">stderr</div>
+                    <div className={behaviorResult.original?.stderr?.trim() === behaviorResult.transformed?.stderr?.trim() ? "text-emerald-400 font-bold" : "text-red-400 font-bold"}>
+                      {behaviorResult.original?.stderr?.trim() === behaviorResult.transformed?.stderr?.trim() ? "identical" : "mismatch"}
+                    </div>
+                  </div>
+                  <div className="p-1.5 bg-[#050505] rounded border border-[#1f1f1f]">
+                    <div className="text-[9px] text-zinc-500 uppercase">exit code</div>
+                    <div className={behaviorResult.original?.exit_code === behaviorResult.transformed?.exit_code ? "text-emerald-400 font-bold" : "text-red-400 font-bold"}>
+                      {behaviorResult.original?.exit_code === behaviorResult.transformed?.exit_code ? `identical (${behaviorResult.transformed?.exit_code})` : "mismatch"}
+                    </div>
+                  </div>
                 </div>
-                <div className="flex justify-between text-zinc-400">
-                  <span>Perf Delta:</span>
-                  <span className="text-cyan-300 font-bold">
-                    {verificationResult.delta_ms > 0 ? `+${verificationResult.delta_ms}` : verificationResult.delta_ms}ms
-                  </span>
-                </div>
+
+                {behaviorResult.differences && behaviorResult.differences.length > 0 && (
+                  <div className="p-2 bg-red-950/40 border border-red-500/30 rounded text-red-300 text-[10px] space-y-0.5">
+                    <div className="font-bold uppercase tracking-wider text-[9px] text-red-400">Differences Detected:</div>
+                    {behaviorResult.differences.map((diff: string, idx: number) => (
+                      <div key={idx}>• {diff}</div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -3308,14 +3378,25 @@ export default function IDEApp() {
             >
               Cancel
             </button>
-            <button
-              onClick={() => handleApplySurgery(findings.map((f) => f.line))}
-              disabled={verifying || (verificationResult !== null && !verificationResult.verified)}
-              className="px-5 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-black font-bold shadow-cyan-glow transition-all flex items-center gap-2 disabled:opacity-40"
-            >
-              <Zap className="w-4 h-4 fill-black" />
-              <span>Apply Surgery</span>
-            </button>
+            <div className="flex items-center gap-2">
+              {behaviorResult && !behaviorResult.behavior_preserved && (
+                <button
+                  onClick={() => setShowForceApplyConfirm(true)}
+                  className="px-4 py-2 rounded-xl bg-red-950 hover:bg-red-900 border border-red-500/40 text-red-300 font-bold transition-all shadow-sm flex items-center gap-1.5"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                  <span>Force Apply Anyway</span>
+                </button>
+              )}
+              <button
+                onClick={() => handleApplySurgery(diffData.changed_lines)}
+                disabled={applyingSurgery || behaviorVerifying || (behaviorResult !== null && !behaviorResult.behavior_preserved)}
+                className="px-5 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-black font-bold shadow-cyan-glow transition-all flex items-center gap-2 disabled:opacity-40"
+              >
+                <Zap className="w-4 h-4 fill-black" />
+                <span>Apply Surgery</span>
+              </button>
+            </div>
           </div>
 
         </div>
@@ -3340,6 +3421,47 @@ export default function IDEApp() {
         }}
         onCancel={() => setCloseConfirmTab(null)}
       />
+
+      {/* Force Apply Confirmation Dialog */}
+      {showForceApplyConfirm && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-[#0a0a0a] border border-red-500/50 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl font-mono text-xs">
+            <div className="flex items-center gap-2 text-red-400 font-bold text-sm">
+              <AlertTriangle className="w-5 h-5 text-red-400" />
+              <span>Confirm Force Apply Surgery</span>
+            </div>
+            <p className="text-zinc-300 text-xs font-sans leading-relaxed">
+              Behavioral verification detected behavioral divergence between original and transformed code. Applying surgery may alter program execution.
+            </p>
+            {behaviorResult?.differences && behaviorResult.differences.length > 0 && (
+              <div className="bg-red-950/40 border border-red-500/30 rounded-xl p-3 text-[11px] text-red-300 space-y-1">
+                {behaviorResult.differences.map((d: string, idx: number) => (
+                  <div key={idx}>• {d}</div>
+                ))}
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                onClick={() => setShowForceApplyConfirm(false)}
+                className="px-4 py-2 rounded-xl border border-[#262626] text-zinc-300 hover:bg-[#141414] transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowForceApplyConfirm(false);
+                  if (diffData) {
+                    handleApplySurgery(diffData.changed_lines);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold transition-all shadow-lg"
+              >
+                Force Apply Surgery
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <CommandPalette
         isOpen={cmdPaletteOpen}

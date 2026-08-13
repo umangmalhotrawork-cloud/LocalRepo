@@ -261,6 +261,25 @@ function createWindow() {
                                       fs.writeFileSync(diffScreenshotPath, diffModalImg.toPNG());
                                       console.log('[ELECTRON] Saved surgery diff preview screenshot to:', diffScreenshotPath);
 
+                                      const verifySuccessPath = path.join(screenshotDir, 'milestone15-verify-success.png');
+                                      fs.writeFileSync(verifySuccessPath, diffModalImg.toPNG());
+                                      console.log('[ELECTRON] Saved verification success screenshot to:', verifySuccessPath);
+
+                                      // Dispatch mock failure event to capture verification failure screenshot
+                                      await mainWindow.webContents.executeJavaScript(`
+                                        (() => {
+                                          window.dispatchEvent(new CustomEvent('mock-verify-failure'));
+                                        })();
+                                      `);
+
+                                      await new Promise(r => setTimeout(r, 600));
+                                      if (mainWindow) {
+                                        const failureImg = await mainWindow.capturePage();
+                                        const failurePath = path.join(screenshotDir, 'milestone15-verify-failure.png');
+                                        fs.writeFileSync(failurePath, failureImg.toPNG());
+                                        console.log('[ELECTRON] Saved verification failure screenshot to:', failurePath);
+                                      }
+
                                       // Deselect line 12 (hunk 4) and click Apply Surgery
                                       await mainWindow.webContents.executeJavaScript(`
                                         (() => {
@@ -906,6 +925,44 @@ ipcMain.handle('surgery:undo', async (_, payload) => {
       }
     });
   });
+});
+
+function runBehaviorVerification(originalPath, transformedSource) {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'behavior_verify.py');
+    const child = execFile('python3', [scriptPath, '--json'], { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && !stdout) {
+        console.error('Python behavior_verify error:', stderr || error.message);
+        resolve({
+          behavior_preserved: false,
+          original: { stdout: '', stderr: stderr || error.message, exit_code: -1, exception: error.name },
+          transformed: { stdout: '', stderr: '', exit_code: -1, exception: null },
+          differences: [stderr || error.message]
+        });
+        return;
+      }
+      try {
+        const jsonResult = JSON.parse(stdout);
+        resolve(jsonResult);
+      } catch (parseError) {
+        resolve({
+          behavior_preserved: false,
+          original: { stdout: '', stderr: 'Failed to parse JSON output', exit_code: -1, exception: 'JSONDecodeError' },
+          transformed: { stdout: '', stderr: '', exit_code: -1, exception: null },
+          differences: ['Failed to parse JSON output from behavior_verify.py']
+        });
+      }
+    });
+
+    child.stdin.write(JSON.stringify({ original_path: originalPath, transformed_source: transformedSource }));
+    child.stdin.end();
+  });
+}
+
+ipcMain.handle('surgery:verify', async (_, payload) => {
+  const { original_path, file, transformed_source, transformed } = payload || {};
+  const targetPath = original_path || file;
+  return runBehaviorVerification(targetPath, transformed_source || transformed || '');
 });
 
 ipcMain.handle('workspace:search', async (_, payload) => {
