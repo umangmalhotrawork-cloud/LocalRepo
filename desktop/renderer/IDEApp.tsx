@@ -363,9 +363,9 @@ export default function IDEApp() {
   const [cursorPositions, setCursorPositions] = useState<Record<string, { line: number; col: number }>>({});
 
   const activeFileLuminance = useMemo<FileLuminanceReport | null>(() => {
-    if (!luminanceReport || !activeTabPath) return null;
+    if (!luminanceReport || !activeTabPath || typeof activeTabPath !== "string") return null;
     const base = activeTabPath.split("/").pop() || "";
-    return luminanceReport.files.find((f) => activeTabPath.endsWith(f.file) || f.file.endsWith(base)) || null;
+    return luminanceReport.files.find((f) => f && f.file && typeof f.file === "string" ? (activeTabPath.endsWith(f.file) || f.file.endsWith(base)) : false) || null;
   }, [luminanceReport, activeTabPath]);
 
   // Persistence Hook & Editor State Tracking
@@ -1109,7 +1109,7 @@ export default function IDEApp() {
 
     addLog(`[FS] Reading file from disk: ${fileName}`);
     let content = defaultCartCalculatorCode;
-    if (typeof window !== "undefined" && window.electronAPI && !filePath.startsWith("demo-workspaces/")) {
+    if (typeof window !== "undefined" && window.electronAPI && typeof filePath === "string" && !filePath.startsWith("demo-workspaces/")) {
       try {
         console.log('[IDE-APP] handleOpenFile invoking readFile for', filePath);
         const res = await window.electronAPI.readFile(filePath);
@@ -1238,10 +1238,10 @@ export default function IDEApp() {
   };
 
   const handleSaveFile = async () => {
-    if (!activeTab) return;
+    if (!activeTab || !activeTab.path) return;
     addLog(`[FS] Saving file: ${activeTab.name}`);
 
-    if (typeof window !== "undefined" && window.electronAPI && !activeTab.path.startsWith("demo-workspaces/")) {
+    if (typeof window !== "undefined" && window.electronAPI && typeof activeTab.path === "string" && !activeTab.path.startsWith("demo-workspaces/")) {
       try {
         console.log('[IDE-APP] handleSaveFile invoking writeFile for', activeTab.path);
         const res = await window.electronAPI.writeFile(activeTab.path, activeTab.content);
@@ -1275,10 +1275,11 @@ export default function IDEApp() {
   };
 
   const runAnalysis = async (path: string, content: string) => {
+    if (!path || typeof path !== "string") return;
     setAnalyzing(true);
     addLog(`[ENGINE] Running Python analyzer on ${path}...`);
 
-    if (typeof window !== "undefined" && window.electronAPI && !path.startsWith("demo-workspaces/")) {
+    if (typeof window !== "undefined" && window.electronAPI && typeof path === "string" && !path.startsWith("demo-workspaces/")) {
       try {
         console.log('[IDE-APP] runAnalysis invoking analyzeFile for', path);
         const res = await window.electronAPI.analyzeFile(path);
@@ -1320,7 +1321,7 @@ export default function IDEApp() {
     console.log('[WORKSPACE] scan start', folderPath);
     addLog(`[SCAN] Starting workspace-wide AST tomography on ${folderPath}...`);
 
-    if (typeof window !== "undefined" && window.electronAPI && !folderPath.startsWith("demo-workspaces/")) {
+    if (typeof window !== "undefined" && window.electronAPI && typeof folderPath === "string" && !folderPath.startsWith("demo-workspaces/")) {
       try {
         const report = await window.electronAPI.scanWorkspace(folderPath);
         if (report && !report.error) {
@@ -1675,7 +1676,7 @@ export default function IDEApp() {
     console.log('[GRAPH] build start', folder);
     addLog(`[GRAPH] Building cross-file provenance graph for ${folder}...`);
 
-    if (typeof window !== "undefined" && window.electronAPI && !folder.startsWith("demo-workspaces/")) {
+    if (typeof window !== "undefined" && window.electronAPI && typeof folder === "string" && !folder.startsWith("demo-workspaces/")) {
       try {
         const graphData = await window.electronAPI.buildWorkspaceGraph(folder);
         if (graphData && !graphData.error) {
@@ -2100,7 +2101,7 @@ export default function IDEApp() {
     setVerifying(true);
     addLog(`[VERIFY] Running isolated differential verification for ${filePath}...`);
 
-    if (typeof window !== "undefined" && window.electronAPI && !filePath.startsWith("demo-workspaces/")) {
+    if (typeof window !== "undefined" && window.electronAPI && typeof filePath === "string" && !filePath.startsWith("demo-workspaces/")) {
       try {
         const res = await window.electronAPI.verifyEquivalence(filePath, transformedContent);
         setVerificationResult(res);
