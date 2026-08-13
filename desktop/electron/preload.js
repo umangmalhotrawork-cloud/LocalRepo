@@ -35,4 +35,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   generateFingerprint: (filePath) => ipcRenderer.invoke('behavior:fingerprint', filePath),
   compareFingerprints: (fingerprintA, fingerprintB) => ipcRenderer.invoke('behavior:compare-fingerprints', { fingerprint_a: fingerprintA, fingerprint_b: fingerprintB }),
   analyzeBehaviorHistory: (payload) => ipcRenderer.invoke('behavior:history', payload),
+  calculateImpactRadius: (payload) => ipcRenderer.invoke('behavior:impact-radius', payload),
 });

@@ -349,6 +349,7 @@ export default function IDEApp() {
   const [fingerprintLoading, setFingerprintLoading] = useState(false);
   const [workspaceGraph, setWorkspaceGraph] = useState<WorkspaceGraph | null>(null);
   const [graphLoading, setGraphLoading] = useState(false);
+  const [impactRadiusResult, setImpactRadiusResult] = useState<any>(null);
   const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
   const [startupModalOpen, setStartupModalOpen] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<"file" | "project" | "clones" | "semantic">("file");
@@ -2881,6 +2882,7 @@ export default function IDEApp() {
               onRefresh={() => handleLoadWorkspaceGraph()}
               onNodeClick={handleGraphNodeClick}
               onClose={() => setMainView("editor")}
+              impactRadiusResult={impactRadiusResult}
             />
           ) : mainView === "clones" ? (
             <ClonePanel
@@ -2905,6 +2907,12 @@ export default function IDEApp() {
               loading={fingerprintLoading}
               onGenerate={(fp) => handleGenerateFingerprint(fp)}
               onClose={() => setMainView("editor")}
+              workspaceGraph={workspaceGraph}
+              onImpactRadiusComputed={(res) => setImpactRadiusResult(res)}
+              onSelectImpactNode={(file, line) => {
+                handleJumpToStatement(file, line);
+                setMainView("graph");
+              }}
             />
           ) : (
             <>

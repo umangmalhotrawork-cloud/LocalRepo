@@ -982,6 +982,18 @@ ipcMain.handle('behavior:history', async (_, payload) => {
   });
 });
 
+ipcMain.handle('behavior:impact-radius', async (_, payload) => {
+  return new Promise((resolve) => {
+    try {
+      const { computeBehavioralImpactRadius } = require('../engine/behavioral_impact_radius');
+      const result = computeBehavioralImpactRadius(payload);
+      resolve(result);
+    } catch (e) {
+      resolve({ schema_version: 1, error: e.message, summary: { global_severity: 'NO_CHANGE' }, impacted_nodes: [] });
+    }
+  });
+});
+
 ipcMain.handle('surgery:preview', async (_, payload) => {
   const { file, approved_lines = [] } = payload;
   const absPath = path.isAbsolute(file) ? file : path.join(app.getAppPath(), file);

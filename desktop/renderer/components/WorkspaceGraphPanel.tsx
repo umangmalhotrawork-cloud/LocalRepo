@@ -35,6 +35,7 @@ interface WorkspaceGraphPanelProps {
   onRefresh: () => void;
   onNodeClick: (node: GraphNode) => void;
   onClose?: () => void;
+  impactRadiusResult?: any;
 }
 
 export default function WorkspaceGraphPanel({
@@ -43,6 +44,7 @@ export default function WorkspaceGraphPanel({
   onRefresh,
   onNodeClick,
   onClose,
+  impactRadiusResult,
 }: WorkspaceGraphPanelProps) {
   const [selectedFile, setSelectedFile] = useState<string>("ALL");
   const [selectedKind, setSelectedKind] = useState<string>("ALL");
@@ -88,6 +90,27 @@ export default function WorkspaceGraphPanel({
       (e) => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target)
     );
   }, [graph, filteredNodeIds]);
+
+  const impactNodeMap = useMemo(() => {
+    if (!impactRadiusResult || !impactRadiusResult.impacted_nodes) return new Map();
+    const map = new Map<string, any>();
+
+    if (impactRadiusResult.root_function) {
+      const rootKey = `${impactRadiusResult.root_function.name}`.toLowerCase();
+      map.set(rootKey, {
+        classification: "ROOT_CHANGE",
+        severity: impactRadiusResult.root_function.severity || "HIGH",
+        distance: 0,
+      });
+    }
+
+    for (const node of impactRadiusResult.impacted_nodes) {
+      const symKey = `${node.symbol}`.toLowerCase();
+      map.set(symKey, node);
+      map.set(node.id, node);
+    }
+    return map;
+  }, [impactRadiusResult]);
 
   // Compute 2D node coordinates grouped by file in vertical lanes
   const nodePositions = useMemo(() => {
@@ -532,6 +555,19 @@ export default function WorkspaceGraphPanel({
               const isSelected = selectedNodeId === node.id;
               const isHovered = hoveredNode?.id === node.id;
 
+              const impactData = impactNodeMap.get(node.id) || impactNodeMap.get(node.symbol.toLowerCase());
+              const isImpactRoot = impactData?.classification === "ROOT_CHANGE";
+              const isImpactObserved = impactData?.classification === "OBSERVED_CHANGE";
+              const isImpactStatic = impactData?.classification === "STATIC_IMPACT";
+
+              const strokeColor = isImpactRoot
+                ? "#f43f5e"
+                : isImpactObserved
+                ? "#f59e0b"
+                : isImpactStatic
+                ? "#06b6d4"
+                : undefined;
+
               return (
                 <g
                   key={node.id}
@@ -550,8 +586,9 @@ export default function WorkspaceGraphPanel({
                     height={pos.height}
                     rx="10"
                     className={`${colors.bg} ${colors.border} transition-all`}
-                    strokeWidth={isSelected || isHovered ? "2" : "1"}
-                    strokeOpacity={isSelected ? 1.0 : 0.6}
+                    stroke={strokeColor}
+                    strokeWidth={strokeColor || isSelected || isHovered ? "2.5" : "1"}
+                    strokeOpacity={strokeColor || isSelected ? 1.0 : 0.6}
                     fillOpacity={0.85}
                   />
 
@@ -572,6 +609,18 @@ export default function WorkspaceGraphPanel({
                       L{node.line}
                     </text>
                   </g>
+
+                  {/* Impact Overlay Badge */}
+                  {impactData && (
+                    <g transform={`translate(${pos.width - 100}, 30)`}>
+                      <text
+                        className="text-[8px] font-black uppercase tracking-tight"
+                        fill={isImpactRoot ? "#f43f5e" : isImpactObserved ? "#f59e0b" : "#06b6d4"}
+                      >
+                        {isImpactRoot ? "ROOT CHANGE" : isImpactObserved ? `OBSERVED (d=${impactData.distance})` : `STATIC (d=${impactData.distance})`}
+                      </text>
+                    </g>
+                  )}
 
                   {/* Label / Symbol */}
                   <g transform="translate(10, 36)">

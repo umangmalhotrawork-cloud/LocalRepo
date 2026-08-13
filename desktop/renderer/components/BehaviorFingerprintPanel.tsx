@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Cpu, ShieldCheck, AlertTriangle, CheckCircle2, RefreshCw, ChevronRight, ChevronDown, Clock, FileCode, GitCompare, ArrowRight, XCircle, History, GitCommit, GitBranch } from "lucide-react";
+import { Cpu, ShieldCheck, AlertTriangle, CheckCircle2, RefreshCw, ChevronRight, ChevronDown, Clock, FileCode, GitCompare, ArrowRight, XCircle, History, GitCommit, GitBranch, Activity, Sparkles } from "lucide-react";
 
 export interface ObservationItem {
   input: Array<{ type: string; value: any }>;
@@ -118,12 +118,51 @@ export interface TemporalBehaviorResult {
   error?: string;
 }
 
+export interface ImpactRadiusNode {
+  id: string;
+  symbol: string;
+  file: string;
+  line: number;
+  kind?: string;
+  distance: number;
+  relationship: "direct-caller" | "indirect-caller";
+  classification: "ROOT_CHANGE" | "OBSERVED_CHANGE" | "STATIC_IMPACT" | "UNVERIFIED";
+  severity: "NO_CHANGE" | "LOW" | "MEDIUM" | "HIGH";
+  description: string;
+  differences?: any[];
+}
+
+export interface ImpactRadiusResult {
+  schema_version: number;
+  root_function?: {
+    name: string;
+    file: string;
+    severity: string;
+    differences_count: number;
+    differences: any[];
+  };
+  summary?: {
+    total_impacted_nodes: number;
+    observed_changes_count: number;
+    static_impacts_count: number;
+    unverified_count: number;
+    max_depth_reached: number;
+    blast_radius_score: number;
+    global_severity: "NO_CHANGE" | "LOW" | "MEDIUM" | "HIGH";
+  };
+  impacted_nodes?: ImpactRadiusNode[];
+  error?: string;
+}
+
 interface BehaviorFingerprintPanelProps {
   filePath?: string;
   report: BehavioralFingerprintReport | null;
   loading: boolean;
   onGenerate: (filePath: string) => void;
   onClose?: () => void;
+  workspaceGraph?: any;
+  onImpactRadiusComputed?: (result: ImpactRadiusResult | null) => void;
+  onSelectImpactNode?: (file: string, line: number) => void;
 }
 
 export default function BehaviorFingerprintPanel({
@@ -132,8 +171,11 @@ export default function BehaviorFingerprintPanel({
   loading,
   onGenerate,
   onClose,
+  workspaceGraph,
+  onImpactRadiusComputed,
+  onSelectImpactNode,
 }: BehaviorFingerprintPanelProps) {
-  const [viewMode, setViewMode] = useState<"single" | "compare" | "temporal">("single");
+  const [viewMode, setViewMode] = useState<"single" | "compare" | "temporal" | "impact">("single");
   const [selectedFn, setSelectedFn] = useState<string | null>(null);
   const [expandedObs, setExpandedObs] = useState<Record<string, boolean>>({});
   
@@ -147,10 +189,45 @@ export default function BehaviorFingerprintPanel({
   const [temporalResult, setTemporalResult] = useState<TemporalBehaviorResult | null>(null);
   const [analyzingTemporal, setAnalyzingTemporal] = useState<boolean>(false);
 
+  // Impact Radius State (Milestone 19)
+  const [impactRootFn, setImpactRootFn] = useState<string>("");
+  const [impactMaxDepth, setImpactMaxDepth] = useState<number>(3);
+  const [impactResult, setImpactResult] = useState<ImpactRadiusResult | null>(null);
+  const [analyzingImpact, setAnalyzingImpact] = useState<boolean>(false);
+
   const activeFn = report?.functions.find((f) => f.name === selectedFn) || report?.functions[0] || null;
 
   const toggleObs = (key: string) => {
     setExpandedObs((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const handleRunImpactAnalysis = async () => {
+    if (!filePath) return;
+    setAnalyzingImpact(true);
+    try {
+      if (typeof window !== "undefined" && window.electronAPI) {
+        const rootName = impactRootFn || activeFn?.name || report?.functions[0]?.name || "";
+        const fpA = report || (await (window.electronAPI as any).generateFingerprint(filePath));
+
+        const payload = {
+          root_function: rootName,
+          root_file: filePath,
+          workspace_graph: workspaceGraph || { nodes: [], edges: [] },
+          fingerprint_a: fpA,
+          fingerprint_b: fpA,
+          max_depth: impactMaxDepth,
+        };
+
+        const res = await (window.electronAPI as any).calculateImpactRadius(payload);
+        setImpactResult(res);
+        if (onImpactRadiusComputed) {
+          onImpactRadiusComputed(res);
+        }
+      }
+    } catch (err: any) {
+      console.error("Impact radius calculation error:", err);
+    }
+    setAnalyzingImpact(false);
   };
 
   const handleRunComparison = async () => {
@@ -260,6 +337,17 @@ export default function BehaviorFingerprintPanel({
             >
               <History className="w-3 h-3" />
               <span>Git Timeline</span>
+            </button>
+            <button
+              onClick={() => setViewMode("impact")}
+              className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${
+                viewMode === "impact"
+                  ? "bg-rose-950 text-rose-300 border border-rose-500/30 shadow-sm"
+                  : "text-zinc-400 hover:text-white"
+              }`}
+            >
+              <Activity className="w-3 h-3 text-rose-400" />
+              <span>Impact Radius</span>
             </button>
           </div>
 
@@ -441,6 +529,165 @@ export default function BehaviorFingerprintPanel({
           ) : (
             <div className="p-8 text-center text-zinc-600 text-xs">
               Click "Analyze Git History" above to localize the first observable behavioral divergence across the repository's commit timeline.
+            </div>
+          )}
+        </div>
+      ) : viewMode === "impact" ? (
+        <div className="flex-1 flex flex-col min-h-0 bg-[#050505] p-4 overflow-y-auto space-y-4">
+          {/* Impact Setup Panel */}
+          <div className="p-4 rounded-xl bg-[#0d0a0b] border border-rose-900/30 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-rose-400" />
+                <h3 className="text-sm font-bold text-white">Behavioral Impact Radius & Blast-Radius Engine (Milestone 19)</h3>
+              </div>
+              <span className="text-[10px] px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-500/30 font-bold flex items-center gap-1">
+                <Sparkles className="w-3 h-3 text-rose-400" />
+                Call-Graph + Runtime Fingerprints
+              </span>
+            </div>
+
+            <div className="grid grid-cols-12 gap-3 pt-1">
+              <div className="col-span-6">
+                <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold block mb-1">
+                  Root Function
+                </label>
+                <select
+                  value={impactRootFn}
+                  onChange={(e) => setImpactRootFn(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-lg bg-[#141416] border border-[#27272a] text-xs text-zinc-200 outline-none"
+                >
+                  <option value="">Auto-Detect ({report?.functions[0]?.name || "First Function"})</option>
+                  {report?.functions.map((f) => (
+                    <option key={f.name} value={f.name}>
+                      {f.name} (L{f.line})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="col-span-3">
+                <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold block mb-1">
+                  Max Depth
+                </label>
+                <select
+                  value={impactMaxDepth}
+                  onChange={(e) => setImpactMaxDepth(Number(e.target.value))}
+                  className="w-full px-3 py-1.5 rounded-lg bg-[#141416] border border-[#27272a] text-xs text-zinc-200 outline-none"
+                >
+                  <option value={1}>1 Hop (Direct Callers)</option>
+                  <option value={2}>2 Hops</option>
+                  <option value={3}>3 Hops (Default)</option>
+                  <option value={5}>5 Hops (Deep Trace)</option>
+                </select>
+              </div>
+
+              <div className="col-span-3 flex items-end">
+                <button
+                  onClick={handleRunImpactAnalysis}
+                  disabled={analyzingImpact || !filePath}
+                  className="w-full py-1.5 px-3 rounded-lg bg-rose-950 hover:bg-rose-900 border border-rose-500/40 text-rose-200 font-bold text-xs transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <Activity className={`w-3.5 h-3.5 text-rose-400 ${analyzingImpact ? "animate-spin" : ""}`} />
+                  <span>{analyzingImpact ? "Analyzing..." : "Analyze Impact"}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Impact Results Executive KPI Header */}
+          {impactResult && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-4 gap-3">
+                <div className="p-3 rounded-xl bg-rose-950/20 border border-rose-500/30 flex flex-col justify-between">
+                  <span className="text-[10px] uppercase text-rose-400 font-bold tracking-wider">Blast-Radius Score</span>
+                  <div className="text-2xl font-black text-rose-300 mt-1">
+                    {impactResult.summary?.blast_radius_score || 0} <span className="text-xs text-rose-500 font-normal">/ 10.0</span>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-[#0a0a0d] border border-[#1f1f1f] flex flex-col justify-between">
+                  <span className="text-[10px] uppercase text-zinc-500 font-bold tracking-wider">Global Severity</span>
+                  <div className="mt-1">
+                    <span className={`px-2 py-0.5 rounded text-xs font-bold border ${
+                      impactResult.summary?.global_severity === "HIGH"
+                        ? "bg-rose-950 text-rose-300 border-rose-500/40"
+                        : impactResult.summary?.global_severity === "MEDIUM"
+                        ? "bg-amber-950 text-amber-300 border-amber-500/40"
+                        : "bg-emerald-950 text-emerald-300 border-emerald-500/40"
+                    }`}>
+                      {impactResult.summary?.global_severity || "NO_CHANGE"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-[#0a0a0d] border border-[#1f1f1f] flex flex-col justify-between">
+                  <span className="text-[10px] uppercase text-zinc-500 font-bold tracking-wider">Observed Changes</span>
+                  <div className="text-xl font-bold text-amber-400 mt-1">
+                    {impactResult.summary?.observed_changes_count || 0} <span className="text-xs text-zinc-600">/ {impactResult.summary?.total_impacted_nodes || 0} nodes</span>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-[#0a0a0d] border border-[#1f1f1f] flex flex-col justify-between">
+                  <span className="text-[10px] uppercase text-zinc-500 font-bold tracking-wider">Static Dependencies</span>
+                  <div className="text-xl font-bold text-cyan-400 mt-1">
+                    {impactResult.summary?.static_impacts_count || 0} <span className="text-xs text-zinc-600">nodes</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Impacted Callers List */}
+              <div className="p-4 rounded-xl bg-[#0a0a0d] border border-[#1f1f1f] space-y-3">
+                <h4 className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center justify-between">
+                  <span>Downstream Callers & Affected Surface ({impactResult.impacted_nodes?.length || 0})</span>
+                  <span className="text-[10px] text-zinc-500 lowercase font-normal">Click node to jump to source / graph</span>
+                </h4>
+
+                {impactResult.impacted_nodes?.length === 0 ? (
+                  <div className="text-center py-6 text-zinc-500 text-xs">
+                    No downstream callers found for target root function in call graph.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {impactResult.impacted_nodes?.map((node, idx) => (
+                      <div
+                        key={idx}
+                        onClick={() => onSelectImpactNode && onSelectImpactNode(node.file, node.line)}
+                        className="p-3 rounded-lg bg-[#111114] hover:bg-[#18181c] border border-[#1f1f24] hover:border-rose-500/40 cursor-pointer transition-all flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                            node.classification === "OBSERVED_CHANGE"
+                              ? "bg-rose-950 text-rose-300 border-rose-500/40"
+                              : node.classification === "STATIC_IMPACT"
+                              ? "bg-cyan-950 text-cyan-300 border-cyan-500/40"
+                              : "bg-zinc-900 text-zinc-400 border-zinc-700"
+                          }`}>
+                            {node.classification}
+                          </span>
+
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-white text-xs">{node.symbol}</span>
+                              <span className="text-[10px] text-zinc-500">
+                                ({node.file}:L{node.line})
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-zinc-400 mt-0.5">{node.description}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-[#1c1c22] text-zinc-400 border border-[#2a2a32]">
+                            d = {node.distance} ({node.relationship})
+                          </span>
+                          <ChevronRight className="w-4 h-4 text-zinc-500" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
