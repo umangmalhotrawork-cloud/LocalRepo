@@ -25,6 +25,7 @@ import SemanticClonePanel, { SemanticCloneReport, SemanticCloneInstance } from "
 import CodeEditorPanel, { WorkspaceLuminanceReport, FileLuminanceReport, StatementLuminance } from "./components/CodeEditorPanel";
 import SurgeryHistoryDrawer from "./components/SurgeryHistoryDrawer";
 import RestoreConfirmModal from "./components/RestoreConfirmModal";
+import BehaviorFingerprintPanel, { BehavioralFingerprintReport } from "./components/BehaviorFingerprintPanel";
 import { useWorkspaceState, EditorViewState, WorkspacePersistedState } from "./hooks/useWorkspaceState";
 import { buildWorkspaceReport, ReportExportPayload } from "./utils/reportBuilder";
 import { exportGraphSvg } from "./utils/exportGraphSvg";
@@ -331,7 +332,7 @@ export default function IDEApp() {
       return_sink_line: 24,
     },
   ]);
-  type MainView = "editor" | "dashboard" | "graph" | "clones" | "semantic_clones" | "luminance";
+  type MainView = "editor" | "dashboard" | "graph" | "clones" | "semantic_clones" | "luminance" | "behavior_fingerprint";
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(findings[0] || null);
   const [workspaceReport, setWorkspaceReport] = useState<WorkspaceReport | null>(null);
   const [workspaceSummary, setWorkspaceSummary] = useState<WorkspaceReport | null>(null);
@@ -344,6 +345,8 @@ export default function IDEApp() {
   const [semanticCloneLoading, setSemanticCloneLoading] = useState(false);
   const [luminanceReport, setLuminanceReport] = useState<WorkspaceLuminanceReport | null>(null);
   const [luminanceLoading, setLuminanceLoading] = useState(false);
+  const [fingerprintReport, setFingerprintReport] = useState<BehavioralFingerprintReport | null>(null);
+  const [fingerprintLoading, setFingerprintLoading] = useState(false);
   const [workspaceGraph, setWorkspaceGraph] = useState<WorkspaceGraph | null>(null);
   const [graphLoading, setGraphLoading] = useState(false);
   const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
@@ -2049,6 +2052,27 @@ export default function IDEApp() {
     setLuminanceLoading(false);
   };
 
+  const handleGenerateFingerprint = async (targetFilePath?: string) => {
+    const fpath = targetFilePath || activeTabPath || "demo-workspaces/ai_cart_project/src/cart_calculator.py";
+    setFingerprintLoading(true);
+    addLog(`[BEHAVIOR-FINGERPRINT] Discovering functions and executing input matrix for: ${fpath}`);
+
+    if (typeof window !== "undefined" && window.electronAPI && (window.electronAPI as any).generateFingerprint) {
+      try {
+        const rep = await (window.electronAPI as any).generateFingerprint(fpath);
+        if (rep && !rep.error) {
+          setFingerprintReport(rep);
+          addLog(`[BEHAVIOR-FINGERPRINT] Complete. Discovered ${rep.functions_count || 0} functions.`);
+        } else {
+          addLog(`[BEHAVIOR-FINGERPRINT] Error: ${rep?.error || "Unknown error"}`);
+        }
+      } catch (err: any) {
+        addLog(`[BEHAVIOR-FINGERPRINT] Exception: ${err.message || String(err)}`);
+      }
+    }
+    setFingerprintLoading(false);
+  };
+
   const handleJumpToStatement = async (file: string, line: number) => {
     const targetPath = folderPath ? `${folderPath}/${file}` : file;
     const fileName = file.split("/").pop() || file;
@@ -2642,6 +2666,25 @@ export default function IDEApp() {
           </button>
 
           <button
+            onClick={() => {
+              const next = mainView === "behavior_fingerprint" ? "editor" : "behavior_fingerprint";
+              setMainView(next);
+              if (next === "behavior_fingerprint" && !fingerprintReport) {
+                handleGenerateFingerprint();
+              }
+            }}
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
+              mainView === "behavior_fingerprint"
+                ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 shadow-cyan-glow font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300"
+            }`}
+            title="Toggle Behavioral Fingerprint Engine"
+          >
+            <Cpu className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span>Fingerprint</span>
+          </button>
+
+          <button
             onClick={() => setStartupModalOpen(true)}
             className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-zinc-400 hover:text-white transition-all"
             title="Open Workspace Hub / Recent Projects"
@@ -2852,6 +2895,14 @@ export default function IDEApp() {
               loading={semanticCloneLoading}
               onRunScan={handleRunSemanticCloneScan}
               onSelectInstance={handleSelectSemanticCloneInstance}
+              onClose={() => setMainView("editor")}
+            />
+          ) : mainView === "behavior_fingerprint" ? (
+            <BehaviorFingerprintPanel
+              filePath={activeTabPath}
+              report={fingerprintReport}
+              loading={fingerprintLoading}
+              onGenerate={(fp) => handleGenerateFingerprint(fp)}
               onClose={() => setMainView("editor")}
             />
           ) : (

@@ -931,6 +931,57 @@ ipcMain.handle('report:export-pldi', async (_, workspacePath) => {
   });
 });
 
+ipcMain.handle('behavior:fingerprint', async (_, filePath) => {
+  return new Promise((resolve) => {
+    const isJS = filePath.match(/\.(js|jsx|ts|tsx)$/i);
+    const scriptPath = isJS
+      ? path.join(app.getAppPath(), 'desktop', 'engine', 'js_behavior_fingerprint.js')
+      : path.join(app.getAppPath(), 'desktop', 'engine', 'behavior_fingerprint.py');
+    const runner = isJS ? 'node' : 'python3';
+
+    execFile(runner, [scriptPath, filePath], { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && !stdout) return resolve({ error: stderr || error.message, functions: [] });
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (e) {
+        resolve({ error: 'Failed to parse behavioral fingerprint JSON output', functions: [] });
+      }
+    });
+  });
+});
+
+ipcMain.handle('behavior:compare-fingerprints', async (_, payload) => {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'behavior_compare.js');
+    const child = execFile('node', [scriptPath], { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && !stdout) return resolve({ compatible: false, error: stderr || error.message, summary: {} });
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (e) {
+        resolve({ compatible: false, error: 'Failed to parse fingerprint comparison JSON output', summary: {} });
+      }
+    });
+    child.stdin.write(JSON.stringify(payload));
+    child.stdin.end();
+  });
+});
+
+ipcMain.handle('behavior:history', async (_, payload) => {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'git_behavior_history.js');
+    const child = execFile('node', [scriptPath, '--json'], { maxBuffer: 20 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error && !stdout) return resolve({ error: stderr || error.message, timeline: [] });
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (e) {
+        resolve({ error: 'Failed to parse Git behavioral history JSON output', timeline: [] });
+      }
+    });
+    child.stdin.write(JSON.stringify(payload));
+    child.stdin.end();
+  });
+});
+
 ipcMain.handle('surgery:preview', async (_, payload) => {
   const { file, approved_lines = [] } = payload;
   const absPath = path.isAbsolute(file) ? file : path.join(app.getAppPath(), file);

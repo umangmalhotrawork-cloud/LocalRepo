@@ -32,4 +32,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   restoreHistory: (id) => ipcRenderer.invoke('history:restore', id),
   appendHistory: (entry) => ipcRenderer.invoke('history:append', entry),
   exportPldiReport: (workspacePath) => ipcRenderer.invoke('report:export-pldi', workspacePath),
+  generateFingerprint: (filePath) => ipcRenderer.invoke('behavior:fingerprint', filePath),
+  compareFingerprints: (fingerprintA, fingerprintB) => ipcRenderer.invoke('behavior:compare-fingerprints', { fingerprint_a: fingerprintA, fingerprint_b: fingerprintB }),
+  analyzeBehaviorHistory: (payload) => ipcRenderer.invoke('behavior:history', payload),
 });
