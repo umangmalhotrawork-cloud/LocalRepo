@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Activity, Github, Sparkles, Command, Menu, X } from "lucide-react";
+import { Activity, Github, Sparkles, Command, Menu, X, Download, Terminal, ShieldCheck } from "lucide-react";
 import CommandPaletteModal from "@/components/ui/CommandPaletteModal";
 
 export default function Navbar() {
@@ -15,7 +15,7 @@ export default function Navbar() {
 
   useEffect(() => {
     const handleScroll = () => {
-      setScrolled(window.scrollY > 40);
+      setScrolled(window.scrollY > 20);
     };
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
@@ -28,76 +28,70 @@ export default function Navbar() {
   }, []);
 
   const navItems = [
-    { name: "Home", path: "/" },
-    { name: "Research", path: "/research" },
+    { name: "Overview", path: "/" },
+    { name: "Desktop IDE", path: "/desktop" },
     { name: "Architecture", path: "/architecture" },
-    { name: "Docs", path: "/docs" },
+    { name: "Documentation", path: "/docs" },
     { name: "Interactive Demo", path: "/demo" },
+    { name: "Research", path: "/research" },
   ];
 
   return (
     <>
       <header
-        className={`sticky top-0 z-40 w-full transition-all duration-300 ${
+        className={`sticky top-0 z-40 w-full font-mono text-xs transition-all duration-200 ${
           scrolled
-            ? "backdrop-blur-2xl bg-black/85 border-b border-[#1f1f1f] shadow-2xl"
-            : "bg-transparent border-b border-transparent"
+            ? "bg-[#09090d]/95 backdrop-blur-md border-b border-[#1f1f24] shadow-lg"
+            : "bg-[#050508] border-b border-[#1f1f24]"
         }`}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-12 flex items-center justify-between">
           
           {/* Brand */}
-          <Link href="/" className="flex items-center gap-3 group">
-            <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500/20 to-purple-600/20 border border-cyan-500/40 flex items-center justify-center group-hover:border-cyan-400 group-hover:shadow-[0_0_20px_rgba(34,211,238,0.5)] transition-all">
-              <Activity className="w-5 h-5 text-cyan-400 group-hover:rotate-12 transition-transform" />
+          <Link href="/" className="flex items-center gap-2.5 group">
+            <div className="w-7 h-7 rounded-lg bg-cyan-950/80 border border-cyan-500/50 flex items-center justify-center text-cyan-400 group-hover:border-cyan-400 transition-colors">
+              <Activity className="w-4 h-4" />
             </div>
-            <div className="flex items-baseline gap-2">
-              <span className="font-heading font-bold text-xl text-white tracking-tight group-hover:text-cyan-300 transition-colors">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-zinc-100 uppercase tracking-wider text-xs group-hover:text-cyan-300 transition-colors">
                 Echo Nullity
               </span>
-              <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-mono tracking-wider text-cyan-400 bg-cyan-950/70 border border-cyan-500/30 rounded-full">
-                V2 ENGINE
+              <span className="px-1.5 py-0.2 rounded-full bg-[#151520] border border-[#262626] text-zinc-400 text-[9.5px]">
+                v1.0.0-beta
               </span>
             </div>
           </Link>
 
           {/* Desktop Navigation Links */}
-          <nav className="hidden md:flex items-center gap-1 bg-[#0a0a0a]/90 p-1.5 rounded-full border border-[#1f1f1f]">
+          <nav className="hidden md:flex items-center gap-1 bg-[#09090d] p-1 rounded-xl border border-[#1f1f24]">
             {navItems.map((item) => {
               const isActive = pathname === item.path;
               return (
                 <Link
                   key={item.path}
                   href={item.path}
-                  className={`relative px-4 py-1.5 text-xs font-medium rounded-full transition-colors ${
+                  className={`px-3 py-1 rounded-lg transition-all text-xs ${
                     isActive
-                      ? "text-white font-semibold"
-                      : "text-zinc-400 hover:text-white hover:bg-zinc-900/60"
+                      ? "bg-[#151520] text-cyan-300 border border-cyan-500/40 font-bold shadow-sm"
+                      : "text-zinc-400 hover:text-zinc-200 hover:bg-[#121216]"
                   }`}
                 >
-                  {isActive && (
-                    <motion.div
-                      layoutId="activeNavTab"
-                      className="absolute inset-0 bg-gradient-to-r from-cyan-500/20 to-purple-500/20 border border-cyan-500/40 rounded-full"
-                      transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                    />
-                  )}
-                  <span className="relative z-10">{item.name}</span>
+                  {item.name}
                 </Link>
               );
             })}
           </nav>
 
-          {/* Right Controls: Command Palette (⌘K) + GitHub + CTA */}
-          <div className="flex items-center gap-3">
+          {/* Right Controls */}
+          <div className="flex items-center gap-2">
             {/* Command Palette Button */}
             <button
               onClick={() => setCmdOpen(true)}
-              className="hidden lg:flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-zinc-400 bg-[#0a0a0a] hover:bg-[#141414] border border-[#1f1f1f] hover:border-cyan-500/40 rounded-xl transition-all"
+              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-zinc-400 bg-[#0a0a0d] hover:bg-[#141418] border border-[#1f1f24] hover:border-cyan-500/40 transition-all cursor-pointer"
             >
               <Command className="w-3.5 h-3.5 text-cyan-400" />
               <span>Search</span>
-              <kbd className="px-1.5 py-0.5 text-[10px] bg-[#161616] border border-[#262626] rounded text-zinc-300">
+              <kbd className="px-1 py-0.2 text-[9px] bg-[#151520] border border-[#262626] rounded text-zinc-300">
                 ⌘K
               </kbd>
             </button>
@@ -107,30 +101,29 @@ export default function Navbar() {
               href="https://github.com"
               target="_blank"
               rel="noreferrer"
-              className="hidden sm:flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-zinc-300 bg-[#0a0a0a] hover:bg-[#141414] border border-[#1f1f1f] hover:border-zinc-700 rounded-xl transition-all"
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-zinc-300 bg-[#0a0a0d] hover:bg-[#141418] border border-[#1f1f24] hover:border-zinc-700 transition-all"
             >
-              <Github className="w-4 h-4 text-zinc-400" />
-              <span>GitHub</span>
-              <span className="text-cyan-400 font-semibold bg-cyan-950/60 px-1.5 py-0.5 rounded text-[10px] border border-cyan-500/20">
+              <Github className="w-3.5 h-3.5 text-zinc-400" />
+              <span className="text-cyan-400 font-bold bg-cyan-950/60 px-1 py-0.2 rounded text-[9.5px] border border-cyan-500/20">
                 1.4k ★
               </span>
             </a>
 
-            {/* CTA Button */}
+            {/* Primary Action Button */}
             <Link
-              href="/demo"
-              className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-black bg-cyan-400 hover:bg-cyan-300 rounded-xl shadow-cyan-glow transition-all hover:scale-105 active:scale-95 font-sans"
+              href="#downloads"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-cyan-950 text-cyan-300 border border-cyan-500/50 hover:bg-cyan-900 font-bold text-xs transition-all shadow-[0_0_12px_rgba(6,182,212,0.25)]"
             >
-              <Sparkles className="w-3.5 h-3.5 fill-black" />
-              <span>Run Tomography</span>
+              <Download className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Download Beta</span>
             </Link>
 
             {/* Mobile Menu Button */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden p-2 text-zinc-400 hover:text-white rounded-xl bg-[#0a0a0a] border border-[#1f1f1f]"
+              className="md:hidden p-1.5 text-zinc-400 hover:text-white rounded-lg bg-[#0a0a0d] border border-[#1f1f24]"
             >
-              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
             </button>
           </div>
 
@@ -143,17 +136,17 @@ export default function Navbar() {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
-              className="md:hidden bg-[#0a0a0a] border-b border-[#1f1f1f] px-4 py-4 space-y-2 font-mono text-xs"
+              className="md:hidden bg-[#09090d] border-b border-[#1f1f24] px-4 py-3 space-y-1.5 font-mono text-xs"
             >
               {navItems.map((item) => (
                 <Link
                   key={item.path}
                   href={item.path}
                   onClick={() => setMobileMenuOpen(false)}
-                  className={`block px-4 py-2.5 rounded-xl transition-colors ${
+                  className={`block px-3 py-2 rounded-lg transition-colors ${
                     pathname === item.path
-                      ? "bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40"
-                      : "text-zinc-400 hover:text-white hover:bg-[#141414]"
+                      ? "bg-cyan-950/80 text-cyan-300 font-bold border border-cyan-500/40"
+                      : "text-zinc-400 hover:text-white hover:bg-[#121216]"
                   }`}
                 >
                   {item.name}
@@ -164,10 +157,10 @@ export default function Navbar() {
                   setMobileMenuOpen(false);
                   setCmdOpen(true);
                 }}
-                className="w-full text-left px-4 py-2.5 rounded-xl bg-[#141414] border border-[#242424] text-cyan-400 flex items-center justify-between"
+                className="w-full text-left px-3 py-2 rounded-lg bg-[#121216] border border-[#24242e] text-cyan-400 flex items-center justify-between"
               >
                 <span>Search Documentation (⌘K)</span>
-                <Command className="w-4 h-4" />
+                <Command className="w-3.5 h-3.5" />
               </button>
             </motion.div>
           )}

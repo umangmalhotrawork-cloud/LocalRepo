@@ -1,117 +1,78 @@
 import Hero from "@/components/Hero";
-import CodeDemo from "@/components/CodeDemo";
+import TrustBanner from "@/components/TrustBanner";
+import IDECoreSection from "@/components/IDECoreSection";
 import FeatureSection from "@/components/FeatureCard";
-import ArchitectureFlow from "@/components/ArchitectureFlow";
-import TensionGraph from "@/components/TensionGraph";
-import MetricsGrid from "@/components/MetricsGrid";
-import ResearchSection from "@/components/ResearchSection";
-import DeveloperWorkflow from "@/components/DeveloperWorkflow";
-import OpenSourceRepo from "@/components/OpenSourceRepo";
+import AgentSection from "@/components/AgentSection";
+import DebuggerSection from "@/components/DebuggerSection";
+import TestExplorerSection from "@/components/TestExplorerSection";
+import ProfilerSection from "@/components/ProfilerSection";
+import SecurityAuditSection from "@/components/SecurityAuditSection";
+import ReliabilitySection from "@/components/ReliabilitySection";
+import BenchmarksSection from "@/components/BenchmarksSection";
+import CodeDemo from "@/components/CodeDemo";
+import DownloadsSection from "@/components/DownloadsSection";
 import FAQAccordion from "@/components/FAQAccordion";
 import CTASection from "@/components/CTASection";
 
-import SectionReveal from "@/components/ui/SectionReveal";
-import CodeTransition from "@/components/ui/CodeTransition";
-
 export default function HomePage() {
   return (
-    <div className="space-y-4">
+    <div className="space-y-0 bg-[#050508]">
       {/* 1. Hero Section */}
-      <SectionReveal label="TOMOGRAPHY ENGINE STARTUP">
-        <Hero />
-      </SectionReveal>
+      <Hero />
 
-      <CodeTransition lines={[
-        "> initializing Tree-sitter multi-language parser...",
-        "> detecting identity operation patterns...",
-        "> computing path condition collapse...",
-        "> ready for interactive tomography analysis...",
-      ]} />
+      {/* 2. Trust & Privacy Guarantees */}
+      <TrustBanner />
 
-      {/* 2. Interactive Code Demo */}
-      <SectionReveal label="INTERACTIVE AST SURGERY">
-        <CodeDemo />
-      </SectionReveal>
+      {/* 3. The Desktop IDE Core Workspace */}
+      <IDECoreSection />
 
-      <CodeTransition lines={[
-        "> constructing Control Flow Graph (CFG)...",
-        "> resolving value propagation paths (DFG)...",
-        "> tagging 0.00 Causal Luminance nodes...",
-        "> isolating pure computational statements...",
-      ]} />
+      {/* 4. Causal Code Tomography & AST Surgery */}
+      <FeatureSection />
 
-      {/* 3. Core Instrumentation Feature Cards */}
-      <SectionReveal label="SEMANTIC INSTRUMENTATION">
-        <FeatureSection />
-      </SectionReveal>
+      {/* 5. Autonomous AI Agent Mode */}
+      <AgentSection />
 
-      <CodeTransition lines={[
-        "> running petgraph AST graph traversals...",
-        "> calculating Zhang-Shasha Tree Edit Distances...",
-        "> building cross-module tension matrix...",
-        "> grouping redundant logic clusters...",
-      ]} />
+      {/* 6. Time Travel Debugger v2 */}
+      <DebuggerSection />
 
-      {/* 4. Analysis Pipeline Flow */}
-      <SectionReveal label="RUST ENGINE PIPELINE">
-        <ArchitectureFlow />
-      </SectionReveal>
+      {/* 7. Test Explorer & Coverage Dashboard */}
+      <TestExplorerSection />
 
-      <CodeTransition lines={[
-        "> evaluating cross-file semantic equivalence...",
-        "> identifying AI-generated duplicate patterns...",
-        "> clustering tension score > 0.85...",
-        "> preparing force-directed node visualization...",
-      ]} />
+      {/* 8. Performance Profiler */}
+      <ProfilerSection />
 
-      {/* 5. Semantic Tension Graph */}
-      <SectionReveal label="EQUIVALENCE CLUSTERING">
-        <TensionGraph />
-      </SectionReveal>
+      {/* 9. Security & Dependency Audit */}
+      <SecurityAuditSection />
 
-      <CodeTransition lines={[
-        "> compiling empirical software metrics...",
-        "> validating NullBench 200 function dataset...",
-        "> measuring 10k LOC scan latency (<5.0s)...",
-        "> verifying sub-second rollback restoration...",
-      ]} />
+      {/* 10. Reliability & Workspace Snapshots */}
+      <ReliabilitySection />
 
-      {/* 6. Metrics Grid */}
-      <SectionReveal label="EMPIRICAL METRICS">
-        <MetricsGrid />
-      </SectionReveal>
+      {/* 11. Empirical Benchmarks */}
+      <BenchmarksSection />
 
-      <CodeTransition lines={[
-        "> loading PLDI / ICSE academic paper specification...",
-        "> exporting BibTeX citation metadata...",
-        "> verifying local-first privacy sandbox policy...",
-        "> ready for peer review evaluation...",
-      ]} />
+      {/* 12. Interactive In-Browser AST Surgery Playground */}
+      <div className="py-14 bg-[#050508] border-b border-[#1f1f24]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="space-y-2 mb-6">
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[10px] font-mono font-bold uppercase tracking-wider">
+              <span>INTERACTIVE PLAYGROUND</span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-heading font-extrabold text-zinc-100 tracking-tight">
+              Live AST Mutation &amp; Surgery Simulation.
+            </h2>
+          </div>
+          <CodeDemo />
+        </div>
+      </div>
 
-      {/* 7. Research Section */}
-      <SectionReveal label="ACADEMIC CONTRIBUTIONS">
-        <ResearchSection />
-      </SectionReveal>
+      {/* 13. Cross-Platform Downloads */}
+      <DownloadsSection />
 
-      {/* 8. Developer Workflow */}
-      <SectionReveal label="ENGINEERING INTEGRATION">
-        <DeveloperWorkflow />
-      </SectionReveal>
+      {/* 14. Technical FAQ */}
+      <FAQAccordion />
 
-      {/* 9. Open Source Repo */}
-      <SectionReveal label="OPEN SOURCE MIT">
-        <OpenSourceRepo />
-      </SectionReveal>
-
-      {/* 10. FAQ Accordion */}
-      <SectionReveal label="FREQUENTLY ASKED QUESTIONS">
-        <FAQAccordion />
-      </SectionReveal>
-
-      {/* 11. Final CTA */}
-      <SectionReveal label="GET STARTED">
-        <CTASection />
-      </SectionReveal>
+      {/* 15. Final Conversion CTA */}
+      <CTASection />
     </div>
   );
 }

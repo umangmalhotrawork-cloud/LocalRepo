@@ -11,24 +11,24 @@ interface FAQItem {
 
 const faqs: FAQItem[] = [
   {
-    question: "Is Echo Nullity free?",
-    answer: "Yes. Echo Nullity is an open-source research engine released under the permissive MIT License. You can run the CLI and VS Code extension locally without any subcriptions or paywalls.",
+    question: "Is Echo Nullity a VS Code extension or a standalone desktop IDE?",
+    answer: "Echo Nullity is a standalone, full-featured desktop IDE built on Electron, Next.js, and Monaco Editor. It includes its own file explorer, multi-tab buffer manager, native terminal subsystem, Git source control, Time Travel Debugger, performance profiler, and autonomous AI agent.",
   },
   {
-    question: "Does it upload my code?",
-    answer: "No. Echo Nullity is strictly local-first. All parsing (Tree-sitter), control-flow graph extraction (petgraph), mutation testing, and AST diff surgeries execute on your local CPU. Zero source code or telemetry is ever transmitted.",
+    question: "Does Echo Nullity transmit source code to external servers?",
+    answer: "No. Echo Nullity is strictly 100% local-first. All parsing, graph traversal, mutation sandboxing, test execution, and performance profiling run exclusively on your local CPU. Telemetry is local-only and opt-in.",
   },
   {
-    question: "Which languages are supported?",
-    answer: "The core engine currently supports Python, C++, and Rust with full Tree-sitter parsers, Control Flow Graphs (CFG), and Data Flow Graphs (DFG). Additional support for Java, Go, and TypeScript is actively under development.",
+    question: "Which programming languages are supported?",
+    answer: "Full Causal Code Tomography, AST surgery, and Monaco syntax highlighting support Python, TypeScript, JavaScript, C++, and Rust. The test runner supports pytest, unittest, Jest, and Vitest.",
   },
   {
-    question: "How is this different from dead-code elimination?",
-    answer: "Traditional dead-code elimination only removes unreachable code (e.g., statements after a return or inside `if (false)`). Echo Nullity detects executable code that actually runs and passes tests, but exerts zero causal necessity over the program's output state.",
+    question: "How is Causal Luminance different from dead-code elimination?",
+    answer: "Dead-code elimination only removes unreachable statements (such as code after a return). Causal Luminance identifies executable statements that actually run and pass tests, but exert zero causal necessity over the program's observable return state.",
   },
   {
-    question: "Can I use it with AI coding tools?",
-    answer: "Yes! Echo Nullity is designed specifically for AI-augmented workflows (Copilot, Claude, Cursor, ChatGPT). AI coding tools frequently introduce redundant identity calculations, vacuous error guards, and duplicate abstractions. Echo Nullity continuously purifies generated code as you work.",
+    question: "How do Workspace Snapshots and Rollback work?",
+    answer: "Snapshots are atomic local JSON records capturing all workspace file buffers, tabs, and cursor positions. You can compare snapshots with side-by-side diffs and rollback single files or entire repositories in under 0.4 seconds, with automatic pre-restore safety backups.",
   },
 ];
 
@@ -40,41 +40,41 @@ export default function FAQAccordion() {
   };
 
   return (
-    <section className="py-20 bg-[#000000] relative">
+    <section className="py-14 bg-[#050508] border-b border-[#1f1f24] font-mono text-xs">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* Header */}
-        <div className="text-center space-y-4 max-w-2xl mx-auto mb-14">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 text-xs font-mono">
-            <HelpCircle className="w-3.5 h-3.5 text-cyan-400" />
+        <div className="space-y-2 mb-8 text-center max-w-2xl mx-auto">
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[10px] font-bold uppercase tracking-wider">
+            <HelpCircle className="w-3 h-3 text-cyan-400" />
             <span>FREQUENTLY ASKED QUESTIONS</span>
           </div>
-          <h2 className="text-3xl sm:text-4xl font-bold text-white tracking-tight">
-            Frequently Asked Questions
+          <h2 className="text-2xl sm:text-3xl font-heading font-extrabold text-zinc-100 tracking-tight">
+            Technical &amp; Architectural FAQs.
           </h2>
-          <p className="text-zinc-400 text-sm">
-            Everything you need to know about causal tomography, privacy, and IDE integration.
+          <p className="text-zinc-400 text-xs font-sans leading-relaxed">
+            Everything you need to know about the local-first desktop IDE, privacy guarantees, and causal tomography.
           </p>
         </div>
 
         {/* Accordion list */}
-        <div className="space-y-4">
+        <div className="space-y-2.5">
           {faqs.map((faq, idx) => {
             const isOpen = openIndex === idx;
             return (
               <div
                 key={idx}
-                className="bg-[#0a0a0a] border border-[#1f1f1f] hover:border-cyan-500/30 rounded-24 overflow-hidden transition-all"
+                className="bg-[#0a0a0d] border border-[#1f1f24] hover:border-cyan-500/30 rounded-xl overflow-hidden transition-all"
               >
                 <button
                   onClick={() => toggle(idx)}
-                  className="w-full p-6 text-left flex items-center justify-between gap-4 font-semibold text-white text-base focus:outline-none"
+                  className="w-full p-4 text-left flex items-center justify-between gap-4 font-bold text-zinc-100 text-xs focus:outline-none cursor-pointer"
                 >
                   <span className="hover:text-cyan-300 transition-colors">
                     {faq.question}
                   </span>
                   <ChevronDown
-                    className={`w-5 h-5 text-cyan-400 shrink-0 transition-transform duration-300 ${
+                    className={`w-4 h-4 text-cyan-400 shrink-0 transition-transform duration-200 ${
                       isOpen ? "rotate-180" : ""
                     }`}
                   />
@@ -86,8 +86,8 @@ export default function FAQAccordion() {
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: "auto" }}
                       exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.3 }}
-                      className="px-6 pb-6 text-sm text-zinc-400 leading-relaxed border-t border-[#161616] pt-4"
+                      transition={{ duration: 0.2 }}
+                      className="px-4 pb-4 text-[11.5px] text-zinc-400 font-sans leading-relaxed border-t border-[#181820] pt-3"
                     >
                       {faq.answer}
                     </motion.div>

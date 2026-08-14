@@ -39,7 +39,7 @@ export default function TensionGraph() {
             </p>
 
             <blockquote className="p-4 rounded-xl bg-[#0a0a0a] border-l-4 border-amber-400 text-amber-200 text-xs font-mono italic">
-              "The AI wrote the same empty logic in five different files."
+              &quot;The AI wrote the same empty logic in five different files.&quot;
             </blockquote>
 
             <div className="space-y-3 font-mono text-xs text-zinc-300">

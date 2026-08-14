@@ -218,7 +218,7 @@ export default function DemoPage() {
             </div>
 
             <div className="p-3 bg-[#050505] rounded-xl text-zinc-300 space-y-1 min-h-[90px]">
-              {terminalStage === 0 && <span className="text-zinc-500">Ready. Click "Run Safe Remove Surgery" to execute mutation sandbox.</span>}
+              {terminalStage === 0 && <span className="text-zinc-500">Ready. Click &quot;Run Safe Remove Surgery&quot; to execute mutation sandbox.</span>}
               {terminalStage >= 1 && <div className="text-cyan-400">&gt; Spawning subprocess sandbox runner... [OK]</div>}
               {terminalStage >= 2 && <div className="text-purple-400">&gt; Bypassing AST nodes lines 3-4... [OK]</div>}
               {terminalStage >= 3 && <div className="text-teal-400">&gt; Rerunning 14 unit test assertions... [14/14 PASSED]</div>}

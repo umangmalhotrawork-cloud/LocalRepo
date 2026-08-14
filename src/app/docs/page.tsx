@@ -1,243 +1,248 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { BookOpen, Terminal, ShieldCheck, Settings, HelpCircle, Code, Check, ExternalLink, Github } from "lucide-react";
+import { useState } from "react";
+import { BookOpen, Terminal, ShieldCheck, Settings, Check, Github, Bot, Bug, Flame, ShieldAlert, History, Download, Layers } from "lucide-react";
+import Link from "next/link";
 
 export default function DocsPage() {
-  const [activeSection, setActiveSection] = useState("install");
-  const [scrollProgress, setScrollProgress] = useState(0);
-
-  useEffect(() => {
-    const handleScroll = () => {
-      const totalHeight = document.documentElement.scrollHeight - window.innerHeight;
-      if (totalHeight > 0) {
-        setScrollProgress((window.scrollY / totalHeight) * 100);
-      }
-    };
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
+  const [activeSection, setActiveSection] = useState("setup");
 
   const sections = [
-    { id: "install", name: "Installation & Requirements" },
-    { id: "quickstart", name: "Quick Start Guide" },
-    { id: "vscode", name: "VS Code Extension Usage" },
-    { id: "cli", name: "CLI Command Reference" },
-    { id: "saferemove", name: "Safe Remove Surgery Protocol" },
-    { id: "config", name: "Configuration (nullity.toml)" },
-    { id: "troubleshooting", name: "Troubleshooting & FAQ" },
+    { id: "setup", name: "1. Setup & Requirements" },
+    { id: "quickstart", name: "2. Desktop IDE Quickstart" },
+    { id: "agent", name: "3. Autonomous AI Agent Mode" },
+    { id: "debugger", name: "4. Time Travel Debugger v2" },
+    { id: "testing", name: "5. Test Explorer & Coverage" },
+    { id: "profiler", name: "6. Performance Profiler" },
+    { id: "security", name: "7. Security & CVE Audit" },
+    { id: "snapshots", name: "8. Workspace Snapshots & Rollback" },
+    { id: "packaging", name: "9. Packaging & Distribution" },
   ];
 
   return (
-    <div className="relative">
-      {/* Top Reading Progress Bar */}
-      <div className="fixed top-[64px] left-0 right-0 h-1 bg-[#1f1f1f] z-30">
-        <div
-          className="h-full bg-gradient-to-r from-cyan-400 to-purple-500 transition-all duration-150 shadow-cyan-glow"
-          style={{ width: `${scrollProgress}%` }}
-        />
-      </div>
+    <div className="py-8 bg-[#050508] min-h-screen font-mono text-xs text-zinc-300">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        
+        {/* Header */}
+        <div className="mb-6 space-y-1">
+          <div className="inline-flex items-center gap-1.5 px-2 py-0.2 rounded-full bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[10px] font-bold uppercase">
+            <BookOpen className="w-3 h-3 text-cyan-400" />
+            <span>DOCUMENTATION &amp; SPECIFICATIONS</span>
+          </div>
+          <h1 className="text-2xl font-bold text-zinc-100">Echo Nullity Developer Guide</h1>
+          <p className="text-zinc-400 text-xs font-sans">
+            Technical reference manual for the local-first AI Desktop IDE.
+          </p>
+        </div>
 
-      <div className="py-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
-          {/* Sticky Sidebar Navigation */}
-          <div className="lg:col-span-3 sticky top-24 space-y-2 bg-[#0a0a0a] border border-[#1f1f1f] rounded-24 p-4 font-mono text-xs shadow-2xl">
-            <div className="px-3 py-2 text-zinc-500 font-bold uppercase tracking-wider text-[10px]">
-              Documentation Sitemap
+          {/* Sidebar */}
+          <div className="lg:col-span-3 sticky top-16 space-y-1.5 bg-[#0a0a0d] border border-[#1f1f24] rounded-xl p-3">
+            <div className="px-2 py-1 text-zinc-500 font-bold uppercase tracking-wider text-[10px]">
+              Table of Contents
             </div>
             {sections.map((sec) => (
               <button
                 key={sec.id}
                 onClick={() => setActiveSection(sec.id)}
-                className={`w-full text-left px-3 py-2 rounded-xl transition-all ${
+                className={`w-full text-left px-2.5 py-1.5 rounded-lg transition-all text-xs cursor-pointer ${
                   activeSection === sec.id
-                    ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold"
-                    : "text-zinc-400 hover:text-white hover:bg-zinc-900/60"
+                    ? "bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 font-bold"
+                    : "text-zinc-400 hover:text-zinc-200 hover:bg-[#121216]"
                 }`}
               >
                 {sec.name}
               </button>
             ))}
 
-            <div className="pt-4 border-t border-[#1a1a1a]">
+            <div className="pt-3 border-t border-[#181820] space-y-1.5">
               <a
                 href="https://github.com"
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center justify-between px-3 py-2 rounded-xl bg-[#141414] border border-[#242424] text-zinc-400 hover:text-white transition-colors"
+                className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[#121216] border border-[#24242e] text-zinc-400 hover:text-white transition-colors"
               >
-                <span>Edit on GitHub</span>
+                <span>GitHub Repository</span>
                 <Github className="w-3.5 h-3.5 text-cyan-400" />
               </a>
+              <Link
+                href="/desktop"
+                className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900 transition-colors font-bold"
+              >
+                <span>Launch Desktop IDE</span>
+                <Terminal className="w-3.5 h-3.5" />
+              </Link>
             </div>
           </div>
 
-          {/* Main Content Pane Max Width 760px */}
-          <div className="lg:col-span-9 max-w-[760px] space-y-12 bg-[#0a0a0a] border border-[#1f1f1f] rounded-24 p-8 sm:p-12 text-sm shadow-2xl">
+          {/* Main Content Pane */}
+          <div className="lg:col-span-9 space-y-6 bg-[#0a0a0d] border border-[#1f1f24] rounded-xl p-6 sm:p-8">
             
-            {/* Installation */}
-            {activeSection === "install" && (
-              <div className="space-y-6">
-                <h1 className="text-3xl sm:text-4xl font-heading font-bold text-white tracking-tight">Installation & System Requirements</h1>
-                <p className="text-zinc-400 leading-relaxed font-body">
-                  Echo Nullity is designed as a local-first static analysis engine compiled natively in Rust with TypeScript editor integrations.
+            {/* Setup */}
+            {activeSection === "setup" && (
+              <div className="space-y-4">
+                <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-cyan-400" />
+                  <span>1. Setup &amp; Prerequisites</span>
+                </h2>
+                <p className="text-zinc-400 text-xs font-sans leading-relaxed">
+                  Echo Nullity is an offline, local-first Electron + Next.js desktop application. It requires zero cloud infrastructure.
                 </p>
 
-                <div className="space-y-3 font-mono text-xs">
-                  <h3 className="text-white font-bold text-sm">System Prerequisites</h3>
-                  <ul className="space-y-2 text-zinc-300">
-                    <li className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-cyan-400" />
-                      <span>Rust 1.80+ (with <code className="text-cyan-300">cargo</code> toolchain)</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-cyan-400" />
-                      <span>Node.js 20+ & npm / pnpm</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-cyan-400" />
-                      <span>VS Code 1.90+ (for extension)</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-cyan-400" />
-                      <span>Git 2.40+ (for automatic rollback snapshot management)</span>
-                    </li>
+                <div className="space-y-2">
+                  <h3 className="font-bold text-zinc-200 text-xs uppercase tracking-wider">System Prerequisites</h3>
+                  <ul className="space-y-1.5 text-zinc-300">
+                    <li className="flex items-center gap-2"><Check className="w-3.5 h-3.5 text-cyan-400" /><span>Node.js 20+ &amp; npm / pnpm</span></li>
+                    <li className="flex items-center gap-2"><Check className="w-3.5 h-3.5 text-cyan-400" /><span>Git 2.40+ (for source control &amp; rollback)</span></li>
+                    <li className="flex items-center gap-2"><Check className="w-3.5 h-3.5 text-cyan-400" /><span>Python 3.10+ (for native cProfile / tracemalloc profiling)</span></li>
                   </ul>
                 </div>
 
-                <div className="space-y-2 font-mono text-xs">
-                  <h3 className="text-white font-bold text-sm">Installing the CLI Tool</h3>
-                  <pre className="p-4 rounded-xl bg-[#050505] text-cyan-300 border border-[#181818]">
-                    cargo install echo-nullity-cli
-                  </pre>
+                <div className="space-y-1.5">
+                  <h3 className="font-bold text-zinc-200 text-xs uppercase tracking-wider">Clone &amp; Install Dependencies</h3>
+                  <pre className="p-3 rounded-lg bg-[#050508] border border-[#181820] text-cyan-300">git clone https://github.com/echo-nullity/echo-nullity.git&#10;cd echo-nullity&#10;npm install</pre>
                 </div>
               </div>
             )}
 
             {/* Quickstart */}
             {activeSection === "quickstart" && (
-              <div className="space-y-6">
-                <h1 className="text-3xl sm:text-4xl font-heading font-bold text-white tracking-tight">Quick Start Guide</h1>
-                <p className="text-zinc-400 leading-relaxed font-body">
-                  Analyze a codebase in three simple steps using the local CLI binary:
+              <div className="space-y-4">
+                <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+                  <Terminal className="w-4 h-4 text-cyan-400" />
+                  <span>2. Desktop IDE Quickstart</span>
+                </h2>
+                <p className="text-zinc-400 text-xs font-sans leading-relaxed">
+                  Launch the local development environment or production desktop binary.
                 </p>
-
-                <div className="space-y-4 font-mono text-xs">
-                  <div className="p-4 rounded-xl bg-[#050505] border border-[#181818] space-y-2">
-                    <div className="text-cyan-400 font-bold">Step 1: Scan Directory</div>
-                    <pre className="text-zinc-300">echo-nullity scan ./my-project</pre>
+                <div className="space-y-2">
+                  <div className="p-3 rounded-lg bg-[#050508] border border-[#181820] space-y-1">
+                    <div className="text-cyan-400 font-bold">Start Local Desktop Dev Environment</div>
+                    <pre className="text-zinc-300">npm run electron:dev</pre>
                   </div>
-
-                  <div className="p-4 rounded-xl bg-[#050505] border border-[#181818] space-y-2">
-                    <div className="text-purple-400 font-bold">Step 2: Preview Safe Remove</div>
-                    <pre className="text-zinc-300">echo-nullity safe-remove --preview src/cart.py:12-18</pre>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-[#050505] border border-[#181818] space-y-2">
-                    <div className="text-emerald-400 font-bold">Step 3: Execute Verified Patch</div>
-                    <pre className="text-zinc-300">echo-nullity safe-remove --apply src/cart.py:12-18</pre>
+                  <div className="p-3 rounded-lg bg-[#050508] border border-[#181820] space-y-1">
+                    <div className="text-emerald-400 font-bold">Build Optimized Production Bundle</div>
+                    <pre className="text-zinc-300">npm run build</pre>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* VS Code */}
-            {activeSection === "vscode" && (
-              <div className="space-y-6">
-                <h1 className="text-3xl sm:text-4xl font-heading font-bold text-white tracking-tight">VS Code Extension Usage</h1>
-                <p className="text-zinc-400 leading-relaxed font-body">
-                  The Echo Nullity extension provides real-time Causal Tomography while you code inside VS Code:
+            {/* Agent */}
+            {activeSection === "agent" && (
+              <div className="space-y-4">
+                <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+                  <Bot className="w-4 h-4 text-purple-400" />
+                  <span>3. Autonomous AI Agent Mode (⌘⇧I)</span>
+                </h2>
+                <p className="text-zinc-400 text-xs font-sans leading-relaxed">
+                  The AI Agent formulates multi-step plans, executes AST modifications across files, and runs terminal commands within a mathematical Patch Firewall.
                 </p>
-                <ul className="space-y-3 text-zinc-300 font-mono text-xs">
-                  <li>• <strong>Ghost Opacity:</strong> Lines with 0.00 Causal Luminance fade to 20% opacity automatically.</li>
-                  <li>• <strong>Provenance Hover:</strong> Hover over any ghosted line to inspect its mathematical necessity proof.</li>
-                  <li>• <strong>Safe Remove Lens:</strong> Click the CodeLens action button directly above ghosted functions to execute AST surgery.</li>
+                <ul className="space-y-1.5 text-zinc-300">
+                  <li className="flex items-center gap-2"><Check className="w-3.5 h-3.5 text-purple-400" /><span>Press <kbd className="px-1 py-0.2 bg-[#151520] rounded border border-[#262626]">⌘⇧I</kbd> to open the Agent Panel</span></li>
+                  <li className="flex items-center gap-2"><Check className="w-3.5 h-3.5 text-purple-400" /><span>Enter prompt to generate ordered milestones</span></li>
+                  <li className="flex items-center gap-2"><Check className="w-3.5 h-3.5 text-purple-400" /><span>Preview individual diffs before applying</span></li>
                 </ul>
               </div>
             )}
 
-            {/* CLI */}
-            {activeSection === "cli" && (
-              <div className="space-y-6">
-                <h1 className="text-3xl sm:text-4xl font-heading font-bold text-white tracking-tight">CLI Command Reference</h1>
-                <div className="space-y-4 font-mono text-xs">
-                  <div className="p-4 rounded-xl bg-[#050505] border border-[#181818] space-y-1">
-                    <span className="text-cyan-400 font-bold">echo-nullity scan &lt;path&gt;</span>
-                    <p className="text-zinc-400">Scans specified repository path for Ghost Code and Semantic Tension clusters.</p>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-[#050505] border border-[#181818] space-y-1">
-                    <span className="text-purple-400 font-bold">echo-nullity safe-remove --preview &lt;file:lines&gt;</span>
-                    <p className="text-zinc-400">Outputs unified AST diff preview without modifying files.</p>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-[#050505] border border-[#181818] space-y-1">
-                    <span className="text-emerald-400 font-bold">echo-nullity safe-remove --apply &lt;file:lines&gt;</span>
-                    <p className="text-zinc-400">Runs differential mutation sandbox tests and applies AST patch if green.</p>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-[#050505] border border-[#181818] space-y-1">
-                    <span className="text-amber-400 font-bold">echo-nullity rollback &lt;snapshot-id&gt;</span>
-                    <p className="text-zinc-400">Instantly restores state from local compressed snapshot (&lt;1s).</p>
-                  </div>
+            {/* Debugger */}
+            {activeSection === "debugger" && (
+              <div className="space-y-4">
+                <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+                  <Bug className="w-4 h-4 text-emerald-400" />
+                  <span>4. Time Travel Debugger v2</span>
+                </h2>
+                <p className="text-zinc-400 text-xs font-sans leading-relaxed">
+                  Record full execution traces and step backward or forward through variable state without restarting.
+                </p>
+                <div className="p-3 rounded-lg bg-[#050508] border border-[#181820] space-y-1.5">
+                  <div><kbd className="px-1.5 py-0.5 rounded bg-[#151520] border border-[#262626] text-cyan-300">F5</kbd> — Launch debugger on active file</div>
+                  <div><kbd className="px-1.5 py-0.5 rounded bg-[#151520] border border-[#262626] text-cyan-300">F10</kbd> — Step forward to next instruction</div>
+                  <div><kbd className="px-1.5 py-0.5 rounded bg-[#151520] border border-[#262626] text-cyan-300">Shift+F10</kbd> — Step backward to previous frame</div>
                 </div>
               </div>
             )}
 
-            {/* Safe Remove Protocol */}
-            {activeSection === "saferemove" && (
-              <div className="space-y-6">
-                <h1 className="text-3xl sm:text-4xl font-heading font-bold text-white tracking-tight">Safe Remove Surgery Protocol</h1>
-                <p className="text-zinc-400 leading-relaxed font-body">
-                  Safe Remove performs verified, reversible semantic surgery on a live codebase across 6 isolation steps:
+            {/* Testing */}
+            {activeSection === "testing" && (
+              <div className="space-y-4">
+                <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+                  <Check className="w-4 h-4 text-cyan-400" />
+                  <span>5. Test Explorer &amp; Coverage</span>
+                </h2>
+                <p className="text-zinc-400 text-xs font-sans leading-relaxed">
+                  Auto-discovers tests for pytest, unittest, Jest, and Vitest. Visualizes branch coverage directly in Monaco gutters.
                 </p>
-                <ol className="space-y-2 font-mono text-xs text-zinc-300 list-decimal pl-5">
-                  <li>Preview candidate removal as unified AST diff.</li>
-                  <li>Run static dependency graph audit.</li>
-                  <li>Run side-effect taxonomy check (Pure vs. IO vs. Logging).</li>
-                  <li>Execute differential mutation run inside isolated sandbox.</li>
-                  <li>Apply patch only after 100% verification passes.</li>
-                  <li>Store local compressed rollback snapshot automatically.</li>
-                </ol>
+                <div className="p-3 rounded-lg bg-[#050508] border border-[#181820] text-zinc-300">
+                  Execute single test methods, files, or entire repositories with assertion failure extraction.
+                </div>
               </div>
             )}
 
-            {/* Configuration */}
-            {activeSection === "config" && (
-              <div className="space-y-6">
-                <h1 className="text-3xl sm:text-4xl font-heading font-bold text-white tracking-tight">Configuration (nullity.toml)</h1>
-                <pre className="p-4 rounded-xl bg-[#050505] text-cyan-300 font-mono text-xs border border-[#181818] overflow-x-auto leading-relaxed">
-{`[engine]
-min_luminance_threshold = 0.05
-tension_cluster_threshold = 0.85
-languages = ["python", "cpp", "rust"]
-
-[sandbox]
-isolation = "subprocess"
-timeout_ms = 5000
-allow_logging_side_effects = false
-
-[rollback]
-max_snapshots = 50
-auto_stash = true`}
-                </pre>
+            {/* Profiler */}
+            {activeSection === "profiler" && (
+              <div className="space-y-4">
+                <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+                  <Flame className="w-4 h-4 text-amber-400" />
+                  <span>6. Performance Profiler</span>
+                </h2>
+                <p className="text-zinc-400 text-xs font-sans leading-relaxed">
+                  Profile Python CPU execution (<code className="text-amber-300">cProfile</code>), memory allocations (<code className="text-amber-300">tracemalloc</code>), and React render counts.
+                </p>
+                <div className="p-3 rounded-lg bg-[#050508] border border-[#181820] text-zinc-300">
+                  Slow execution lines are highlighted in Monaco with amber gutter decorations.
+                </div>
               </div>
             )}
 
-            {/* Troubleshooting */}
-            {activeSection === "troubleshooting" && (
-              <div className="space-y-6">
-                <h1 className="text-3xl sm:text-4xl font-heading font-bold text-white tracking-tight">Troubleshooting & FAQ</h1>
-                <p className="text-zinc-400 leading-relaxed font-body">
-                  For complete troubleshooting details, refer to the FAQ on the home page or open an issue on the GitHub repository.
+            {/* Security */}
+            {activeSection === "security" && (
+              <div className="space-y-4">
+                <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-red-400" />
+                  <span>7. Security &amp; CVE Audit (⌘⇧S)</span>
+                </h2>
+                <p className="text-zinc-400 text-xs font-sans leading-relaxed">
+                  Scans lockfiles for known CVE advisories and flags leaked API secrets and dangerous AST execution sinks.
                 </p>
+              </div>
+            )}
+
+            {/* Snapshots */}
+            {activeSection === "snapshots" && (
+              <div className="space-y-4">
+                <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+                  <History className="w-4 h-4 text-cyan-400" />
+                  <span>8. Workspace Snapshots &amp; Rollback (⌘⇧B)</span>
+                </h2>
+                <p className="text-zinc-400 text-xs font-sans leading-relaxed">
+                  Create named checkpoints, compare diffs, and restore single files or full repositories in under 0.4s.
+                </p>
+              </div>
+            )}
+
+            {/* Packaging */}
+            {activeSection === "packaging" && (
+              <div className="space-y-4">
+                <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+                  <Download className="w-4 h-4 text-cyan-400" />
+                  <span>9. Packaging &amp; Distribution</span>
+                </h2>
+                <p className="text-zinc-400 text-xs font-sans leading-relaxed">
+                  Package self-contained installers for macOS, Windows, and Linux.
+                </p>
+                <div className="space-y-1.5 text-zinc-300">
+                  <pre className="p-2.5 rounded-lg bg-[#050508] border border-[#181820]">npm run package:mac    # macOS .dmg / .app&#10;npm run package:win    # Windows NSIS / .zip&#10;npm run package:linux  # Linux .AppImage / tar.gz</pre>
+                </div>
               </div>
             )}
 
           </div>
 
         </div>
+
       </div>
     </div>
   );
