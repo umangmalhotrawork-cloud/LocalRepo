@@ -1,3 +1,2 @@
-print("HELLO WORLD")
-print("TEST 123")
-print("ECHO NULLITY")
+x = 10
+print(x)

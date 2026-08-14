@@ -696,6 +696,10 @@ export default function IDEApp() {
     addLog(`[DEBUGGER] Starting time-travel trace on ${activeTab.name}...`);
 
     try {
+      console.log("[DEBUGGER] typeof debugPython =", typeof debugPython);
+      if (typeof debugPython !== "function") {
+        throw new Error("debugPython import is not a function");
+      }
       const res = await debugPython(activeTab.content);
       if (res.steps && res.steps.length > 0) {
         setDebugSteps(res.steps);

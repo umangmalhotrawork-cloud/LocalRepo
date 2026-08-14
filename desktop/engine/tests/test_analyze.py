@@ -179,7 +179,6 @@ def test_rewrite_output():
         assert res["ghost_count_before"] == 2
         assert res["ghost_count_after"] == 0
         assert res["causal_luminance_after"] == 1.0
-        assert "price = price" in res["transformed_source"]
         assert len(res["changed_lines"]) == 2
     finally:
         if os.path.exists(tf_path):
@@ -226,6 +225,15 @@ def test_verify_equivalence_divergent():
     finally:
         if os.path.exists(tf_path):
             os.remove(tf_path)
+
+def test_self_assignment_detected():
+    code = "x = 10\nx = x\nprint(x)\n"
+    result = analyze_source(code)
+    assert result["ghost_lines_count"] == 1
+    finding = result["findings"][0]
+    assert finding["line"] == 2
+    assert finding["code"] == "x = x"
+    assert "Vacuous Self-Assignment" in finding["title"]
 
 if __name__ == "__main__":
     test_funcs = [v for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]

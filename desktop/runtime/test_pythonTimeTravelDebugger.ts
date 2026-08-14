@@ -98,9 +98,7 @@ print("Hello Step 2")
   return true;
 }
 
-if (typeof require !== "undefined" && require.main === module) {
-  runTimeTravelDebuggerTests().catch((err) => {
-    console.error("[TEST ERROR]", err);
-    process.exit(1);
-  });
-}
+runTimeTravelDebuggerTests().catch((err) => {
+  console.error("[TEST ERROR]", err);
+  process.exit(1);
+});

@@ -159,6 +159,35 @@ class IdentityVisitor(ast.NodeVisitor):
             self.current_assignment_target = ", ".join(ast.unparse(t) for t in node.targets)
         except Exception:
             self.current_assignment_target = None
+
+        if isinstance(node.value, ast.Name):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == node.value.id:
+                    line_idx = getattr(node, "lineno", 1)
+                    code_line = (
+                        self.source_lines[line_idx - 1].strip()
+                        if line_idx <= len(self.source_lines)
+                        else ast.unparse(node)
+                    )
+                    print(f"[ANALYZER] Ghost line detected: {code_line} (line {line_idx})", file=sys.stderr)
+                    provenance = [
+                        f"Assignment target: {t.id}",
+                        f"Vacuous self-assignment: {t.id} = {node.value.id}",
+                        "Variable is assigned to itself with zero state leverage."
+                    ]
+                    self.raw_findings.append({
+                        "line": line_idx,
+                        "code": code_line,
+                        "title": f"Vacuous Self-Assignment ({t.id} = {node.value.id})",
+                        "reason": "Variable is assigned to itself exerting zero state leverage.",
+                        "luminance": 0.00,
+                        "status": "Verified Ghost Line",
+                        "category": "vacuous_self_assignment",
+                        "provenance": provenance,
+                        "target_name": t.id
+                    })
+                    break
+
         self.generic_visit(node)
         self.current_assignment_target = prev
 
@@ -242,6 +271,14 @@ class IdentityVisitor(ast.NodeVisitor):
         return findings
 
 class IdentityTransformer(ast.NodeTransformer):
+    def visit_Assign(self, node):
+        self.generic_visit(node)
+        if isinstance(node.value, ast.Name):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == node.value.id:
+                    return None
+        return node
+
     def visit_BinOp(self, node):
         self.generic_visit(node)
         match = match_identity_binop(node)
