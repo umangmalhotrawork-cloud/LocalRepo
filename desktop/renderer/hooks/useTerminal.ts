@@ -98,6 +98,20 @@ export function useTerminal(initialCwd: string = "") {
       return res.id;
     } catch (err: any) {
       console.error("[USE-TERMINAL] Failed to create terminal:", err);
+      const errorTabId = `term-err-${Date.now()}`;
+      const newTab: TerminalTab = {
+        id: errorTabId,
+        name: `Terminal ${tabsRef.current.length + 1} (Error)`,
+        cwd: cwdOverride || initialCwd || "~",
+        status: "error",
+        output: [
+          `[TERMINAL ERROR] Failed to spawn shell session.`,
+          `Details: ${err.message || String(err)}`,
+          `Tip: Verify shell executable exists and has valid execution permissions.`,
+        ],
+      };
+      setTabs((prev) => [...prev, newTab]);
+      setActiveTabId(errorTabId);
       return null;
     }
   }, [initialCwd]);
@@ -139,6 +153,26 @@ export function useTerminal(initialCwd: string = "") {
     }
   }, []);
 
+  const appendOutputToTab = useCallback((id: string, text: string) => {
+    if (!text) return;
+    setTabs((prevTabs) =>
+      prevTabs.map((tab) => {
+        if (tab.id === id) {
+          const splitLines = text.replace(/\r\n/g, "\n").split("\n");
+          if (splitLines.length > 1 && splitLines[splitLines.length - 1] === "") {
+            splitLines.pop();
+          }
+          const updatedOutput = [...tab.output, ...splitLines];
+          if (updatedOutput.length > 2000) {
+            updatedOutput.splice(0, updatedOutput.length - 2000);
+          }
+          return { ...tab, output: updatedOutput };
+        }
+        return tab;
+      })
+    );
+  }, []);
+
   return {
     tabs,
     activeTabId,
@@ -147,5 +181,6 @@ export function useTerminal(initialCwd: string = "") {
     closeTerminalTab,
     restartTerminalTab,
     sendTerminalInput,
+    appendOutputToTab,
   };
 }

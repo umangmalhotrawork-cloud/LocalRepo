@@ -89,7 +89,7 @@ export default function StartupModal({
           </div>
 
           <div className="space-y-1.5 max-h-36 overflow-y-auto">
-            {recentWorkspaces.length > 0 ? (
+            {Array.isArray(recentWorkspaces) && recentWorkspaces.length > 0 ? (
               recentWorkspaces.map((folder, i) => (
                 <button
                   key={i}

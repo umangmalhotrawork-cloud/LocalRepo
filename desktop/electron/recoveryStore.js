@@ -68,18 +68,20 @@ class RecoveryStore {
   }
 
   computeContentHash(snapshot) {
-    if (!snapshot || !snapshot.openTabs) return '';
-    const contentPayload = snapshot.openTabs.map((t) => `${t.path}:${t.content}:${t.isDirty}`).join('|');
+    if (!snapshot || !Array.isArray(snapshot.openTabs)) return '';
+    const contentPayload = snapshot.openTabs
+      .filter((t) => t && typeof t.path === 'string')
+      .map((t) => `${t.path}:${typeof t.content === 'string' ? t.content : ''}:${!!t.isDirty}`)
+      .join('|');
     return crypto.createHash('md5').update(contentPayload).digest('hex');
   }
 
   saveSnapshot(workspacePath, snapshot) {
     if (!workspacePath || !snapshot) return { success: false, error: 'Missing arguments' };
 
-    // Filter to ensure dirty tabs exist or preserve open state
-    const dirtyTabs = (snapshot.openTabs || []).filter((t) => t.isDirty);
-    if (dirtyTabs.length === 0) {
-      // If nothing is dirty, clean up snapshot
+    const rawTabs = Array.isArray(snapshot.openTabs) ? snapshot.openTabs : [];
+    const hasDirty = rawTabs.some((t) => t && typeof t.path === 'string' && t.isDirty);
+    if (!hasDirty) {
       this.clearSnapshot(workspacePath);
       return { success: true, cleared: true };
     }
@@ -95,11 +97,17 @@ class RecoveryStore {
 
     try {
       const fullSnapshot = {
-        workspacePath,
+        workspacePath: String(workspacePath),
         savedAt: Date.now(),
         appVersion: '1.0.0',
-        openTabs: snapshot.openTabs,
-        activeTabPath: snapshot.activeTabPath || null,
+        openTabs: rawTabs
+          .filter((t) => t && typeof t.path === 'string')
+          .map((t) => ({
+            path: String(t.path),
+            content: typeof t.content === 'string' ? t.content : '',
+            isDirty: !!t.isDirty,
+          })),
+        activeTabPath: typeof snapshot.activeTabPath === 'string' ? snapshot.activeTabPath : null,
       };
 
       const data = JSON.stringify(fullSnapshot, null, 2);
@@ -123,7 +131,29 @@ class RecoveryStore {
       if (!fs.existsSync(targetPath)) return null;
       const data = fs.readFileSync(targetPath, 'utf-8');
       if (!data || !data.trim()) return null;
-      return JSON.parse(data);
+      let parsed = null;
+      try {
+        parsed = JSON.parse(data);
+      } catch (e) {
+        console.warn('[RECOVERY-STORE] Corrupted recovery snapshot file ignored:', targetPath);
+        return null;
+      }
+      if (!parsed || typeof parsed !== 'object') return null;
+      return {
+        workspacePath: typeof parsed.workspacePath === 'string' ? parsed.workspacePath : workspacePath,
+        savedAt: typeof parsed.savedAt === 'number' ? parsed.savedAt : Date.now(),
+        appVersion: typeof parsed.appVersion === 'string' ? parsed.appVersion : '1.0.0',
+        openTabs: Array.isArray(parsed.openTabs)
+          ? parsed.openTabs
+              .filter((t) => t && typeof t.path === 'string')
+              .map((t) => ({
+                path: String(t.path),
+                content: typeof t.content === 'string' ? t.content : '',
+                isDirty: !!t.isDirty,
+              }))
+          : [],
+        activeTabPath: typeof parsed.activeTabPath === 'string' ? parsed.activeTabPath : null,
+      };
     } catch (err) {
       console.error('[RECOVERY-STORE] Error reading snapshot:', err);
       return null;
@@ -153,7 +183,9 @@ class RecoveryStore {
           try {
             const raw = fs.readFileSync(path.join(dir, f), 'utf-8');
             const parsed = JSON.parse(raw);
-            list.push(parsed);
+            if (parsed && typeof parsed === 'object' && parsed.workspacePath) {
+              list.push(parsed);
+            }
           } catch (e) {}
         }
       }
@@ -188,7 +220,13 @@ class RecoveryStore {
       if (!fs.existsSync(sessionPath)) return { wasCrash: false };
       const raw = fs.readFileSync(sessionPath, 'utf-8');
       if (!raw) return { wasCrash: false };
-      const data = JSON.parse(raw);
+      let data = null;
+      try {
+        data = JSON.parse(raw);
+      } catch (e) {
+        return { wasCrash: false };
+      }
+      if (!data || typeof data !== 'object') return { wasCrash: false };
 
       // If cleanShutdown is true, normal exit
       if (data.cleanShutdown) return { wasCrash: false, lastHeartbeat: data.lastHeartbeat };

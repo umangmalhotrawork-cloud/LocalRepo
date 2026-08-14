@@ -129,4 +129,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setTelemetry: (enabled) => ipcRenderer.invoke('telemetry:set', enabled),
     trackTelemetry: (eventName) => ipcRenderer.invoke('telemetry:track', eventName),
   },
+  runPythonFile: (filePath) => ipcRenderer.invoke('python:run-file', filePath),
+  onPythonOutput: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('python:output', listener);
+    return () => ipcRenderer.removeListener('python:output', listener);
+  },
 });

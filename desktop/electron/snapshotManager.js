@@ -137,16 +137,23 @@ class SnapshotManager {
 
     const snapshot = {
       id: snapshotId,
-      name,
-      description,
+      name: String(name || 'Snapshot'),
+      description: String(description || ''),
       isAuto: Boolean(isAuto),
       timestamp: Date.now(),
       workspacePath: path.resolve(workspacePath),
       totalFiles: files.length,
       files,
-      openTabs,
-      activeTab,
-      dirtyTabs,
+      openTabs: Array.isArray(openTabs)
+        ? openTabs.map((t) => (typeof t === 'string' ? { path: t } : {
+            path: String(t.path || ''),
+            name: typeof t.name === 'string' ? t.name : String(t.path || '').split('/').pop() || 'file',
+          }))
+        : [],
+      activeTab: typeof activeTab === 'string' ? activeTab : null,
+      dirtyTabs: Array.isArray(dirtyTabs)
+        ? dirtyTabs.map((t) => (typeof t === 'string' ? t : (t && t.path ? String(t.path) : '')))
+        : [],
     };
 
     const filePath = path.join(snapshotDir, `${snapshotId}.json`);
@@ -205,16 +212,18 @@ class SnapshotManager {
           try {
             const raw = fs.readFileSync(path.join(snapshotDir, file), 'utf8');
             const data = JSON.parse(raw);
-            snapshots.push({
-              id: data.id,
-              name: data.name,
-              description: data.description || '',
-              isAuto: Boolean(data.isAuto),
-              timestamp: data.timestamp,
-              workspacePath: data.workspacePath,
-              totalFiles: data.totalFiles || (data.files ? data.files.length : 0),
-              openTabsCount: data.openTabs ? data.openTabs.length : 0,
-            });
+            if (data && typeof data === 'object' && data.id) {
+              snapshots.push({
+                id: data.id,
+                name: data.name || 'Snapshot',
+                description: data.description || '',
+                isAuto: Boolean(data.isAuto),
+                timestamp: typeof data.timestamp === 'number' ? data.timestamp : 0,
+                workspacePath: data.workspacePath || workspacePath,
+                totalFiles: data.totalFiles || (Array.isArray(data.files) ? data.files.length : 0),
+                openTabsCount: Array.isArray(data.openTabs) ? data.openTabs.length : 0,
+              });
+            }
           } catch (e) {}
         }
       }
@@ -232,7 +241,16 @@ class SnapshotManager {
     if (!fs.existsSync(filePath)) {
       throw new Error(`Snapshot ${snapshotId} not found`);
     }
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const raw = fs.readFileSync(filePath, 'utf8');
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('Corrupted snapshot file');
+      }
+      return parsed;
+    } catch (e) {
+      throw new Error(`Failed to parse snapshot ${snapshotId}: ${e.message}`);
+    }
   }
 
   /**

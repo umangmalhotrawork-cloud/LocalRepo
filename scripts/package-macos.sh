@@ -9,7 +9,8 @@ npm run build
 
 # 2. Package Electron App
 echo "[2/4] Packaging Electron application bundle..."
-# If electron-builder / electron-packager is installed, invoke it; otherwise prepare standard distribution dist/
+# Ensure native spawn-helper binaries have executable permissions
+find node_modules/node-pty -name "spawn-helper" -exec chmod 0755 {} + 2>/dev/null || true
 mkdir -p dist/mac
 
 echo "[3/4] Creating macOS .app bundle structure..."

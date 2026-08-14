@@ -54,7 +54,7 @@ import SecurityAuditPanel from "./components/SecurityAuditPanel";
 import { useSecurityAudit } from "./hooks/useSecurityAudit";
 import SnapshotPanel from "./components/SnapshotPanel";
 import { useSnapshots } from "./hooks/useSnapshots";
-import { useWorkspaceState, EditorViewState, WorkspacePersistedState, RecoverySnapshot } from "./hooks/useWorkspaceState";
+import { useWorkspaceState, EditorViewState, WorkspacePersistedState, RecoverySnapshot, safeParse } from "./hooks/useWorkspaceState";
 import { buildWorkspaceReport, ReportExportPayload } from "./utils/reportBuilder";
 import { exportGraphSvg } from "./utils/exportGraphSvg";
 
@@ -123,6 +123,8 @@ declare global {
       restoreHistory: (id: string) => Promise<{ success: boolean; file: string; restored_content: string; checkpoint_id: string; entry?: HistoryEntry; error?: string }>;
       appendHistory: (entry: Partial<HistoryEntry>) => Promise<{ success: boolean; entry?: HistoryEntry; error?: string }>;
       analyzeSemanticIntentDrift: (payload: { original_source: string; edited_source: string; language?: string; function_name?: string }) => Promise<SemanticIntentDriftReport>;
+      runPythonFile: (filePath: string) => Promise<{ success: boolean; exitCode?: number; error?: string }>;
+      onPythonOutput: (callback: (payload: { filePath?: string; data?: string; type?: 'stdout' | 'stderr' | 'exit'; exitCode?: number; isError?: boolean }) => void) => () => void;
       terminal?: {
         create: (options?: { cwd?: string; shell?: string; cols?: number; rows?: number }) => Promise<{ id: string; pid: number; shell: string; cwd: string; status: string }>;
         write: (id: string, data: string) => Promise<void>;
@@ -305,6 +307,11 @@ export default function IDEApp() {
 
   useEffect(() => {
     console.log('[IDE-APP] mounted');
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      console.warn('[NAVIGATION] unexpected unload triggered');
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     if (typeof window !== "undefined" && (window as any).electronAPI?.hardening) {
       (window as any).electronAPI.hardening.trackTelemetry('appLaunches').catch(() => {});
       (window as any).electronAPI.hardening.checkHealth().then((res: any) => {
@@ -313,7 +320,10 @@ export default function IDEApp() {
         }
       }).catch(() => {});
     }
-    return () => console.log('[IDE-APP] unmounted');
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      console.log('[IDE-APP] unmounted');
+    };
   }, []);
 
   const [folderPath, setFolderPath] = useState<string | null>("demo-workspaces/ai_cart_project");
@@ -578,6 +588,7 @@ export default function IDEApp() {
     closeTerminalTab,
     restartTerminalTab,
     sendTerminalInput,
+    appendOutputToTab,
   } = useTerminal(folderPath || "");
 
   const [debugSteps, setDebugSteps] = useState<DebugStep[]>([]);
@@ -706,40 +717,92 @@ export default function IDEApp() {
     }
   };
 
-  const handleExecutePython = async () => {
-    if (!activeTab || !activeTab.path.endsWith(".py")) return;
+  const handleExecutePython = async (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+
+    console.log('[PYTHON] Button clicked');
+
+    if (!activeTab || !activeTab.path) {
+      addLog("[RUN] Error: No active file selected.");
+      console.log('[PYTHON] Aborted: No active file');
+      return;
+    }
+    if (!activeTab.path.endsWith(".py")) {
+      addLog("[RUN] Error: Active file is not a Python (.py) file.");
+      console.log('[PYTHON] Aborted: Not a .py file');
+      return;
+    }
+
+    // Save active tab before executing
+    if (activeTab.isDirty) {
+      await handleSaveFile();
+    }
+
     setPythonRunning(true);
-    setPythonOutput("Running Python...");
-    setExecutionAnalysis(null);
-    setDebugSteps([]);
-    setDebugIndex(0);
+    setShowTerminalPanel(true);
+    setTerminalPanelMode("terminal");
+    if (consoleHeight < 180) {
+      setConsoleHeight(240);
+    }
+
+    // Ensure a terminal tab exists or create one
+    let targetTabId = activeTerminalTabId;
+    if (!targetTabId || terminalTabs.length === 0) {
+      const createdId = await createTerminalTab(folderPath || undefined);
+      if (createdId) targetTabId = createdId;
+    }
+
+    const fileName = activeTab.name || activeTab.path.split("/").pop() || "script.py";
+    const headerLine = `▶ Running ${fileName}`;
+
+    if (targetTabId) {
+      appendOutputToTab(targetTabId, headerLine);
+    }
+
+    console.log('[PYTHON] Subscribing to output');
+    let unbindListener: (() => void) | null = null;
+    if (typeof window !== "undefined" && (window as any).electronAPI?.onPythonOutput) {
+      unbindListener = (window as any).electronAPI.onPythonOutput((payload: any) => {
+        console.log('[PYTHON] Renderer received', payload);
+        if (!targetTabId) return;
+        if (payload.data) {
+          appendOutputToTab(targetTabId, payload.data);
+        }
+        if (payload.type === "exit" && payload.exitCode !== undefined) {
+          const icon = payload.exitCode === 0 ? "✔" : "✖";
+          appendOutputToTab(targetTabId, `${icon} Process exited with code ${payload.exitCode}`);
+        }
+      });
+    }
+
     try {
-      const res = await runPython(activeTab.content);
-      let output = "";
-      if (res.stdout) output += res.stdout;
-      if (res.stderr) {
-        if (output) output += "\n";
-        output += `[STDERR]\n${res.stderr}`;
+      if (typeof window !== "undefined" && (window as any).electronAPI?.runPythonFile) {
+        const res = await (window as any).electronAPI.runPythonFile(activeTab.path);
+        console.log('[PYTHON] Run result', res);
+        if (!res.success && res.error) {
+          if (targetTabId) {
+            appendOutputToTab(targetTabId, `✖ Error: ${res.error}`);
+          }
+        }
+      } else {
+        // Fallback for non-Electron environment
+        const res = await runPython(activeTab.content);
+        let outStr = res.stdout || "";
+        if (res.stderr) outStr += (outStr ? "\n" : "") + res.stderr;
+        if (targetTabId) {
+          if (outStr) appendOutputToTab(targetTabId, outStr);
+          appendOutputToTab(targetTabId, "✔ Process exited with code 0");
+        }
       }
-      setPythonOutput(output || "Execution completed with no output.");
-
-      const analysis = analyzePythonExecution(activeTab.content, res.stdout, res.stderr);
-      setExecutionAnalysis(analysis);
-
-      setDebugRunning(true);
-      const debugRes = await debugPython(activeTab.content);
-      setDebugSteps(debugRes.steps || []);
-      setDebugIndex(0);
-      setDebugError(debugRes.error);
-      setDebugRunning(false);
     } catch (err: any) {
-      setPythonOutput(`[ERROR] ${err.message || String(err)}`);
-      const analysis = analyzePythonExecution(activeTab.content, "", err.message || String(err));
-      setExecutionAnalysis(analysis);
-      setDebugSteps([]);
+      console.error('[PYTHON] Execution error', err);
+      if (targetTabId) {
+        appendOutputToTab(targetTabId, `✖ Process execution error: ${err.message || String(err)}`);
+      }
     } finally {
+      if (unbindListener) unbindListener();
       setPythonRunning(false);
-      setDebugRunning(false);
     }
   };
 
@@ -1264,7 +1327,8 @@ export default function IDEApp() {
     if (typeof window === "undefined" || !folder) return;
     try {
       setRecentWorkspaces((prev) => {
-        const updated = [folder, ...prev.filter((f) => f !== folder)].slice(0, 5);
+        const safePrev = Array.isArray(prev) ? prev : [];
+        const updated = [folder, ...safePrev.filter((f) => f && f !== folder && typeof f === "string")].slice(0, 5);
         localStorage.setItem("echo_recent_workspaces", JSON.stringify(updated));
         return updated;
       });
@@ -1295,7 +1359,7 @@ export default function IDEApp() {
 
     const stateToPersist: WorkspacePersistedState = {
       folderPath,
-      openTabs: openTabs.map((t) => ({ path: t.path, name: t.name })),
+      openTabs: (Array.isArray(openTabs) ? openTabs : []).filter((t) => t && typeof t.path === "string").map((t) => ({ path: t.path, name: t.name })),
       activeTabPath: activeTabPath || (openTabs[0]?.path || ""),
       mainView,
       explorerWidth,
@@ -1404,10 +1468,15 @@ export default function IDEApp() {
     if (typeof window !== "undefined") {
       try {
         const stored = localStorage.getItem("echo_recent_workspaces");
-        if (stored) {
-          setRecentWorkspaces(JSON.parse(stored));
+        const parsed = safeParse<any[]>(stored, []);
+        if (Array.isArray(parsed)) {
+          setRecentWorkspaces(parsed.filter((p) => typeof p === "string"));
+        } else {
+          setRecentWorkspaces([]);
         }
-      } catch (e) {}
+      } catch (e) {
+        setRecentWorkspaces([]);
+      }
     }
 
     async function restoreSession() {
@@ -1448,8 +1517,9 @@ export default function IDEApp() {
 
         // 3. Restore tabs
         const restoredTabs: TabItem[] = [];
-        if (loadedState.openTabs && loadedState.openTabs.length > 0) {
+        if (Array.isArray(loadedState.openTabs) && loadedState.openTabs.length > 0) {
           for (const tab of loadedState.openTabs) {
+            if (!tab || typeof tab.path !== "string") continue;
             try {
               if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.readFile) {
                 const res = await window.electronAPI.readFile(tab.path);
@@ -3895,7 +3965,8 @@ export default function IDEApp() {
           {/* Contextual Python Execution (Only for .py files) */}
           {activeTab && activeTab.path.endsWith(".py") && (
             <button
-              onClick={handleExecutePython}
+              type="button"
+              onClick={(e) => handleExecutePython(e)}
               disabled={pythonRunning}
               aria-label="Run Python file in local runtime"
               className="min-h-[28px] px-2 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 font-bold text-xs flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400 shrink-0"

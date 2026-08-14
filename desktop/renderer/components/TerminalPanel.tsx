@@ -51,13 +51,31 @@ export default function TerminalPanel({
   };
 
   const [commandInput, setCommandInput] = useState<string>("");
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
   const [copied, setCopied] = useState<boolean>(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const outputContainerRef = useRef<HTMLDivElement>(null);
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const debugContainerRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef<boolean>(false);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0];
+
+  const focusInput = React.useCallback(() => {
+    requestAnimationFrame(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    });
+  }, []);
+
+  // Automatically focus terminal input on mount, mode change, tab selection, or tab creation
+  useEffect(() => {
+    if (activeMode === "terminal" && activeTab) {
+      focusInput();
+    }
+  }, [activeMode, activeTabId, tabs.length, focusInput]);
 
   // Auto-scroll logic for terminal output
   useEffect(() => {
@@ -85,9 +103,39 @@ export default function TerminalPanel({
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && activeTab) {
       e.preventDefault();
-      onSendInput(activeTab.id, commandInput + "\n");
+      const cmd = commandInput;
+      if (cmd.trim()) {
+        setHistory((prev) => [...prev, cmd]);
+      }
+      setHistoryIndex(-1);
+      onSendInput(activeTab.id, cmd + "\n");
       setCommandInput("");
       userScrolledUpRef.current = false;
+      focusInput();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (history.length > 0) {
+        const nextIdx = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1);
+        setHistoryIndex(nextIdx);
+        setCommandInput(history[nextIdx] || "");
+      }
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (historyIndex !== -1) {
+        const nextIdx = historyIndex + 1;
+        if (nextIdx >= history.length) {
+          setHistoryIndex(-1);
+          setCommandInput("");
+        } else {
+          setHistoryIndex(nextIdx);
+          setCommandInput(history[nextIdx] || "");
+        }
+      }
+    } else if (e.key === "c" && (e.ctrlKey || e.metaKey)) {
+      if (activeTab) {
+        onSendInput(activeTab.id, "\x03");
+        setCommandInput("");
+      }
     }
   };
 
@@ -165,7 +213,10 @@ export default function TerminalPanel({
               {tabs.map((tab) => (
                 <div
                   key={tab.id}
-                  onClick={() => onSelectTab(tab.id)}
+                  onClick={() => {
+                    onSelectTab(tab.id);
+                    focusInput();
+                  }}
                   className={`group min-h-[24px] px-2 py-0.5 rounded flex items-center gap-1.5 cursor-pointer transition-all text-[10.5px] ${
                     activeTabId === tab.id
                       ? "bg-[#151520] text-cyan-300 font-bold border border-cyan-500/30"
@@ -197,7 +248,10 @@ export default function TerminalPanel({
               ))}
 
               <button
-                onClick={onCreateTab}
+                onClick={() => {
+                  onCreateTab();
+                  focusInput();
+                }}
                 aria-label="Create new shell terminal tab"
                 className="min-w-[28px] min-h-[28px] p-1 rounded bg-[#18181b] hover:bg-[#27272a] text-zinc-300 border border-[#27272a] transition-all cursor-pointer flex items-center justify-center focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400"
                 title="Create New Terminal Tab"
@@ -216,7 +270,10 @@ export default function TerminalPanel({
               <span className="text-zinc-500 hidden md:inline">CWD: <strong className="text-purple-300">{activeTab.cwd}</strong></span>
 
               <button
-                onClick={() => onRestartTab(activeTab.id)}
+                onClick={() => {
+                  onRestartTab(activeTab.id);
+                  focusInput();
+                }}
                 aria-label="Restart terminal shell process"
                 className="min-h-[28px] px-2 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 text-cyan-300 border border-cyan-500/30 font-bold transition-all cursor-pointer flex items-center gap-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400"
                 title="Restart Terminal Process"
@@ -282,11 +339,21 @@ export default function TerminalPanel({
         {/* 1. Terminal Shell Mode */}
         {activeMode === "terminal" && (
           activeTab ? (
-            <div className="flex-1 flex flex-col min-h-0">
+            <div 
+              className="flex-1 flex flex-col min-h-0 cursor-text focus:outline-none"
+              onClick={focusInput}
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (document.activeElement !== inputRef.current && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                  inputRef.current?.focus();
+                }
+              }}
+            >
               <div
                 ref={outputContainerRef}
                 onScroll={handleScroll}
-                className="flex-1 p-3 overflow-y-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-zinc-300"
+                onClick={focusInput}
+                className="flex-1 p-3 overflow-y-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-zinc-300 select-text"
               >
                 {activeTab.output.length > 0 ? (
                   activeTab.output.map((line, idx) => <div key={idx}>{line}</div>)
@@ -296,25 +363,36 @@ export default function TerminalPanel({
               </div>
 
               {/* Interactive Shell Input Prompt Bar */}
-              <div className="px-3 py-1.5 bg-[#0a0a0d] border-t border-[#1f1f1f] flex items-center gap-2">
-                <span className="text-emerald-400 font-bold text-xs flex items-center gap-1">
+              <div 
+                className="px-3 py-1.5 bg-[#0a0a0d] border-t border-[#1f1f1f] flex items-center gap-2 cursor-text"
+                onClick={focusInput}
+              >
+                <span className="text-emerald-400 font-bold text-xs flex items-center gap-1 shrink-0">
                   <span>$</span>
                   <ChevronRight className="w-3 h-3 text-cyan-400" />
                 </span>
                 <input
+                  ref={inputRef}
                   type="text"
                   value={commandInput}
                   onChange={(e) => setCommandInput(e.target.value)}
                   onKeyDown={handleInputKeyDown}
-                  placeholder="Type command (e.g. node -v, python --version, pytest, npm test)..."
+                  placeholder={activeTab.output.length === 0 && !commandInput ? "Type command (e.g. node -v, python3 --version, pwd)..." : ""}
                   aria-label="Terminal command prompt input"
-                  className="flex-1 bg-transparent text-cyan-200 outline-none font-mono text-xs placeholder:text-zinc-600 focus-visible:ring-1 focus-visible:ring-cyan-400/50 rounded px-1"
+                  autoFocus
+                  className="flex-1 bg-transparent text-cyan-200 outline-none font-mono text-xs caret-cyan-400 placeholder:text-zinc-600 focus:outline-none rounded px-1"
                 />
               </div>
             </div>
           ) : (
-            <div className="flex-1 flex items-center justify-center text-zinc-600 font-mono text-xs">
-              <span>No active terminal. Click <strong>+</strong> to open a shell.</span>
+            <div 
+              className="flex-1 flex items-center justify-center text-zinc-600 font-mono text-xs cursor-pointer"
+              onClick={() => {
+                onCreateTab();
+                focusInput();
+              }}
+            >
+              <span>No active terminal. Click <strong className="text-cyan-400">+</strong> to open a shell.</span>
             </div>
           )
         )}

@@ -1,7 +1,8 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
-const path = require('path');
 const fs = require('fs');
-const { execFile } = require('child_process');
+const http = require('http');
+const path = require('path');
+const { execFile, spawn: execSpawn } = require('child_process');
 const { loadState, saveState } = require('./state-store');
 const { exportWorkspaceReport } = require('./report-export');
 const ptyManager = require('./ptyManager');
@@ -72,7 +73,92 @@ function buildFileTree(dirPath) {
   return { name, path: dirPath, isDirectory: true, children };
 }
 
+function waitForServer(targetUrl, maxRetries = 40, intervalMs = 500) {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    let isFinished = false;
+    let activeTimer = null;
+    let activeRequest = null;
+
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(targetUrl);
+    } catch (e) {
+      return reject(new Error(`Invalid URL: ${targetUrl}`));
+    }
+
+    function cleanup() {
+      isFinished = true;
+      if (activeTimer) {
+        clearTimeout(activeTimer);
+        activeTimer = null;
+      }
+      if (activeRequest) {
+        try {
+          activeRequest.destroy();
+        } catch (e) {}
+        activeRequest = null;
+      }
+    }
+
+    function check() {
+      if (isFinished) return;
+      attempts++;
+
+      activeRequest = http.get(
+        {
+          hostname: parsedUrl.hostname,
+          port: parsedUrl.port || 3000,
+          path: parsedUrl.pathname,
+          timeout: 1000,
+        },
+        (res) => {
+          if (isFinished) return;
+          if (res.statusCode && res.statusCode < 500) {
+            cleanup();
+            console.log(`[ELECTRON] Dev server is ready at ${targetUrl} (statusCode=${res.statusCode}, attempt=${attempts})`);
+            resolve(true);
+          } else if (attempts < maxRetries) {
+            activeTimer = setTimeout(check, intervalMs);
+          } else {
+            cleanup();
+            reject(new Error(`Server returned status ${res.statusCode} after ${attempts} attempts`));
+          }
+        }
+      );
+
+      activeRequest.on('error', (err) => {
+        if (isFinished) return;
+        if (attempts < maxRetries) {
+          if (attempts % 5 === 0) {
+            console.log(`[ELECTRON] Waiting for dev server at ${targetUrl} (attempt ${attempts}/${maxRetries}): ${err.message}`);
+          }
+          activeTimer = setTimeout(check, intervalMs);
+        } else {
+          cleanup();
+          reject(new Error(`Failed to connect to dev server at ${targetUrl} after ${attempts} attempts: ${err.message}`));
+        }
+      });
+
+      activeRequest.on('timeout', () => {
+        if (isFinished) return;
+        if (activeRequest) activeRequest.destroy();
+        if (attempts < maxRetries) {
+          activeTimer = setTimeout(check, intervalMs);
+        } else {
+          cleanup();
+          reject(new Error(`Connection to ${targetUrl} timed out after ${attempts} attempts`));
+        }
+      });
+    }
+
+    check();
+  });
+}
+
 function createWindow() {
+  let loadedSuccessfully = false;
+
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -91,7 +177,8 @@ function createWindow() {
 
   mainWindow.maximize();
 
-  const startUrl = process.env.ELECTRON_START_URL || 'http://127.0.0.1:3000/desktop';
+  const isDev = !app.isPackaged && (process.env.NODE_ENV === 'development' || !process.env.NODE_ENV || Boolean(process.env.ELECTRON_START_URL));
+  const startUrl = process.env.ELECTRON_START_URL || 'http://localhost:3000/desktop';
 
   // Prevent unwanted secondary popups or navigation loops
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -102,27 +189,43 @@ function createWindow() {
   });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (url !== startUrl && !url.startsWith('http://127.0.0.1:3000/desktop')) {
+    if (isDev && url !== startUrl && !url.startsWith('http://localhost:3000')) {
       event.preventDefault();
     }
   });
 
-  let loadedSuccessfully = false;
+  if (isDev) {
+    console.log(`[ELECTRON] Dev mode active. Waiting for Next.js dev server at ${startUrl}...`);
+    waitForServer(startUrl, 40, 500)
+      .then(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          console.log(`[ELECTRON] Dev server ready. Loading URL: ${startUrl}`);
+          mainWindow.loadURL(startUrl).catch((err) => {
+            console.error('[ELECTRON] Failed to load dev URL:', err.message);
+          });
+        }
+      })
+      .catch((err) => {
+        console.error('[ELECTRON] Fatal: Next.js dev server unavailable:', err.message);
+        console.error('[ELECTRON] Please start Next.js dev server first using `npm run electron:dev` or `npm run dev`.');
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.close();
+        }
+      });
+  } else {
+    const prodPath = path.join(__dirname, '..', '..', 'out', 'desktop.html');
+    const fallbackProdPath = path.join(__dirname, '..', '..', 'out', 'index.html');
+    const finalPath = fs.existsSync(prodPath) ? prodPath : fallbackProdPath;
 
-  const loadWithRetry = (url, attempts = 0) => {
-    if (!mainWindow || loadedSuccessfully) return;
-    console.log(`[ELECTRON] Attempting to load URL (${attempts + 1}):`, url);
-    mainWindow.loadURL(url).catch((err) => {
-      console.log(`[ELECTRON] Dev server not ready yet (${err.message}). Retrying in 1s...`);
-      if (attempts < 30 && !loadedSuccessfully) {
-        setTimeout(() => loadWithRetry(url, attempts + 1), 1000);
-      } else {
-        console.error('[ELECTRON] Failed to load renderer URL after max retries:', url);
-      }
-    });
-  };
-
-  loadWithRetry(startUrl);
+    if (fs.existsSync(finalPath)) {
+      console.log(`[ELECTRON] Loading production build asset: ${finalPath}`);
+      mainWindow.loadFile(finalPath).catch((err) => {
+        console.error('[ELECTRON] Failed to load production file:', err.message);
+      });
+    } else {
+      console.error('[ELECTRON] Production build file not found at:', finalPath);
+    }
+  }
 
   mainWindow.webContents.openDevTools({ mode: 'detach' });
 
@@ -1540,6 +1643,101 @@ ipcMain.handle('terminal:restart', async (event, id) => {
 
 ipcMain.handle('terminal:list', async () => {
   return ptyManager.list();
+});
+
+// Python Direct File Execution IPC Handler
+console.log('[PYTHON] IPC handler registered');
+ipcMain.handle('python:run-file', async (event, filePath) => {
+  console.log('[PYTHON] IPC run-file invoked for:', filePath);
+  if (!filePath || typeof filePath !== 'string') {
+    return { success: false, error: 'No active file provided' };
+  }
+  if (!fs.existsSync(filePath)) {
+    return { success: false, error: `File does not exist: ${filePath}` };
+  }
+  if (!filePath.endsWith('.py')) {
+    return { success: false, error: 'Active file is not a Python (.py) file' };
+  }
+
+  return new Promise((resolve) => {
+    const cwd = path.dirname(filePath);
+
+    function startProcess(bin) {
+      console.log(`[PYTHON] Spawning process ${bin} -u for file:`, filePath);
+      let child;
+      try {
+        child = execSpawn(bin, ['-u', filePath], {
+          cwd,
+          env: { ...process.env, PYTHONUNBUFFERED: '1' },
+        });
+      } catch (err) {
+        console.error(`[PYTHON] Exception spawning ${bin}:`, err);
+        return null;
+      }
+
+      if (!child || !child.pid) return null;
+
+      child.on('error', (err) => {
+        console.error(`[PYTHON] Process error on ${bin}:`, err);
+        if (bin === 'python3') {
+          const fallback = startProcess('python');
+          if (fallback) return;
+        }
+        event.sender.send('python:output', {
+          filePath,
+          data: `\n[ERROR] Process spawn failure: ${err.message}\n`,
+          isError: true,
+        });
+        resolve({ success: false, error: `Process spawn failure: ${err.message}` });
+      });
+
+      if (child.stdout) {
+        child.stdout.on('data', (chunk) => {
+          console.log('[PYTHON][STDOUT]', chunk.toString());
+          event.sender.send('python:output', {
+            filePath,
+            data: chunk.toString(),
+            type: 'stdout',
+          });
+        });
+      }
+
+      if (child.stderr) {
+        child.stderr.on('data', (chunk) => {
+          console.log('[PYTHON][STDERR]', chunk.toString());
+          event.sender.send('python:output', {
+            filePath,
+            data: chunk.toString(),
+            type: 'stderr',
+          });
+        });
+      }
+
+      child.on('close', (code) => {
+        const exitCode = code !== null ? code : 1;
+        console.log(`[PYTHON] Process closed with exit code:`, exitCode);
+        event.sender.send('python:output', {
+          filePath,
+          exitCode,
+          type: 'exit',
+        });
+        resolve({ success: exitCode === 0, exitCode });
+      });
+
+      return child;
+    }
+
+    const spawned = startProcess('python3') || startProcess('python');
+    if (!spawned) {
+      console.error('[PYTHON] Failed to spawn python3 or python');
+      event.sender.send('python:output', {
+        filePath,
+        data: `\n[ERROR] Python executable not found. Verify python3 or python is installed and available on PATH.\n`,
+        isError: true,
+      });
+      resolve({ success: false, error: 'Python executable not found' });
+    }
+  });
 });
 
 // Git Source Control IPC Handlers

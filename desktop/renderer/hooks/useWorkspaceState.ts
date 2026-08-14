@@ -40,6 +40,41 @@ export type RecoverySnapshot = {
 
 const LOCAL_STORAGE_KEY = "echo_workspace_state";
 
+export function safeParse<T>(raw: string | null | undefined, fallback: T): T {
+  if (!raw || typeof raw !== "string") return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed !== null && parsed !== undefined ? parsed : fallback;
+  } catch (err) {
+    console.warn("[SAFE-PARSE] Failed to parse persisted state JSON:", err);
+    return fallback;
+  }
+}
+
+export function validateWorkspaceState(state: any): WorkspacePersistedState | null {
+  if (!state || typeof state !== "object" || typeof state.folderPath !== "string") {
+    return null;
+  }
+  return {
+    folderPath: state.folderPath,
+    openTabs: Array.isArray(state.openTabs)
+      ? state.openTabs
+          .filter((t: any) => t && typeof t.path === "string")
+          .map((t: any) => ({
+            path: String(t.path),
+            name: typeof t.name === "string" ? t.name : String(t.path).split("/").pop() || "file",
+          }))
+      : [],
+    activeTabPath: typeof state.activeTabPath === "string" ? state.activeTabPath : "",
+    mainView: typeof state.mainView === "string" ? state.mainView : "editor",
+    explorerWidth: typeof state.explorerWidth === "number" && !isNaN(state.explorerWidth) ? state.explorerWidth : 260,
+    analysisWidth: typeof state.analysisWidth === "number" && !isNaN(state.analysisWidth) ? state.analysisWidth : 400,
+    consoleHeight: typeof state.consoleHeight === "number" && !isNaN(state.consoleHeight) ? state.consoleHeight : 220,
+    editorStates: state.editorStates && typeof state.editorStates === "object" ? state.editorStates : {},
+    timestamp: typeof state.timestamp === "number" ? state.timestamp : Date.now(),
+  };
+}
+
 export function useWorkspaceState() {
   const [loadedState, setLoadedState] = useState<WorkspacePersistedState | null>(null);
   const [hasLoaded, setHasLoaded] = useState<boolean>(false);
@@ -57,7 +92,7 @@ export function useWorkspaceState() {
     const snap = pendingRecoveryRef.current;
     if (!snap || !snap.workspacePath) return;
 
-    const dirtyTabs = (snap.openTabs || []).filter((t) => t.isDirty);
+    const dirtyTabs = (Array.isArray(snap.openTabs) ? snap.openTabs : []).filter((t) => t && t.isDirty);
     if (dirtyTabs.length === 0) {
       if (typeof window !== "undefined" && (window as any).electronAPI?.recovery?.clear) {
         try {
@@ -71,7 +106,17 @@ export function useWorkspaceState() {
       try {
         await (window as any).electronAPI.recovery.save({
           workspacePath: snap.workspacePath,
-          snapshot: snap,
+          snapshot: {
+            workspacePath: snap.workspacePath,
+            savedAt: snap.savedAt || Date.now(),
+            appVersion: snap.appVersion || "1.0.0",
+            openTabs: dirtyTabs.map((t) => ({
+              path: String(t.path),
+              content: typeof t.content === "string" ? t.content : "",
+              isDirty: true,
+            })),
+            activeTabPath: snap.activeTabPath || null,
+          },
         });
         console.log("[RECOVERY] Snapshot saved to disk");
       } catch (err) {
@@ -100,33 +145,34 @@ export function useWorkspaceState() {
     let isMounted = true;
 
     async function initializeState() {
-      let state: WorkspacePersistedState | null = null;
+      let rawState: any = null;
 
       if (typeof window !== "undefined" && window.electronAPI && window.electronAPI.loadWorkspaceState) {
         try {
-          state = await window.electronAPI.loadWorkspaceState();
+          rawState = await window.electronAPI.loadWorkspaceState();
         } catch (err) {
           console.error("[STATE-HOOK] Failed to load workspace state from Electron:", err);
         }
       }
 
-      if (!state && typeof window !== "undefined") {
+      if (!rawState && typeof window !== "undefined") {
         try {
           const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-          if (raw) {
-            state = JSON.parse(raw);
-          }
+          rawState = safeParse(raw, null);
         } catch (err) {
           console.warn("[STATE-HOOK] Failed to parse state from localStorage:", err);
         }
       }
 
+      const validState = validateWorkspaceState(rawState);
+
       if (isMounted) {
-        if (state) {
-          console.log("[STATE] loaded", state);
-          setLoadedState(state);
+        if (validState) {
+          console.log("[STATE] loaded valid state", validState);
+          setLoadedState(validState);
         } else {
-          console.log("[STATE] loaded null (fresh session)");
+          console.log("[STATE] loaded null (fresh session or invalid state discarded)");
+          setLoadedState(null);
         }
         setHasLoaded(true);
       }
@@ -149,14 +195,17 @@ export function useWorkspaceState() {
   const requestSave = useCallback((state: WorkspacePersistedState) => {
     if (!state || !state.folderPath) return;
 
+    const validated = validateWorkspaceState(state);
+    if (!validated) return;
+
     const serialized = JSON.stringify({
-      folderPath: state.folderPath,
-      openTabs: state.openTabs,
-      activeTabPath: state.activeTabPath,
-      mainView: state.mainView,
-      explorerWidth: state.explorerWidth,
-      analysisWidth: state.analysisWidth,
-      consoleHeight: state.consoleHeight,
+      folderPath: validated.folderPath,
+      openTabs: validated.openTabs,
+      activeTabPath: validated.activeTabPath,
+      mainView: validated.mainView,
+      explorerWidth: validated.explorerWidth,
+      analysisWidth: validated.analysisWidth,
+      consoleHeight: validated.consoleHeight,
     });
 
     if (lastSavedStringRef.current === serialized) {
@@ -165,7 +214,7 @@ export function useWorkspaceState() {
     lastSavedStringRef.current = serialized;
 
     pendingStateRef.current = {
-      ...state,
+      ...validated,
       timestamp: Date.now(),
     };
 

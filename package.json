@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "electron:dev": "concurrently -k -s first \"next dev -H 127.0.0.1 -p 3000\" \"wait-on http-get://127.0.0.1:3000/desktop && electron .\"",
+    "electron:dev": "concurrently -k -s first \"next dev -p 3000\" \"wait-on http://localhost:3000/desktop && electron .\"",
     "electron:start": "electron .",
     "package:mac": "bash scripts/package-macos.sh",
     "package:win": "powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
