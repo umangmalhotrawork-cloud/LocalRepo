@@ -10,8 +10,57 @@ def compute_sha256(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+def simplified_identity_operand(expression):
+    if not isinstance(expression, ast.BinOp):
+        return None
+    if isinstance(expression.op, ast.Mult):
+        if isinstance(expression.right, ast.Constant) and expression.right.value == 1:
+            return expression.left
+        if isinstance(expression.left, ast.Constant) and expression.left.value == 1:
+            return expression.right
+    elif isinstance(expression.op, ast.Add):
+        if isinstance(expression.right, ast.Constant) and expression.right.value == 0:
+            return expression.left
+        if isinstance(expression.left, ast.Constant) and expression.left.value == 0:
+            return expression.right
+    elif isinstance(expression.op, ast.Sub):
+        if isinstance(expression.right, ast.Constant) and expression.right.value == 0:
+            return expression.left
+    elif isinstance(expression.op, ast.Div):
+        if isinstance(expression.right, ast.Constant) and expression.right.value == 1:
+            return expression.left
+    return None
+
+
+def simplify_identity_statement(statement, source_lines):
+    """Return a source-preserving one-line identity simplification, if possible."""
+    expression = statement.value if isinstance(statement, (ast.Assign, ast.AnnAssign)) else None
+    operand = simplified_identity_operand(expression)
+    if not operand or expression.lineno != expression.end_lineno or operand.lineno != operand.end_lineno:
+        return None
+    target = (
+        statement.targets[0]
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1
+        else statement.target if isinstance(statement, ast.AnnAssign) else None
+    )
+    if isinstance(target, ast.Name) and isinstance(operand, ast.Name) and target.id == operand.id:
+        return None
+
+    source_line = source_lines[expression.lineno - 1]
+    original_bytes = source_line.encode("utf-8")
+    operand_source = ast.get_source_segment("".join(source_lines), operand)
+    if operand_source is None:
+        return None
+    replaced = (
+        original_bytes[:expression.col_offset]
+        + operand_source.encode("utf-8")
+        + original_bytes[expression.end_col_offset:]
+    )
+    return expression.lineno, replaced.decode("utf-8")
+
+
 def transform_source(original_content: str, approved_lines: list, file_path: str) -> str:
-    """Remove complete approved statements while keeping every Python suite valid."""
+    """Simplify approved identities and safely remove other approved statements."""
     tree = ast.parse(original_content, filename=file_path)
     source_lines = original_content.splitlines(keepends=True)
     approved_set = {int(line) for line in approved_lines}
@@ -21,6 +70,7 @@ def transform_source(original_content: str, approved_lines: list, file_path: str
     ]
 
     lines_to_remove = set()
+    line_replacements = {}
     unmatched_lines = []
     for approved_line in approved_set:
         matches = [
@@ -30,10 +80,15 @@ def transform_source(original_content: str, approved_lines: list, file_path: str
         if not matches:
             unmatched_lines.append(approved_line)
             continue
-        # A finding can occur inside a multi-line expression. Remove its smallest
-        # enclosing statement, never just the physical line containing the finding.
+        # A finding can occur inside a multi-line expression. Operate on its
+        # smallest enclosing statement, never just the physical finding line.
         statement = min(matches, key=lambda node: (node.end_lineno - node.lineno, node.lineno))
-        lines_to_remove.update(range(statement.lineno, statement.end_lineno + 1))
+        replacement = simplify_identity_statement(statement, source_lines)
+        if replacement:
+            line_number, replacement_line = replacement
+            line_replacements[line_number] = replacement_line
+        else:
+            lines_to_remove.update(range(statement.lineno, statement.end_lineno + 1))
 
     if unmatched_lines:
         raise ValueError(f"No Python statement found for approved line(s): {sorted(unmatched_lines)}")
@@ -65,6 +120,8 @@ def transform_source(original_content: str, approved_lines: list, file_path: str
     for line_number, line in enumerate(source_lines, start=1):
         if line_number in replacements:
             transformed_lines.append(replacements[line_number])
+        elif line_number in line_replacements:
+            transformed_lines.append(line_replacements[line_number])
         elif line_number not in lines_to_remove:
             transformed_lines.append(line)
 

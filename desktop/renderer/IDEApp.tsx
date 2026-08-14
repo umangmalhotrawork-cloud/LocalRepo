@@ -1883,9 +1883,8 @@ export default function IDEApp() {
             setWorkspaceSummary(scanRes);
             setWorkspaceReport(scanRes);
             console.log('[WORKSPACE] scan complete', scanRes);
-            if (scanRes.files.length > 0) {
-              handleOpenWorkspaceFile(scanRes.files[0]);
-            }
+            // A scan updates project findings only. It must never replace the
+            // user's active editor tab when its asynchronous result arrives.
           }
         } catch (scanErr) {
           console.error('[WORKSPACE] scan error:', scanErr);

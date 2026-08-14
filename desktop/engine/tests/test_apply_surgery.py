@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 import ast
 import os
+import subprocess
 import sys
 import tempfile
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import apply_surgery
+from analyze import analyze_source
 
 
 def run_surgery(source, approved_lines):
@@ -42,13 +44,13 @@ def test_removes_statement_inside_function_without_changing_indentation():
     assert written_source == "def calculate(value):\n    return value\n"
 
 
-def test_removes_complete_multiline_statement_for_a_finding_inside_it():
+def test_simplifies_finding_inside_multiline_statement_without_changing_layout():
     source = "def calculate(value):\n    result = (\n        value * 1\n    )\n    return result\n"
     result, written_source = run_surgery(source, [3])
 
     assert result["success"] is True
     ast.parse(written_source)
-    assert written_source == "def calculate(value):\n    return result\n"
+    assert written_source == "def calculate(value):\n    result = (\n        value\n    )\n    return result\n"
 
 
 def test_empty_if_and_loop_suites_receive_indented_pass():
@@ -66,6 +68,44 @@ def test_empty_if_and_loop_suites_receive_indented_pass():
     ast.parse(written_source)
     assert "    if enabled:\n        pass\n" in written_source
     assert "    for value in values:\n        pass\n" in written_source
+
+
+def test_acceptance_case_simplifies_two_ghost_lines_and_executes():
+    source = (
+        "def demo(a):\n"
+        "    x = a + 0\n"
+        "    y = x * 1\n"
+        "    z = y\n"
+        "    return z\n\n"
+        "print(demo(5))\n"
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as source_file:
+        source_file.write(source)
+        path = source_file.name
+
+    try:
+        result = apply_surgery.apply_surgery(path, [2, 3])
+        with open(path, encoding="utf-8") as source_file:
+            written_source = source_file.read()
+
+        assert result["success"] is True
+        assert result["removed_count"] == 2
+        ast.parse(written_source)
+        assert written_source == (
+            "def demo(a):\n"
+            "    x = a\n"
+            "    y = x\n"
+            "    z = y\n"
+            "    return z\n\n"
+            "print(demo(5))\n"
+        )
+        executed = subprocess.run([sys.executable, path], text=True, capture_output=True, check=True)
+        assert executed.stdout == "5\n"
+        assert analyze_source(written_source, path)["ghost_lines_count"] == 0
+    finally:
+        for candidate in (path, f"{path}.echo-nullity-backup"):
+            if os.path.exists(candidate):
+                os.unlink(candidate)
 
 
 def test_rejects_invalid_transformation_without_writing_source():
