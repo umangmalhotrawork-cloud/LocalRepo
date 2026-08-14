@@ -15,11 +15,18 @@ export interface SurgeryHunk {
   approved: boolean;
 }
 
+export interface SurgeryApplyRequest {
+  filePath: string;
+  approvedLines: number[];
+  originalSource: string;
+  transformedSource: string;
+}
+
 export interface SurgeryDiffPreviewProps {
   filePath: string;
   originalSource: string;
   findings: Finding[];
-  onApply: (approvedLines: number[]) => void;
+  onApply: (request: SurgeryApplyRequest) => void;
   onCancel: () => void;
   isApplying?: boolean;
 }
@@ -224,7 +231,12 @@ export default function SurgeryDiffPreview({
               Cancel
             </button>
             <button
-              onClick={() => onApply(Array.from(approvedLines))}
+              onClick={() => onApply({
+                filePath,
+                approvedLines: Array.from(approvedLines),
+                originalSource,
+                transformedSource,
+              })}
               disabled={approvedCount === 0 || isApplying}
               className="px-5 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-black text-xs font-extrabold shadow-cyan-glow flex items-center gap-2 transition-all disabled:opacity-40 disabled:pointer-events-none"
             >
