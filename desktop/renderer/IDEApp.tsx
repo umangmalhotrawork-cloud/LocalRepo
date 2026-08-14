@@ -2228,31 +2228,63 @@ export default function IDEApp() {
     if (!path || typeof path !== "string") return;
     setAnalyzing(true);
     addLog(`[ENGINE] Running Python analyzer on ${path}...`);
+    console.log(`[RENDERER:runAnalysis] Active Tab Path: ${path} | Buffer Length: ${content ? content.length : 0}`);
 
-    if (typeof window !== "undefined" && window.electronAPI && typeof path === "string" && !path.startsWith("demo-workspaces/")) {
+    if (typeof window !== "undefined" && window.electronAPI && typeof path === "string") {
       try {
-        console.log('[IDE-APP] runAnalysis invoking analyzeFile for', path);
+        console.log('[RENDERER:runAnalysis] Invoking electronAPI.saveFile & analyzeFile for', path);
+        if ((window as any).electronAPI.saveFile) {
+          try {
+            await (window as any).electronAPI.saveFile(path, content);
+            console.log('[RENDERER:runAnalysis] Disk save completed prior to analysis.');
+          } catch (saveErr) {
+            console.warn('[RENDERER:runAnalysis] Disk save ignored/failed:', saveErr);
+          }
+        }
         const res = await window.electronAPI.analyzeFile(path);
+        console.log('[RENDERER:runAnalysis] IPC response received:', res);
         if (res && res.findings) {
           setFindings(res.findings);
           setLuminance(res.causal_luminance !== undefined ? res.causal_luminance : (res.findings.length > 0 ? 0.0 : 1.0));
           addLog(`[ENGINE] Analysis complete: ${res.findings.length} ghost lines detected.`);
         }
       } catch (err) {
-        console.error("[IDE-APP] Error running AST analysis:", err);
+        console.error("[RENDERER:runAnalysis] Error running AST analysis:", err);
       }
     } else {
       const lines = content.split("\n");
       const clientFindings: Finding[] = [];
       lines.forEach((l, i) => {
-        if (/(\*\s*1|\+\s*0|-\s*0|\/\s*1)/.test(l)) {
+        const trimmed = l.trim();
+        if (/(\*\s*1|\+\s*0|-\s*0|\/\s*1)/.test(trimmed)) {
           clientFindings.push({
             line: i + 1,
-            code: l.trim(),
+            code: trimmed,
             title: "Identity Operation",
             reason: "Mathematical identity operation detected.",
             luminance: 0.0,
             status: "Verified Ghost Line",
+            category: "arithmetic_identity",
+          });
+        } else if (/^\s*([a-zA-Z_]\w*)\s*=\s*\1\s*$/.test(trimmed)) {
+          clientFindings.push({
+            line: i + 1,
+            code: trimmed,
+            title: "Vacuous Self-Assignment",
+            reason: "Variable is assigned to itself with zero state leverage.",
+            luminance: 0.0,
+            status: "Verified Ghost Line",
+            category: "vacuous_self_assignment",
+          });
+        } else if (/(gravity|velocity_y|position_y|jump_force)/i.test(trimmed) && (/(=\s*0|gravity\s*\*=\s*-1|velocity_y\s*\+=\s*gravity|position_y\s*-=\s*gravity|\*=\s*-1)/i.test(trimmed))) {
+          clientFindings.push({
+            line: i + 1,
+            code: trimmed,
+            title: "Potential Anti-Gravity Behavior",
+            reason: "Anti-gravity physics anomaly pattern detected.",
+            luminance: 0.05,
+            status: "Physics Anomaly",
+            category: "anti_gravity",
           });
         }
       });

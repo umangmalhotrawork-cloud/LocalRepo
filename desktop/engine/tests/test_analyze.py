@@ -235,6 +235,53 @@ def test_self_assignment_detected():
     assert finding["code"] == "x = x"
     assert "Vacuous Self-Assignment" in finding["title"]
 
+def test_add_zero_detected():
+    code = "x = a + 0\n"
+    result = analyze_source(code)
+    assert result["ghost_lines_count"] == 1
+
+def test_mul_one_detected():
+    code = "y = x * 1\n"
+    result = analyze_source(code)
+    assert result["ghost_lines_count"] == 1
+
+def test_demo_snippet_two_ghost_lines():
+    code = """def demo(a):
+    x = a + 0
+    y = x * 1
+    z = y
+    return z
+
+print(demo(5))
+"""
+    result = analyze_source(code)
+    assert result["ghost_lines_count"] == 2
+
+def test_gravity_zero_detected():
+    code = "gravity = 0\n"
+    result = analyze_source(code)
+    assert result["ghost_lines_count"] == 1
+    assert result["findings"][0]["category"] == "anti_gravity"
+
+def test_negative_gravity_flip_detected():
+    code = "gravity = gravity * -1\n"
+    result = analyze_source(code)
+    assert result["ghost_lines_count"] == 1
+    assert result["findings"][0]["category"] == "anti_gravity"
+
+def test_velocity_opposes_gravity_detected():
+    code = "velocity_y += gravity\n"
+    result = analyze_source(code)
+    assert result["ghost_lines_count"] == 1
+    assert result["findings"][0]["category"] == "anti_gravity"
+
+def test_anti_gravity_sample_two_findings():
+    code = "gravity = 0\nvelocity_y += gravity\n"
+    result = analyze_source(code)
+    assert result["ghost_lines_count"] == 2
+    assert result["findings"][0]["title"] == "Potential Anti-Gravity Behavior"
+    assert result["findings"][1]["title"] == "Potential Anti-Gravity Behavior"
+
 if __name__ == "__main__":
     test_funcs = [v for k, v in list(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

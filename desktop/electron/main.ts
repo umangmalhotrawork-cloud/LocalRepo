@@ -228,8 +228,8 @@ ipcMain.handle('fs:read-dir', async (_, dirPath: string) => {
 
 ipcMain.handle('engine:analyze', async (_, filePath: string) => {
   return new Promise((resolve) => {
-    const scriptPath = path.join(app.getAppPath(), 'app', 'engine', 'analyze.py');
-    execFile('python3', [scriptPath, filePath], (error, stdout, stderr) => {
+    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'analyze.py');
+    execFile('python3', [scriptPath, filePath, '--mode', 'analyze'], (error, stdout, stderr) => {
       if (error) {
         console.error('Python analyze error:', stderr || error.message);
         resolve({

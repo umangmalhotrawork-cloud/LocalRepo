@@ -850,9 +850,18 @@ ipcMain.handle('engine:analyze', async (_, filePath) => {
       ? path.join(app.getAppPath(), 'desktop', 'engine', 'js_analyzer.js')
       : path.join(app.getAppPath(), 'desktop', 'engine', 'analyze.py');
 
-    execFile(command, [scriptPath, filePath, '--mode', 'analyze'], (error, stdout, stderr) => {
+    const args = [scriptPath, filePath, '--mode', 'analyze'];
+    console.log(`[IPC:engine:analyze] Command: ${command} | Script: ${scriptPath} | TargetFile: ${filePath} | Args: ${JSON.stringify(args)}`);
+
+    execFile(command, args, (error, stdout, stderr) => {
+      if (stderr) {
+        console.log(`[IPC:engine:analyze][PYTHON_STDERR]\n${stderr}`);
+      }
+      if (stdout) {
+        console.log(`[IPC:engine:analyze][PYTHON_STDOUT]\n${stdout}`);
+      }
       if (error) {
-        console.error('Analyze error:', stderr || error.message);
+        console.error('[IPC:engine:analyze] Subprocess execution error:', stderr || error.message);
         resolve({
           error: stderr || error.message,
           findings: [],
@@ -862,8 +871,10 @@ ipcMain.handle('engine:analyze', async (_, filePath) => {
       }
       try {
         const jsonResult = JSON.parse(stdout);
+        console.log(`[IPC:engine:analyze] Parsed JSON result: ${jsonResult.ghost_lines_count || 0} findings.`);
         resolve(jsonResult);
       } catch (parseError) {
+        console.error('[IPC:engine:analyze] Failed to parse analyzer JSON output:', stdout);
         resolve({
           error: 'Failed to parse analyzer JSON output',
           findings: [],
