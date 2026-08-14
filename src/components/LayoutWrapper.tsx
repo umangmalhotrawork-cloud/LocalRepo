@@ -16,7 +16,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     setMounted(true);
   }, []);
 
-  const isDesktopApp = pathname === "/desktop" || pathname?.startsWith("/desktop");
+  const isDesktopApp = pathname === "/desktop" || (typeof pathname === "string" && pathname.startsWith("/desktop"));
 
   if (isDesktopApp) {
     return (

@@ -172,10 +172,10 @@ function compareBehavioralFingerprints(fpA, fpB) {
         continue;
       }
 
-      // Both observations exist — compare statuses & outputs
       const statusA = oA.status;
       const statusB = oB.status;
-      const sameOutput = deepEqual(oA.output, oB.output);
+      const sameException = statusA === 'exception' && statusB === 'exception' ? (oA.exception_type === oB.exception_type && oA.message === oB.message) : true;
+      const sameOutput = statusA === 'exception' ? sameException : deepEqual(oA.output, oB.output);
 
       if (statusA === statusB && sameOutput) {
         continue; // Unchanged observation

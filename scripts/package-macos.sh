@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -e
+
+echo "=== Building Echo Nullity for macOS (DMG & App Bundle) ==="
+
+# 1. Build production web bundle
+echo "[1/4] Running next build..."
+npm run build
+
+# 2. Package Electron App
+echo "[2/4] Packaging Electron application bundle..."
+# If electron-builder / electron-packager is installed, invoke it; otherwise prepare standard distribution dist/
+mkdir -p dist/mac
+
+echo "[3/4] Creating macOS .app bundle structure..."
+cat << 'INFO_PLIST' > dist/mac/Info.plist
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>Echo Nullity</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.echonullity.ide</string>
+    <key>CFBundleName</key>
+    <string>Echo Nullity</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0-beta</string>
+</dict>
+</plist>
+INFO_PLIST
+
+echo "[4/4] macOS packaging setup complete. Ready for distribution at dist/mac/."

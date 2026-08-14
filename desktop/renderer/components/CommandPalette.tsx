@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { 
   Command, Search, FolderOpen, Play, Sparkles, RotateCcw, 
-  Sidebar, Terminal, FileText, X, Zap 
+  Sidebar, Terminal, FileText, X, Zap, ShieldAlert, Camera, History 
 } from "lucide-react";
 
 interface CommandItem {
@@ -24,6 +24,24 @@ interface CommandPaletteProps {
   onRestoreBackup: () => void;
   onToggleExplorer: () => void;
   onToggleConsole: () => void;
+  onRestoreRecoverySession?: () => void;
+  onDiscardRecoverySession?: () => void;
+  onOpenTestExplorer?: () => void;
+  onRunAllTests?: () => void;
+  onRunCurrentFileTests?: () => void;
+  onOpenProfiler?: () => void;
+  onProfileCurrentFile?: () => void;
+  onProfileCurrentTest?: () => void;
+  onProfileTerminal?: () => void;
+  onExportProfiler?: () => void;
+  onClearProfilerDecorations?: () => void;
+  onOpenSecurityAudit?: () => void;
+  onRunSecurityScan?: () => void;
+  onExportSecurityReport?: () => void;
+  onCreateSnapshot?: () => void;
+  onOpenSnapshots?: () => void;
+  onCompareLatestSnapshot?: () => void;
+  onRestoreLastSnapshot?: () => void;
   openTabs: { path: string; name: string }[];
   onSelectTab: (path: string) => void;
 }
@@ -37,6 +55,24 @@ export default function CommandPalette({
   onRestoreBackup,
   onToggleExplorer,
   onToggleConsole,
+  onRestoreRecoverySession,
+  onDiscardRecoverySession,
+  onOpenTestExplorer,
+  onRunAllTests,
+  onRunCurrentFileTests,
+  onOpenProfiler,
+  onProfileCurrentFile,
+  onProfileCurrentTest,
+  onProfileTerminal,
+  onExportProfiler,
+  onClearProfilerDecorations,
+  onOpenSecurityAudit,
+  onRunSecurityScan,
+  onExportSecurityReport,
+  onCreateSnapshot,
+  onOpenSnapshots,
+  onCompareLatestSnapshot,
+  onRestoreLastSnapshot,
   openTabs,
   onSelectTab,
 }: CommandPaletteProps) {
@@ -55,6 +91,139 @@ export default function CommandPalette({
       category: "File Operations",
       icon: FolderOpen,
       action: () => { onOpenFolder(); onClose(); },
+    },
+    {
+      id: "create-workspace-snapshot",
+      title: "Create Workspace Snapshot",
+      category: "Snapshots",
+      icon: Camera,
+      shortcut: "⌘⇧B",
+      action: () => { if (onCreateSnapshot) onCreateSnapshot(); onClose(); },
+    },
+    {
+      id: "open-snapshots",
+      title: "Open Snapshots",
+      category: "Snapshots",
+      icon: History,
+      action: () => { if (onOpenSnapshots) onOpenSnapshots(); onClose(); },
+    },
+    {
+      id: "compare-latest-snapshot",
+      title: "Compare With Latest Snapshot",
+      category: "Snapshots",
+      icon: Sparkles,
+      action: () => { if (onCompareLatestSnapshot) onCompareLatestSnapshot(); onClose(); },
+    },
+    {
+      id: "restore-last-snapshot",
+      title: "Restore Last Snapshot",
+      category: "Snapshots",
+      icon: RotateCcw,
+      action: () => { if (onRestoreLastSnapshot) onRestoreLastSnapshot(); onClose(); },
+    },
+    {
+      id: "open-security-audit",
+      title: "Open Security Audit",
+      category: "Security",
+      icon: ShieldAlert,
+      shortcut: "⌘⇧S",
+      action: () => { if (onOpenSecurityAudit) onOpenSecurityAudit(); onClose(); },
+    },
+    {
+      id: "run-security-scan",
+      title: "Run Security Scan",
+      category: "Security",
+      icon: Play,
+      action: () => { if (onRunSecurityScan) onRunSecurityScan(); onClose(); },
+    },
+    {
+      id: "export-security-report",
+      title: "Export Security Report",
+      category: "Security",
+      icon: Sparkles,
+      action: () => { if (onExportSecurityReport) onExportSecurityReport(); onClose(); },
+    },
+    {
+      id: "open-profiler",
+      title: "Open Profiler",
+      category: "Performance Profiler",
+      icon: Zap,
+      shortcut: "⌘⇧P",
+      action: () => { if (onOpenProfiler) onOpenProfiler(); onClose(); },
+    },
+    {
+      id: "profile-current-file",
+      title: "Profile Current File",
+      category: "Performance Profiler",
+      icon: Play,
+      shortcut: "F7",
+      action: () => { if (onProfileCurrentFile) onProfileCurrentFile(); onClose(); },
+    },
+    {
+      id: "profile-current-test",
+      title: "Profile Current Test",
+      category: "Performance Profiler",
+      icon: Play,
+      shortcut: "⇧F7",
+      action: () => { if (onProfileCurrentTest) onProfileCurrentTest(); onClose(); },
+    },
+    {
+      id: "profile-terminal-command",
+      title: "Profile Last Terminal Command",
+      category: "Performance Profiler",
+      icon: Terminal,
+      action: () => { if (onProfileTerminal) onProfileTerminal(); onClose(); },
+    },
+    {
+      id: "export-profiler-report",
+      title: "Export Profiler Report",
+      category: "Performance Profiler",
+      icon: Sparkles,
+      action: () => { if (onExportProfiler) onExportProfiler(); onClose(); },
+    },
+    {
+      id: "clear-profiler-decorations",
+      title: "Clear Profiler Decorations",
+      category: "Performance Profiler",
+      icon: X,
+      action: () => { if (onClearProfilerDecorations) onClearProfilerDecorations(); onClose(); },
+    },
+    {
+      id: "open-test-explorer",
+      title: "Open Test Explorer & Coverage",
+      category: "Testing",
+      icon: Sparkles,
+      shortcut: "⌘⇧T",
+      action: () => { if (onOpenTestExplorer) onOpenTestExplorer(); onClose(); },
+    },
+    {
+      id: "run-all-tests",
+      title: "Run All Tests in Workspace",
+      category: "Testing",
+      icon: Play,
+      action: () => { if (onRunAllTests) onRunAllTests(); onClose(); },
+    },
+    {
+      id: "run-current-file-tests",
+      title: "Run Tests in Current File",
+      category: "Testing",
+      icon: Play,
+      shortcut: "⇧F6",
+      action: () => { if (onRunCurrentFileTests) onRunCurrentFileTests(); onClose(); },
+    },
+    {
+      id: "restore-previous-session",
+      title: "Restore Previous Session",
+      category: "Crash Recovery",
+      icon: RotateCcw,
+      action: () => { if (onRestoreRecoverySession) onRestoreRecoverySession(); onClose(); },
+    },
+    {
+      id: "discard-recovery-snapshot",
+      title: "Discard Recovery Snapshot",
+      category: "Crash Recovery",
+      icon: X,
+      action: () => { if (onDiscardRecoverySession) onDiscardRecoverySession(); onClose(); },
     },
     {
       id: "run-tomography",

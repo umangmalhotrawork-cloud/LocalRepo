@@ -4,6 +4,30 @@ const fs = require('fs');
 const { execFile } = require('child_process');
 const { loadState, saveState } = require('./state-store');
 const { exportWorkspaceReport } = require('./report-export');
+const ptyManager = require('./ptyManager');
+const gitManager = require('./gitManager');
+const searchManager = require('./searchManager');
+const aiManager = require('./aiManager');
+const agentManager = require('./agentManager');
+const { recoveryStore } = require('./recoveryStore');
+const testManager = require('./testManager');
+const { profilerManager } = require('./profilerManager');
+const { securityAuditManager } = require('./securityAuditManager');
+const { snapshotManager } = require('./snapshotManager');
+const { logger } = require('./logger');
+const { crashReporter } = require('./crashReporter');
+const { healthChecker } = require('./healthCheck');
+
+process.on('uncaughtException', (err) => {
+  logger.error('MAIN', `Uncaught exception: ${err.message}`, { stack: err.stack });
+  crashReporter.recordCrash(err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('MAIN', `Unhandled rejection: ${reason}`);
+});
+
+recoveryStore.startHeartbeat();
 
 let mainWindow = null;
 
@@ -57,6 +81,7 @@ function createWindow() {
     title: 'Echo Nullity — Desktop IDE',
     backgroundColor: '#050505',
     titleBarStyle: 'hiddenInset',
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -68,12 +93,28 @@ function createWindow() {
 
   const startUrl = process.env.ELECTRON_START_URL || 'http://127.0.0.1:3000/desktop';
 
+  // Prevent unwanted secondary popups or navigation loops
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url && (url.startsWith('http:') || url.startsWith('https:'))) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url !== startUrl && !url.startsWith('http://127.0.0.1:3000/desktop')) {
+      event.preventDefault();
+    }
+  });
+
+  let loadedSuccessfully = false;
+
   const loadWithRetry = (url, attempts = 0) => {
-    if (!mainWindow) return;
+    if (!mainWindow || loadedSuccessfully) return;
     console.log(`[ELECTRON] Attempting to load URL (${attempts + 1}):`, url);
     mainWindow.loadURL(url).catch((err) => {
       console.log(`[ELECTRON] Dev server not ready yet (${err.message}). Retrying in 1s...`);
-      if (attempts < 30) {
+      if (attempts < 30 && !loadedSuccessfully) {
         setTimeout(() => loadWithRetry(url, attempts + 1), 1000);
       } else {
         console.error('[ELECTRON] Failed to load renderer URL after max retries:', url);
@@ -90,24 +131,26 @@ function createWindow() {
   });
 
   mainWindow.webContents.on('did-finish-load', async () => {
+    loadedSuccessfully = true;
     const targetUrl = mainWindow.webContents.getURL();
     console.log('[ELECTRON] did-finish-load:', targetUrl);
+    console.log('[ELECTRON] URL:', mainWindow.webContents.getURL());
+    console.log('[ELECTRON] main frame load successful');
 
-    await new Promise((r) => setTimeout(r, 300));
-
-    if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
       mainWindow.show();
       mainWindow.focus();
     }
 
-    setTimeout(async () => {
-      try {
-        if (mainWindow) {
-          const image = await mainWindow.capturePage();
-          const screenshotDir = path.join(app.getAppPath(), 'desktop', 'screenshots');
-          if (!fs.existsSync(screenshotDir)) {
-            fs.mkdirSync(screenshotDir, { recursive: true });
-          }
+    if (process.env.ELECTRON_AUTO_SCREENSHOT === 'true') {
+      setTimeout(async () => {
+        try {
+          if (mainWindow) {
+            const image = await mainWindow.capturePage();
+            const screenshotDir = path.join(app.getAppPath(), 'desktop', 'screenshots');
+            if (!fs.existsSync(screenshotDir)) {
+              fs.mkdirSync(screenshotDir, { recursive: true });
+            }
           const screenshotPath = path.join(screenshotDir, 'phase3-editor-completion.png');
           fs.writeFileSync(screenshotPath, image.toPNG());
           console.log('[ELECTRON] Saved verification screenshot to:', screenshotPath);
@@ -604,11 +647,14 @@ function createWindow() {
         console.error('[ELECTRON] Error capturing screenshot:', err);
       }
     }, 2500);
+  }
   });
 
-  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     console.error(`[ELECTRON] did-fail-load (${errorCode}): ${errorDescription}`);
-    setTimeout(() => loadWithRetry(startUrl), 1000);
+    if (isMainFrame && !loadedSuccessfully && errorCode !== -3) {
+      setTimeout(() => loadWithRetry(startUrl), 1000);
+    }
   });
 
   mainWindow.on('closed', () => {
@@ -990,6 +1036,93 @@ ipcMain.handle('behavior:impact-radius', async (_, payload) => {
       resolve(result);
     } catch (e) {
       resolve({ schema_version: 1, error: e.message, summary: { global_severity: 'NO_CHANGE' }, impacted_nodes: [] });
+    }
+  });
+});
+
+ipcMain.handle('behavior:propagation-timeline', async (_, payload) => {
+  return new Promise((resolve) => {
+    try {
+      const { calculatePropagationTimeline } = require('../engine/temporal_impact_propagation');
+      const result = calculatePropagationTimeline(payload);
+      resolve(result);
+    } catch (e) {
+      resolve({ schema_version: 1, error: e.message, timeline: [], summary: {} });
+    }
+  });
+});
+
+ipcMain.handle('behavior:blast-radius', async (_, payload) => {
+  return new Promise(async (resolve) => {
+    try {
+      const { calculateBehavioralBlastRadius } = require('../engine/behavioral_blast_radius');
+      const result = await calculateBehavioralBlastRadius(payload);
+      resolve(result);
+    } catch (e) {
+      resolve({ schema_version: 1, error: e.message, root_changed_functions: [], impacted_functions: [], blast_radius_score: 0.0, summary: {} });
+    }
+  });
+});
+
+ipcMain.handle('behavior:counterfactual', async (_, payload) => {
+  return new Promise(async (resolve) => {
+    try {
+      const { computeCounterfactualAnalysis } = require('../engine/counterfactual_engine');
+      const result = await computeCounterfactualAnalysis(payload);
+      resolve(result);
+    } catch (e) {
+      resolve({ schema_version: 1, error: e.message, equivalence_score: 0.0, safe_to_remove: false, changed_observations: 0, confidence: 0.0, trace_diff: [] });
+    }
+  });
+});
+
+ipcMain.handle('behavior:patch-firewall', async (_, payload) => {
+  return new Promise(async (resolve) => {
+    try {
+      const { evaluateAIPatchFirewall } = require('../engine/ai_patch_firewall');
+      const result = await evaluateAIPatchFirewall(payload);
+      resolve(result);
+    } catch (e) {
+      resolve({ schema_version: 1, error: e.message, files: [], risk_score: 100, risk_level: 'HIGH_RISK', safe_to_auto_apply: false, summary: { changed_hunks: 0, safe_removals: 0, behavior_changes: 0, impacted_functions: 0 } });
+    }
+  });
+});
+
+ipcMain.handle('behavior:repository-firewall', async (_, payload) => {
+  return new Promise(async (resolve) => {
+    try {
+      const { evaluateRepositoryPatchFirewall } = require('../engine/repository_patch_firewall');
+      const result = await evaluateRepositoryPatchFirewall(payload);
+      resolve(result);
+    } catch (e) {
+      resolve({
+        schema_version: 1,
+        error: e.message,
+        repository_path: payload.repository_path || process.cwd(),
+        files_analyzed: 0,
+        hunks_analyzed: 0,
+        risky_hunks: 0,
+        safe_hunks: 0,
+        affected_files: [],
+        top_risky_hunks: [],
+        max_blast_radius_score: 0,
+        risk_score: 100,
+        risk_level: 'HIGH_RISK',
+        merge_recommendation: 'BLOCK',
+        safe_to_auto_apply: false,
+      });
+    }
+  });
+});
+
+ipcMain.handle('behavior:semantic-intent-drift', async (_, payload) => {
+  return new Promise((resolve) => {
+    try {
+      const { analyzeSemanticIntentDrift } = require('../engine/semantic_intent_drift');
+      const result = analyzeSemanticIntentDrift(payload);
+      resolve(result);
+    } catch (e) {
+      resolve({ schema_version: 1, error: e.message, drift_score: 0.0, drift_level: 'NONE', intent_changes: [], confidence: 0.0 });
     }
   });
 });
@@ -1382,4 +1515,257 @@ ipcMain.handle('engine:calculate-luminance', async (_, workspacePath) => {
       }
     });
   });
+});
+
+// PTY Integrated Terminal IPC Handlers
+ipcMain.handle('terminal:create', async (event, options) => {
+  return ptyManager.createTerminal(options, event.sender);
+});
+
+ipcMain.handle('terminal:write', async (_, { id, data }) => {
+  ptyManager.write(id, data);
+});
+
+ipcMain.handle('terminal:resize', async (_, { id, cols, rows }) => {
+  ptyManager.resize(id, cols, rows);
+});
+
+ipcMain.handle('terminal:kill', async (_, id) => {
+  ptyManager.kill(id);
+});
+
+ipcMain.handle('terminal:restart', async (event, id) => {
+  return ptyManager.restart(id, event.sender);
+});
+
+ipcMain.handle('terminal:list', async () => {
+  return ptyManager.list();
+});
+
+// Git Source Control IPC Handlers
+ipcMain.handle('git:status', async (_, workspacePath) => {
+  return gitManager.getStatus(workspacePath);
+});
+
+ipcMain.handle('git:diff', async (_, { workspacePath, file, staged }) => {
+  return gitManager.getDiff(workspacePath, file, staged);
+});
+
+ipcMain.handle('git:stage', async (_, { workspacePath, file }) => {
+  return gitManager.stage(workspacePath, file);
+});
+
+ipcMain.handle('git:unstage', async (_, { workspacePath, file }) => {
+  return gitManager.unstage(workspacePath, file);
+});
+
+ipcMain.handle('git:stageAll', async (_, workspacePath) => {
+  return gitManager.stageAll(workspacePath);
+});
+
+ipcMain.handle('git:unstageAll', async (_, workspacePath) => {
+  return gitManager.unstageAll(workspacePath);
+});
+
+ipcMain.handle('git:commit', async (_, { workspacePath, message }) => {
+  return gitManager.commit(workspacePath, message);
+});
+
+ipcMain.handle('git:branches', async (_, workspacePath) => {
+  return gitManager.getBranches(workspacePath);
+});
+
+ipcMain.handle('git:checkout', async (_, { workspacePath, branch }) => {
+  return gitManager.checkout(workspacePath, branch);
+});
+
+ipcMain.handle('git:createBranch', async (_, { workspacePath, branch }) => {
+  return gitManager.createBranch(workspacePath, branch);
+});
+
+ipcMain.handle('git:discard', async (_, { workspacePath, file }) => {
+  return gitManager.discard(workspacePath, file);
+});
+
+// Workspace Search & Replace IPC Handlers
+ipcMain.handle('search:run', async (_, payload) => {
+  return searchManager.runSearch(payload);
+});
+
+ipcMain.handle('search:replace', async (_, payload) => {
+  return searchManager.replaceSingle(payload);
+});
+
+ipcMain.handle('search:replaceAll', async (_, payload) => {
+  return searchManager.replaceAll(payload);
+});
+
+ipcMain.handle('search:cancel', async (_, id) => {
+  return searchManager.cancelSearch(id);
+});
+
+// AI Code Actions IPC Handler
+ipcMain.handle('ai:code-action', async (_, payload) => {
+  return aiManager.runCodeAction(payload);
+});
+
+// AI Agent Mode IPC Handler
+ipcMain.handle('agent:run', async (_, payload) => {
+  return agentManager.runAgentTask(payload);
+});
+
+// Crash Recovery & Session Restore IPC Handlers
+ipcMain.handle('recovery:save', async (_, payload) => {
+  return recoveryStore.saveSnapshot(payload.workspacePath, payload.snapshot);
+});
+
+ipcMain.handle('recovery:load', async (_, workspacePath) => {
+  return recoveryStore.loadSnapshot(workspacePath);
+});
+
+ipcMain.handle('recovery:clear', async (_, workspacePath) => {
+  return recoveryStore.clearSnapshot(workspacePath);
+});
+
+ipcMain.handle('recovery:list', async () => {
+  return recoveryStore.listSnapshots();
+});
+
+ipcMain.handle('recovery:check-crash', async () => {
+  return recoveryStore.checkCrashState();
+});
+
+// Test Explorer & Coverage IPC Handlers
+ipcMain.handle('test:discover', async (_, workspacePath) => {
+  return testManager.discoverTests(workspacePath);
+});
+
+ipcMain.handle('test:run', async (_, payload) => {
+  return testManager.runTest(payload);
+});
+
+ipcMain.handle('test:run-file', async (_, payload) => {
+  return testManager.runFile(payload);
+});
+
+ipcMain.handle('test:run-all', async (_, payload) => {
+  return testManager.runAll(payload);
+});
+
+ipcMain.handle('test:coverage', async (_, payload) => {
+  return testManager.getCoverage(payload);
+});
+
+// Performance Profiler IPC Handlers
+ipcMain.handle('profiler:python', async (_, payload) => {
+  return profilerManager.profilePythonCPU(payload.code, payload.filePath);
+});
+
+ipcMain.handle('profiler:javascript', async (_, payload) => {
+  return profilerManager.profileJavaScript(payload.code, payload.filePath);
+});
+
+ipcMain.handle('profiler:memory', async (_, payload) => {
+  return profilerManager.profilePythonMemory(payload.code, payload.filePath);
+});
+
+ipcMain.handle('profiler:react', async (_, payload) => {
+  return profilerManager.recordReactMetric(payload.component, payload.renderDurationMs, payload.isWasted);
+});
+
+ipcMain.handle('profiler:export', async (_, payload) => {
+  return profilerManager.exportReport(payload);
+});
+
+// Security & Dependency Audit IPC Handlers
+ipcMain.handle('security:scan', async (_, workspacePath) => {
+  return securityAuditManager.scanWorkspace(workspacePath);
+});
+
+ipcMain.handle('security:export', async (_, payload) => {
+  return securityAuditManager.exportReport(payload.report, payload.format);
+});
+
+// Workspace Snapshots & Checkpoints IPC Handlers
+ipcMain.handle('snapshot:create', async (_, payload) => {
+  return snapshotManager.createSnapshot(payload);
+});
+
+ipcMain.handle('snapshot:list', async (_, workspacePath) => {
+  return snapshotManager.listSnapshots(workspacePath);
+});
+
+ipcMain.handle('snapshot:get', async (_, payload) => {
+  return snapshotManager.getSnapshot(payload.workspacePath, payload.snapshotId);
+});
+
+ipcMain.handle('snapshot:compare', async (_, payload) => {
+  return snapshotManager.compareSnapshots(payload);
+});
+
+ipcMain.handle('snapshot:restore-file', async (_, payload) => {
+  return snapshotManager.restoreFile(payload);
+});
+
+ipcMain.handle('snapshot:restore-workspace', async (_, payload) => {
+  return snapshotManager.restoreWorkspace(payload);
+});
+
+ipcMain.handle('snapshot:delete', async (_, payload) => {
+  return snapshotManager.deleteSnapshot(payload.workspacePath, payload.snapshotId);
+});
+
+// Production Hardening, Diagnostics & Health Check IPC Handlers
+ipcMain.handle('health:check', async () => {
+  return healthChecker.runStartupHealthCheck();
+});
+
+ipcMain.handle('crash:report', async (_, payload) => {
+  return crashReporter.recordCrash(payload.error, payload.context);
+});
+
+ipcMain.handle('crash:list', async () => {
+  return crashReporter.listCrashes();
+});
+
+ipcMain.handle('logger:log', async (_, payload) => {
+  logger.write(payload.level || 'info', payload.category || 'RENDERER', payload.message, payload.meta);
+  return { success: true };
+});
+
+ipcMain.handle('logger:recent', async (_, limit) => {
+  return logger.getRecentLogs(limit || 100);
+});
+
+// Local-only Telemetry Storage
+const telemetryState = {
+  enabled: true,
+  anonymousCounts: {
+    appLaunches: 1,
+    crashes: 0,
+    recoveryRestores: 0,
+    snapshotRestores: 0,
+  },
+};
+
+ipcMain.handle('telemetry:get', async () => {
+  return telemetryState;
+});
+
+ipcMain.handle('telemetry:set', async (_, enabled) => {
+  telemetryState.enabled = Boolean(enabled);
+  return telemetryState;
+});
+
+ipcMain.handle('telemetry:track', async (_, eventName) => {
+  if (telemetryState.enabled && telemetryState.anonymousCounts[eventName] !== undefined) {
+    telemetryState.anonymousCounts[eventName] += 1;
+  }
+  return telemetryState;
+});
+
+app.on('will-quit', () => {
+  logger.info('MAIN', 'Application shutting down cleanly');
+  recoveryStore.updateHeartbeat(true);
+  ptyManager.cleanupAll();
 });

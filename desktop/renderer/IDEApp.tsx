@@ -7,8 +7,9 @@ import dynamic from "next/dynamic";
 import { 
   FolderOpen, FileText, ChevronRight, ChevronDown, Play, Sparkles, 
   Terminal as TerminalIcon, Zap, X, Check, Save, RotateCcw, ArrowRight, 
-  Command, Search, Cpu, Layers, Activity, BarChart3, CheckCircle2, AlertTriangle, ShieldCheck,
-  LayoutDashboard, Clock, FileSearch, Network, Download, Flame, Sun, Moon, Copy
+  Command, Search, Cpu, Layers, Activity, BarChart3, CheckCircle2, AlertTriangle, ShieldCheck, ShieldAlert,
+  LayoutDashboard, Clock, FileSearch, Network, Download, Flame, Sun, Moon, Copy, GitPullRequest, GitBranch, Compass, Globe, FileCode, Bug, Bot, FlaskConical,
+  History as HistoryIcon, Camera
 } from "lucide-react";
 
 import ConfirmDialog from "./components/ConfirmDialog";
@@ -18,6 +19,21 @@ import ProvenanceReplayPanel, { Finding, ProvenanceStep } from "./components/Pro
 import WorkspaceDashboard, { WorkspaceReport, WorkspaceFileReport } from "./components/WorkspaceDashboard";
 import WorkspaceGraphPanel, { WorkspaceGraph, GraphNode } from "./components/WorkspaceGraphPanel";
 import StartupModal from "./components/StartupModal";
+import { runPython } from "../runtime/pythonRunner";
+import { analyzePythonExecution, ExecutionAnalysis } from "../runtime/pythonExecutionAnalyzer";
+import { debugPython, DebugStep } from "../runtime/pythonTimeTravelDebugger";
+import DebuggerPanel from "./components/DebuggerPanel";
+import LiveWebPreviewPanel from "./components/LiveWebPreviewPanel";
+import { shouldShowPreview } from "../engine/live_web_preview";
+import TerminalPanel from "./components/TerminalPanel";
+import { useTerminal } from "./hooks/useTerminal";
+import SourceControlPanel from "./components/SourceControlPanel";
+import { useGit } from "./hooks/useGit";
+import SearchPanel from "./components/SearchPanel";
+import { useSearch, SearchMatchItem } from "./hooks/useSearch";
+import InlineCodeActions from "./components/InlineCodeActions";
+import AIPanel, { AIResponsePayload } from "./components/AIPanel";
+import AgentPanel, { AgentStep, ProposedEdit } from "./components/AgentPanel";
 import SurgeryDiffPreview from "./components/SurgeryDiffPreview";
 import WorkspaceSearchModal, { SearchMode, SearchResultItem } from "./components/WorkspaceSearchModal";
 import ClonePanel, { CloneReport, CloneInstance } from "./components/ClonePanel";
@@ -26,7 +42,19 @@ import CodeEditorPanel, { WorkspaceLuminanceReport, FileLuminanceReport, Stateme
 import SurgeryHistoryDrawer from "./components/SurgeryHistoryDrawer";
 import RestoreConfirmModal from "./components/RestoreConfirmModal";
 import BehaviorFingerprintPanel, { BehavioralFingerprintReport } from "./components/BehaviorFingerprintPanel";
-import { useWorkspaceState, EditorViewState, WorkspacePersistedState } from "./hooks/useWorkspaceState";
+import PatchFirewallPanel, { PatchFirewallReport } from "./components/PatchFirewallPanel";
+import RepositoryPatchFirewallPanel, { RepositoryPatchFirewallReport } from "./components/RepositoryPatchFirewallPanel";
+import SemanticIntentRadarPanel, { SemanticIntentDriftReport } from "./components/SemanticIntentRadarPanel";
+import RecoveryDialog from "./components/RecoveryDialog";
+import TestExplorerPanel from "./components/TestExplorerPanel";
+import { useTests, TestCase } from "./hooks/useTests";
+import ProfilerPanel from "./components/ProfilerPanel";
+import { useProfiler } from "./hooks/useProfiler";
+import SecurityAuditPanel from "./components/SecurityAuditPanel";
+import { useSecurityAudit } from "./hooks/useSecurityAudit";
+import SnapshotPanel from "./components/SnapshotPanel";
+import { useSnapshots } from "./hooks/useSnapshots";
+import { useWorkspaceState, EditorViewState, WorkspacePersistedState, RecoverySnapshot } from "./hooks/useWorkspaceState";
 import { buildWorkspaceReport, ReportExportPayload } from "./utils/reportBuilder";
 import { exportGraphSvg } from "./utils/exportGraphSvg";
 
@@ -94,6 +122,45 @@ declare global {
       getHistory: (id: string) => Promise<{ success: boolean; entry?: HistoryEntry; error?: string }>;
       restoreHistory: (id: string) => Promise<{ success: boolean; file: string; restored_content: string; checkpoint_id: string; entry?: HistoryEntry; error?: string }>;
       appendHistory: (entry: Partial<HistoryEntry>) => Promise<{ success: boolean; entry?: HistoryEntry; error?: string }>;
+      analyzeSemanticIntentDrift: (payload: { original_source: string; edited_source: string; language?: string; function_name?: string }) => Promise<SemanticIntentDriftReport>;
+      terminal?: {
+        create: (options?: { cwd?: string; shell?: string; cols?: number; rows?: number }) => Promise<{ id: string; pid: number; shell: string; cwd: string; status: string }>;
+        write: (id: string, data: string) => Promise<void>;
+        resize: (id: string, cols: number, rows: number) => Promise<void>;
+        kill: (id: string) => Promise<void>;
+        restart: (id: string) => Promise<{ id: string; pid: number; shell: string; cwd: string; status: string }>;
+        list: () => Promise<Array<{ id: string; pid: number; shell: string; cwd: string; status: string }>>;
+        onData: (callback: (data: { id: string; data: string }) => void) => () => void;
+        onExit: (callback: (data: { id: string; exitCode: number; signal?: number }) => void) => () => void;
+      };
+      git?: {
+        status: (workspacePath: string) => Promise<any>;
+        diff: (workspacePath: string, file: string, staged?: boolean) => Promise<{ success: boolean; diff: string; originalContent: string; currentContent: string; error?: string }>;
+        stage: (workspacePath: string, file: string) => Promise<any>;
+        unstage: (workspacePath: string, file: string) => Promise<any>;
+        stageAll: (workspacePath: string) => Promise<any>;
+        unstageAll: (workspacePath: string) => Promise<any>;
+        commit: (workspacePath: string, message: string) => Promise<{ success: boolean; commitResult?: any; status?: any; error?: string }>;
+        branches: (workspacePath: string) => Promise<{ all: string[]; current: string }>;
+        checkout: (workspacePath: string, branch: string) => Promise<any>;
+        createBranch: (workspacePath: string, branch: string) => Promise<any>;
+        discard: (workspacePath: string, file: string) => Promise<any>;
+      };
+      search?: {
+        run: (payload: any) => Promise<{ success: boolean; results: SearchMatchItem[]; totalFiles: number; totalMatches: number; durationMs: number; error?: string }>;
+        replace: (payload: any) => Promise<{ success: boolean; file: string; line: number; newContent: string; error?: string }>;
+        replaceAll: (payload: any) => Promise<{ success: boolean; filesChanged: number; replacementsCount: number; error?: string }>;
+        cancel: (id: string) => Promise<void>;
+      };
+      ai?: {
+        codeAction: (payload: {
+          action: string;
+          language: string;
+          filePath: string;
+          selection: string;
+          fullFile: string;
+        }) => Promise<AIResponsePayload>;
+      };
     };
   }
 }
@@ -238,6 +305,14 @@ export default function IDEApp() {
 
   useEffect(() => {
     console.log('[IDE-APP] mounted');
+    if (typeof window !== "undefined" && (window as any).electronAPI?.hardening) {
+      (window as any).electronAPI.hardening.trackTelemetry('appLaunches').catch(() => {});
+      (window as any).electronAPI.hardening.checkHealth().then((res: any) => {
+        if (res && res.warnings && res.warnings.length > 0) {
+          console.warn('[HEALTH-CHECK] Startup warnings:', res.warnings);
+        }
+      }).catch(() => {});
+    }
     return () => console.log('[IDE-APP] unmounted');
   }, []);
 
@@ -332,13 +407,43 @@ export default function IDEApp() {
       return_sink_line: 24,
     },
   ]);
-  type MainView = "editor" | "dashboard" | "graph" | "clones" | "semantic_clones" | "luminance" | "behavior_fingerprint";
+  type MainView = "editor" | "dashboard" | "graph" | "clones" | "semantic_clones" | "luminance" | "behavior_fingerprint" | "patch_firewall" | "repository_patch_firewall" | "semantic_intent_radar" | "source_control" | "search" | "test_explorer" | "profiler" | "security_audit" | "snapshots";
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(findings[0] || null);
   const [workspaceReport, setWorkspaceReport] = useState<WorkspaceReport | null>(null);
   const [workspaceSummary, setWorkspaceSummary] = useState<WorkspaceReport | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceScanLoading, setWorkspaceScanLoading] = useState(false);
   const [mainView, setMainView] = useState<MainView>("editor");
+
+  const testsHook = useTests(folderPath || "");
+  const testDecorationIdsRef = useRef<string[]>([]);
+
+  const profiler = useProfiler();
+  const profilerDecorationIdsRef = useRef<string[]>([]);
+
+  const securityAudit = useSecurityAudit(folderPath || "");
+  const securityDecorationIdsRef = useRef<string[]>([]);
+
+  const snapshotHook = useSnapshots(folderPath || "");
+
+  const git = useGit(folderPath || "");
+  const [gitDiffModalFile, setGitDiffModalFile] = useState<{ path: string; staged: boolean } | null>(null);
+  const [gitDiffData, setGitDiffData] = useState<{ original: string; current: string; diff: string } | null>(null);
+
+  const handleOpenGitDiff = async (filePath: string, staged: boolean) => {
+    setGitDiffModalFile({ path: filePath, staged });
+    const diffRes = await git.getFileDiff(filePath, staged);
+    if (diffRes) {
+      setGitDiffData({
+        original: diffRes.originalContent || "",
+        current: diffRes.currentContent || "",
+        diff: diffRes.diff || "",
+      });
+    }
+  };
+
+  const search = useSearch(folderPath || "");
+  const searchMatchDecorationIdsRef = useRef<string[]>([]);
   const [cloneReport, setCloneReport] = useState<CloneReport | null>(null);
   const [cloneLoading, setCloneLoading] = useState(false);
   const [semanticCloneReport, setSemanticCloneReport] = useState<SemanticCloneReport | null>(null);
@@ -347,9 +452,106 @@ export default function IDEApp() {
   const [luminanceLoading, setLuminanceLoading] = useState(false);
   const [fingerprintReport, setFingerprintReport] = useState<BehavioralFingerprintReport | null>(null);
   const [fingerprintLoading, setFingerprintLoading] = useState(false);
+  const [patchFirewallReport, setPatchFirewallReport] = useState<PatchFirewallReport | null>(null);
+  const [patchFirewallLoading, setPatchFirewallLoading] = useState(false);
+  const [repositoryFirewallReport, setRepositoryFirewallReport] = useState<RepositoryPatchFirewallReport | null>(null);
+  const [repositoryFirewallLoading, setRepositoryFirewallLoading] = useState(false);
+  const [semanticIntentReport, setSemanticIntentReport] = useState<SemanticIntentDriftReport | null>(null);
+  const [semanticIntentLoading, setSemanticIntentLoading] = useState(false);
+
+  // AI Code Actions State & Handlers
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiResponse, setAiResponse] = useState<AIResponsePayload | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [selectionInfo, setSelectionInfo] = useState<{
+    text: string;
+    x: number;
+    y: number;
+    startLineNumber: number;
+    endLineNumber: number;
+    startColumn: number;
+    endColumn: number;
+  } | null>(null);
+  const selectionInfoRef = useRef(selectionInfo);
+  selectionInfoRef.current = selectionInfo;
+
+  const handleRunAiCodeAction = async (action: "explain" | "find_bug" | "fix" | "refactor" | "tests" | "docs") => {
+    const sel = selectionInfoRef.current;
+    if (!sel || !sel.text || !sel.text.trim()) {
+      addLog("[AI] No code selected. Please select a snippet in the editor first.");
+      return;
+    }
+
+    setAiPanelOpen(true);
+    setAiLoading(true);
+    setAiResponse(null);
+    addLog(`[AI] Running ${action.toUpperCase()} action on ${sel.endLineNumber - sel.startLineNumber + 1} lines...`);
+
+    try {
+      if (typeof window !== "undefined" && window.electronAPI?.ai) {
+        const lang = getLanguageFromPath(activeTabPath || "");
+        const res = await window.electronAPI.ai.codeAction({
+          action,
+          language: lang,
+          filePath: activeTabPath || "",
+          selection: sel.text,
+          fullFile: activeTab?.content || "",
+        });
+        setAiResponse(res);
+        if (res.success) {
+          addLog(`[AI] Action ${action} completed successfully.`);
+        } else {
+          addLog(`[AI] Action error: ${res.error || "failed"}`);
+        }
+      }
+    } catch (err: any) {
+      setAiResponse({
+        success: false,
+        action,
+        error: err.message || String(err),
+        response: "Failed to communicate with AI subsystem.",
+      });
+      addLog(`[AI] Communication error: ${err.message || String(err)}`);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleAnalyzeSemanticIntentDrift = async (origCode: string, editCode: string) => {
+    setSemanticIntentLoading(true);
+    try {
+      if (window.electronAPI && window.electronAPI.analyzeSemanticIntentDrift) {
+        const res = await window.electronAPI.analyzeSemanticIntentDrift({
+          original_source: origCode,
+          edited_source: editCode,
+          language: getLanguageFromPath(activeTabPath),
+        });
+        setSemanticIntentReport(res);
+      } else {
+        const { analyzeSemanticIntentDrift } = require("../../desktop/engine/semantic_intent_drift");
+        const res = analyzeSemanticIntentDrift({ original_source: origCode, edited_source: editCode });
+        setSemanticIntentReport(res);
+      }
+    } catch (e: any) {
+      setSemanticIntentReport({
+        schema_version: 1,
+        function_name: "target_function",
+        drift_score: 0.0,
+        drift_level: "NONE",
+        intent_changes: [],
+        confidence: 0.0,
+        summary: "Error running Intent Drift analysis",
+        error: e.message,
+      });
+    } finally {
+      setSemanticIntentLoading(false);
+    }
+  };
   const [workspaceGraph, setWorkspaceGraph] = useState<WorkspaceGraph | null>(null);
   const [graphLoading, setGraphLoading] = useState(false);
   const [impactRadiusResult, setImpactRadiusResult] = useState<any>(null);
+  const [blastRadiusResult, setBlastRadiusResult] = useState<any>(null);
+  const [counterfactualResult, setCounterfactualResult] = useState<any>(null);
   const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
   const [startupModalOpen, setStartupModalOpen] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState<"file" | "project" | "clones" | "semantic">("file");
@@ -360,6 +562,220 @@ export default function IDEApp() {
   const [luminance, setLuminance] = useState<number>(0.0);
   const [analyzing, setAnalyzing] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [pythonOutput, setPythonOutput] = useState<string>("");
+  const [pythonRunning, setPythonRunning] = useState<boolean>(false);
+  const [executionAnalysis, setExecutionAnalysis] = useState<ExecutionAnalysis | null>(null);
+  const [showLivePreview, setShowLivePreview] = useState<boolean>(false);
+  const [showTerminalPanel, setShowTerminalPanel] = useState<boolean>(false);
+
+  const {
+    tabs: terminalTabs,
+    activeTabId: activeTerminalTabId,
+    setActiveTabId: setActiveTerminalTabId,
+    createTerminalTab,
+    closeTerminalTab,
+    restartTerminalTab,
+    sendTerminalInput,
+  } = useTerminal(folderPath || "");
+
+  const [debugSteps, setDebugSteps] = useState<DebugStep[]>([]);
+  const [debugIndex, setDebugIndex] = useState<number>(0);
+  const [debugRunning, setDebugRunning] = useState<boolean>(false);
+  const [debugPanelOpen, setDebugPanelOpen] = useState<boolean>(false);
+  const [debugError, setDebugError] = useState<string | undefined>(undefined);
+  const debugDecorationIdsRef = useRef<string[]>([]);
+  const debugStepsRef = useRef(debugSteps);
+  debugStepsRef.current = debugSteps;
+  const debugIndexRef = useRef(debugIndex);
+  debugIndexRef.current = debugIndex;
+
+  const [agentPanelOpen, setAgentPanelOpen] = useState<boolean>(false);
+  const [agentRunningCommandOutput, setAgentRunningCommandOutput] = useState<string>("");
+
+  const handleApplyAgentStep = async (step: AgentStep): Promise<boolean> => {
+    if (!step.proposedEdits || step.proposedEdits.length === 0) return true;
+    for (const edit of step.proposedEdits) {
+      const filePath = edit.filePath;
+      try {
+        let currentContent = "";
+        if (typeof window !== "undefined" && (window as any).electronAPI?.readFile) {
+          currentContent = await (window as any).electronAPI.readFile(filePath);
+        } else {
+          const tab = openTabs.find((t) => t.path === filePath);
+          currentContent = tab ? tab.content : "";
+        }
+
+        let newContent = currentContent;
+        if (edit.original && currentContent.includes(edit.original)) {
+          newContent = currentContent.replace(edit.original, edit.replacement);
+        } else {
+          newContent = edit.replacement;
+        }
+
+        if (typeof window !== "undefined" && (window as any).electronAPI?.writeFile) {
+          await (window as any).electronAPI.writeFile(filePath, newContent);
+        }
+
+        // Update tab if open
+        setOpenTabs((prev) =>
+          prev.map((t) => (t.path === filePath ? { ...t, content: newContent, isDirty: false } : t))
+        );
+        addLog(`[AGENT] Applied edit to ${filePath}`);
+      } catch (err: any) {
+        addLog(`[AGENT ERROR] Failed to apply edit to ${filePath}: ${err.message}`);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handleApplyAllAgentApproved = async (
+    approvedSteps: AgentStep[],
+    createCommit: boolean,
+    verifyCmd: string
+  ) => {
+    for (const step of approvedSteps) {
+      await handleApplyAgentStep(step);
+    }
+
+    if (
+      createCommit &&
+      git.isRepo &&
+      typeof window !== "undefined" &&
+      (window as any).electronAPI?.git?.stageAll &&
+      (window as any).electronAPI?.git?.commit
+    ) {
+      try {
+        await (window as any).electronAPI.git.stageAll(folderPath);
+        const commitMsg = `agent: applied ${approvedSteps.length} autonomous steps`;
+        await (window as any).electronAPI.git.commit(folderPath, commitMsg);
+        git.refreshStatus();
+        addLog(`[AGENT GIT] Created commit: "${commitMsg}"`);
+      } catch (e: any) {
+        addLog(`[AGENT GIT ERROR] ${e.message}`);
+      }
+    }
+
+    if (verifyCmd && verifyCmd.trim()) {
+      setAgentRunningCommandOutput(`$ ${verifyCmd}\nRunning verification...\n`);
+      if (
+        typeof window !== "undefined" &&
+        (window as any).electronAPI?.terminal?.create &&
+        (window as any).electronAPI?.terminal?.write
+      ) {
+        try {
+          const term = await (window as any).electronAPI.terminal.create({
+            cwd: folderPath || process.cwd(),
+          });
+          (window as any).electronAPI.terminal.write(term.id, `${verifyCmd}\n`);
+          setAgentRunningCommandOutput((prev) => prev + `Command dispatched to Terminal (${term.id})\n`);
+        } catch (err: any) {
+          setAgentRunningCommandOutput((prev) => prev + `[ERROR] Failed to run command: ${err.message}\n`);
+        }
+      }
+    }
+  };
+
+  const handleRunPythonDebugger = async () => {
+    if (!activeTab || !activeTab.path.endsWith(".py")) return;
+    setDebugRunning(true);
+    setDebugError(undefined);
+    addLog(`[DEBUGGER] Starting time-travel trace on ${activeTab.name}...`);
+
+    try {
+      const res = await debugPython(activeTab.content);
+      if (res.steps && res.steps.length > 0) {
+        setDebugSteps(res.steps);
+        setDebugIndex(0);
+        setDebugPanelOpen(true);
+        setDebugError(res.error);
+        addLog(`[DEBUGGER] Captured ${res.steps.length} execution steps.`);
+      } else if (!res.success && res.error) {
+        setDebugError(res.error);
+        setDebugPanelOpen(true);
+        addLog(`[DEBUGGER] Execution error: ${res.error}`);
+      } else {
+        addLog(`[DEBUGGER] No execution steps captured.`);
+      }
+    } catch (err: any) {
+      addLog(`[DEBUGGER] Failed to trace Python execution: ${err.message || String(err)}`);
+    } finally {
+      setDebugRunning(false);
+    }
+  };
+
+  const handleExecutePython = async () => {
+    if (!activeTab || !activeTab.path.endsWith(".py")) return;
+    setPythonRunning(true);
+    setPythonOutput("Running Python...");
+    setExecutionAnalysis(null);
+    setDebugSteps([]);
+    setDebugIndex(0);
+    try {
+      const res = await runPython(activeTab.content);
+      let output = "";
+      if (res.stdout) output += res.stdout;
+      if (res.stderr) {
+        if (output) output += "\n";
+        output += `[STDERR]\n${res.stderr}`;
+      }
+      setPythonOutput(output || "Execution completed with no output.");
+
+      const analysis = analyzePythonExecution(activeTab.content, res.stdout, res.stderr);
+      setExecutionAnalysis(analysis);
+
+      setDebugRunning(true);
+      const debugRes = await debugPython(activeTab.content);
+      setDebugSteps(debugRes.steps || []);
+      setDebugIndex(0);
+      setDebugError(debugRes.error);
+      setDebugRunning(false);
+    } catch (err: any) {
+      setPythonOutput(`[ERROR] ${err.message || String(err)}`);
+      const analysis = analyzePythonExecution(activeTab.content, "", err.message || String(err));
+      setExecutionAnalysis(analysis);
+      setDebugSteps([]);
+    } finally {
+      setPythonRunning(false);
+      setDebugRunning(false);
+    }
+  };
+
+  // Monaco Line Highlight for Time-Travel Debugger Step
+  useEffect(() => {
+    if (!editorRef.current || !monacoRef.current) return;
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+
+    if (!debugPanelOpen || debugSteps.length === 0 || debugIndex < 0 || debugIndex >= debugSteps.length) {
+      if (debugDecorationIdsRef.current.length > 0) {
+        try {
+          debugDecorationIdsRef.current = editor.deltaDecorations(debugDecorationIdsRef.current, []);
+        } catch (e) {}
+      }
+      return;
+    }
+
+    const step = debugSteps[debugIndex];
+    if (!step || !step.line) return;
+
+    try {
+      const newDecorations = [
+        {
+          range: new monaco.Range(step.line, 1, step.line, 1),
+          options: {
+            isWholeLine: true,
+            className: "bg-cyan-950/60 border-l-4 border-cyan-400 font-bold",
+            glyphMarginClassName: "codicon codicon-arrow-right text-cyan-400 font-bold",
+          },
+        },
+      ];
+
+      debugDecorationIdsRef.current = editor.deltaDecorations(debugDecorationIdsRef.current, newDecorations);
+      editor.revealLineInCenter(step.line);
+    } catch (e) {}
+  }, [debugIndex, debugSteps, debugPanelOpen]);
+
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [cursorPositions, setCursorPositions] = useState<Record<string, { line: number; col: number }>>({});
 
@@ -370,9 +786,86 @@ export default function IDEApp() {
   }, [luminanceReport, activeTabPath]);
 
   // Persistence Hook & Editor State Tracking
-  const { loadedState, requestSave, hasLoaded } = useWorkspaceState();
+  const { loadedState, requestSave, requestRecoverySnapshot, flushRecoverySnapshot, hasLoaded } = useWorkspaceState();
   const editorStatesRef = useRef<Record<string, EditorViewState>>({});
   const isStateRestoredRef = useRef<boolean>(false);
+
+  // Crash Recovery & Session Restore State
+  const [recoverySnapshot, setRecoverySnapshot] = useState<RecoverySnapshot | null>(null);
+  const [recoveryDialogOpen, setRecoveryDialogOpen] = useState<boolean>(false);
+  const [wasCrashDetected, setWasCrashDetected] = useState<boolean>(false);
+  const recoveryCheckedRef = useRef<boolean>(false);
+
+  // Check for recovery snapshot on workspace load
+  useEffect(() => {
+    if (!folderPath || recoveryCheckedRef.current) return;
+    recoveryCheckedRef.current = true;
+
+    async function checkRecovery() {
+      if (typeof window !== "undefined" && (window as any).electronAPI?.recovery) {
+        try {
+          const crashInfo = await (window as any).electronAPI.recovery.checkCrash();
+          if (crashInfo && crashInfo.wasCrash) {
+            setWasCrashDetected(true);
+          }
+
+          const snapshot = await (window as any).electronAPI.recovery.load(folderPath);
+          if (snapshot && snapshot.openTabs && snapshot.openTabs.some((t: any) => t.isDirty)) {
+            setRecoverySnapshot(snapshot);
+            setRecoveryDialogOpen(true);
+            addLog(`[RECOVERY] Found recovery snapshot with ${snapshot.openTabs.length} tabs.`);
+          }
+        } catch (e) {
+          console.error("[RECOVERY] Failed to check recovery snapshot:", e);
+        }
+      }
+    }
+
+    checkRecovery();
+  }, [folderPath]);
+
+  // Request recovery snapshot whenever openTabs or activeTabPath changes
+  useEffect(() => {
+    if (!folderPath || !hasLoaded) return;
+    requestRecoverySnapshot({
+      workspacePath: folderPath,
+      openTabs: openTabs.map((t) => ({
+        path: t.path,
+        content: t.content,
+        isDirty: !!t.isDirty,
+      })),
+      activeTabPath: activeTabPath || null,
+    });
+  }, [openTabs, activeTabPath, folderPath, hasLoaded, requestRecoverySnapshot]);
+
+  const handleRestoreSession = () => {
+    if (!recoverySnapshot || !recoverySnapshot.openTabs) return;
+    const restoredTabs = recoverySnapshot.openTabs.map((t) => ({
+      name: t.path.split("/").pop() || t.path,
+      path: t.path,
+      content: t.content,
+      savedContent: t.content,
+      isDirty: !!t.isDirty,
+    }));
+
+    setOpenTabs(restoredTabs);
+    if (recoverySnapshot.activeTabPath) {
+      setActiveTabPath(recoverySnapshot.activeTabPath);
+    }
+    setRecoveryDialogOpen(false);
+    addLog(`[RECOVERY] Restored session with ${restoredTabs.length} tabs.`);
+  };
+
+  const handleDiscardRecovery = async () => {
+    if (folderPath && typeof window !== "undefined" && (window as any).electronAPI?.recovery?.clear) {
+      try {
+        await (window as any).electronAPI.recovery.clear(folderPath);
+      } catch (e) {}
+    }
+    setRecoverySnapshot(null);
+    setRecoveryDialogOpen(false);
+    addLog(`[RECOVERY] Discarded recovery snapshot.`);
+  };
 
   // Modals & Panels State
   const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
@@ -388,6 +881,43 @@ export default function IDEApp() {
   const [behaviorResult, setBehaviorResult] = useState<any | null>(null);
   const [behaviorVerifying, setBehaviorVerifying] = useState(false);
   const [showForceApplyConfirm, setShowForceApplyConfirm] = useState(false);
+
+  const handleAiPreviewDiff = async (patch: { original: string; replacement: string }) => {
+    if (!activeTab) return;
+    const newContent = activeTab.content.replace(patch.original, patch.replacement);
+
+    // 1. Evaluate Semantic Intent Drift
+    try {
+      if (typeof window !== "undefined" && window.electronAPI?.analyzeSemanticIntentDrift) {
+        const driftRes = await window.electronAPI.analyzeSemanticIntentDrift({
+          original_source: activeTab.content,
+          edited_source: newContent,
+          language: getLanguageFromPath(activeTab.path),
+        });
+        if (driftRes && driftRes.drift_level === "HIGH") {
+          addLog(`[AI-FIREWALL] ⚠️ Warning: High semantic intent drift detected (${driftRes.drift_score}%). Please inspect changes carefully.`);
+        }
+      }
+    } catch (e) {}
+
+    // 2. Open Surgery Diff Preview
+    setDiffData({
+      file: activeTab.path,
+      original_source: activeTab.content,
+      transformed_source: newContent,
+      changed_lines: [selectionInfoRef.current?.startLineNumber || 1],
+      ghost_count_before: findings.length,
+      ghost_count_after: findings.length,
+      causal_luminance_after: 1.0,
+    });
+    setDiffDrawerOpen(true);
+    setShowSurgeryDiffModal(true);
+  };
+
+  const handleAiApplyPatch = (patch: { original: string; replacement: string }) => {
+    if (!activeTab) return;
+    handleAiPreviewDiff(patch);
+  };
 
   // History & Time Travel State
   const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
@@ -533,6 +1063,191 @@ export default function IDEApp() {
   const activeTab = openTabs.find((t) => t.path === activeTabPath) || openTabs[0];
 
   console.log('[IDE-APP] active file', activeTab?.path, activeTab?.content?.length);
+
+  // Test & Coverage Gutter Decorations in Monaco
+  useEffect(() => {
+    if (!editorRef.current || !monacoRef.current || !activeTab) return;
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+
+    const newDecorations: any[] = [];
+
+    // 1. Test Passing / Failing Status Decorations
+    const fileTests = testsHook.testFiles.find((f) => f.filePath === activeTab.path);
+    if (fileTests) {
+      const flattenTests = (children: any[]): TestCase[] => {
+        let acc: TestCase[] = [];
+        for (const c of children) {
+          if (c.type === "test") acc.push(c);
+          else if (c.children) acc = acc.concat(flattenTests(c.children));
+        }
+        return acc;
+      };
+
+      const allCases = flattenTests(fileTests.children);
+      allCases.forEach((tc) => {
+        if (tc.line) {
+          const isPassed = tc.status === "passed";
+          const isFailed = tc.status === "failed";
+          if (isPassed || isFailed) {
+            newDecorations.push({
+              range: new monaco.Range(tc.line, 1, tc.line, 1),
+              options: {
+                isWholeLine: false,
+                glyphMarginClassName: isPassed
+                  ? "bg-emerald-500 rounded-full w-2 h-2 ml-1"
+                  : "bg-rose-500 rounded-full w-2 h-2 ml-1",
+                glyphMarginHoverMessage: {
+                  value: `${tc.name}: ${tc.status.toUpperCase()} (${tc.durationMs || 0}ms)`,
+                },
+              },
+            });
+          }
+        }
+      });
+    }
+
+    // 2. Uncovered Lines Highlight from Coverage Data
+    if (testsHook.coverageData) {
+      const covFile = testsHook.coverageData.files.find(
+        (f) => f.filePath === activeTab.path || activeTab.path.endsWith(f.name)
+      );
+      if (covFile && covFile.uncoveredLines) {
+        covFile.uncoveredLines.forEach((line) => {
+          newDecorations.push({
+            range: new monaco.Range(line, 1, line, 1),
+            options: {
+              isWholeLine: true,
+              className: "bg-rose-950/20 border-l-2 border-rose-500/40",
+              linesDecorationsClassName: "bg-rose-500/80 w-1",
+              overviewRuler: {
+                color: "rgba(244, 63, 94, 0.4)",
+                position: monaco.editor.OverviewRulerLane.Right,
+              },
+            },
+          });
+        });
+      }
+    }
+
+    try {
+      testDecorationIdsRef.current = editor.deltaDecorations(
+        testDecorationIdsRef.current,
+        newDecorations
+      );
+    } catch (e) {}
+  }, [activeTab, testsHook.testFiles, testsHook.coverageData]);
+
+  // Monaco Slow Line Profiler Highlights
+  useEffect(() => {
+    if (!editorRef.current || !monacoRef.current || !activeTab) return;
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+
+    const newDecorations: any[] = [];
+    const activeFileName = activeTab.path.split("/").pop() || "";
+
+    const cpuFunctions = profiler.cpuProfile?.functions || (profiler.jsProfile?.functions as any[]) || [];
+    cpuFunctions.forEach((fn: any) => {
+      const matchesFile = fn.file === activeTab.path || fn.file === activeFileName || activeTab.path.endsWith(fn.file);
+      if (matchesFile && fn.line) {
+        newDecorations.push({
+          range: new monaco.Range(fn.line, 1, fn.line, 1),
+          options: {
+            isWholeLine: true,
+            className: "bg-amber-950/20 border-l-2 border-amber-500/50",
+            linesDecorationsClassName: "bg-amber-500/80 w-1",
+            glyphMarginClassName: "bg-amber-500 rounded-full w-2 h-2 ml-1",
+            glyphMarginHoverMessage: {
+              value: `Hot Path: ${fn.name}() - Total: ${fn.totalTime}ms (Cum: ${fn.cumulativeTime}ms, Calls: ${fn.calls})`,
+            },
+            overviewRuler: {
+              color: "rgba(245, 158, 11, 0.6)",
+              position: monaco.editor.OverviewRulerLane.Right,
+            },
+          },
+        });
+      }
+    });
+
+    try {
+      profilerDecorationIdsRef.current = editor.deltaDecorations(
+        profilerDecorationIdsRef.current,
+        newDecorations
+      );
+    } catch (e) {}
+  }, [activeTab, profiler.cpuProfile, profiler.jsProfile]);
+
+  const clearProfilerDecorations = () => {
+    if (editorRef.current && profilerDecorationIdsRef.current.length > 0) {
+      try {
+        profilerDecorationIdsRef.current = editorRef.current.deltaDecorations(
+          profilerDecorationIdsRef.current,
+          []
+        );
+      } catch (e) {}
+    }
+  };
+
+  // Monaco Security Findings Highlights
+  useEffect(() => {
+    if (!editorRef.current || !monacoRef.current || !activeTab) return;
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+
+    const newDecorations: any[] = [];
+    const activeFileName = activeTab.path.split("/").pop() || "";
+
+    const fileFindings = (securityAudit.findings || []).filter(
+      (f) => f.file === activeTab.path || f.file === activeFileName || activeTab.path.endsWith(f.file)
+    );
+
+    fileFindings.forEach((f) => {
+      if (f.line) {
+        const isCritical = f.severity === "critical";
+        const isHigh = f.severity === "high";
+        const isMedium = f.severity === "medium";
+
+        const glyphColor = isCritical
+          ? "bg-red-500 rounded-full w-2 h-2 ml-1"
+          : isHigh
+          ? "bg-rose-500 rounded-full w-2 h-2 ml-1"
+          : isMedium
+          ? "bg-amber-500 rounded-full w-2 h-2 ml-1"
+          : "bg-blue-500 rounded-full w-2 h-2 ml-1";
+
+        const rulerColor = isCritical
+          ? "rgba(239, 68, 68, 0.8)"
+          : isHigh
+          ? "rgba(244, 63, 94, 0.8)"
+          : "rgba(245, 158, 11, 0.8)";
+
+        newDecorations.push({
+          range: new monaco.Range(f.line, 1, f.line, 1),
+          options: {
+            isWholeLine: true,
+            className: "bg-red-950/20 border-l-2 border-red-500/50",
+            linesDecorationsClassName: "bg-red-500/80 w-1",
+            glyphMarginClassName: glyphColor,
+            glyphMarginHoverMessage: {
+              value: `🛡️ [${f.severity.toUpperCase()}] ${f.title}\n\n💡 Recommendation: ${f.recommendation}`,
+            },
+            overviewRuler: {
+              color: rulerColor,
+              position: monaco.editor.OverviewRulerLane.Right,
+            },
+          },
+        });
+      }
+    });
+
+    try {
+      securityDecorationIdsRef.current = editor.deltaDecorations(
+        securityDecorationIdsRef.current,
+        newDecorations
+      );
+    } catch (e) {}
+  }, [activeTab, securityAudit.findings]);
 
   const addLog = (msg: string) => {
     setLogs((prev) => [...prev.slice(-40), `[${new Date().toLocaleTimeString()}] ${msg}`]);
@@ -851,10 +1566,18 @@ export default function IDEApp() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  const activeTabPathRef = useRef(activeTabPath);
+  activeTabPathRef.current = activeTabPath;
+
+  const openTabsRef = useRef(openTabs);
+  openTabsRef.current = openTabs;
+
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+
   // Keyboard Shortcuts Listener
   useEffect(() => {
     if (typeof window === "undefined") return;
-    console.log('[IDE-APP] useEffect: attaching keyboard shortcuts listener');
     
     const handleKeyDown = (e: KeyboardEvent) => {
       const isCmd = e.metaKey || e.ctrlKey;
@@ -862,37 +1585,125 @@ export default function IDEApp() {
 
       if (isCmd && e.shiftKey && key === "f") {
         e.preventDefault();
-        setSearchModalMode("content");
-        setShowSearchModal(true);
-        console.log('[SHORTCUT] ⌘⇧F triggered Content Search');
+        setMainView((prev) => (prev === "search" ? "editor" : "search"));
+      } else if (e.key === "Escape") {
+        if (editorRef.current && searchMatchDecorationIdsRef.current.length > 0) {
+          try {
+            searchMatchDecorationIdsRef.current = editorRef.current.deltaDecorations(
+              searchMatchDecorationIdsRef.current,
+              []
+            );
+          } catch (e) {}
+        }
       } else if (isCmd && key === "p") {
         e.preventDefault();
         setSearchModalMode("files");
         setShowSearchModal(true);
-        console.log('[SHORTCUT] ⌘P triggered Files Search');
       } else if (isCmd && key === "t") {
         e.preventDefault();
         setSearchModalMode("symbols");
         setShowSearchModal(true);
-        console.log('[SHORTCUT] ⌘T triggered Symbols Search');
       } else if (isCmd && key === "s") {
         e.preventDefault();
         handleSaveFile();
       } else if (isCmd && key === "w") {
         e.preventDefault();
-        if (activeTab) handleCloseTab(activeTab.path);
+        const currentActive = openTabsRef.current.find(t => t.path === activeTabPathRef.current);
+        if (currentActive) handleCloseTab(currentActive.path);
       } else if (isCmd && key === "k") {
         e.preventDefault();
         setCmdPaletteOpen(true);
+      } else if (isCmd && e.shiftKey && key === "i") {
+        e.preventDefault();
+        setAgentPanelOpen((prev) => !prev);
+      } else if (isCmd && key === "i") {
+        if (selectionInfoRef.current && selectionInfoRef.current.text) {
+          e.preventDefault();
+          handleRunAiCodeAction("explain");
+        }
+      } else if (isCmd && e.shiftKey && key === "r") {
+        if (selectionInfoRef.current && selectionInfoRef.current.text) {
+          e.preventDefault();
+          handleRunAiCodeAction("refactor");
+        }
+      } else if (isCmd && e.shiftKey && key === "g") {
+        e.preventDefault();
+        setMainView((prev) => (prev === "source_control" ? "editor" : "source_control"));
+      } else if (isCmd && e.shiftKey && key === "t") {
+        e.preventDefault();
+        setMainView((prev) => (prev === "test_explorer" ? "editor" : "test_explorer"));
+      } else if (isCmd && e.shiftKey && key === "p") {
+        e.preventDefault();
+        setMainView((prev) => (prev === "profiler" ? "editor" : "profiler"));
+      } else if (isCmd && e.shiftKey && key === "s") {
+        e.preventDefault();
+        setMainView((prev) => (prev === "security_audit" ? "editor" : "security_audit"));
+      } else if (e.key === "F7") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          if (activeTabRef.current) {
+            profiler.profilePython(activeTabRef.current.content, activeTabRef.current.path);
+          }
+        } else {
+          if (activeTabRef.current) {
+            profiler.profilePython(activeTabRef.current.content, activeTabRef.current.path);
+            setMainView("profiler");
+          }
+        }
+      } else if (e.key === "F6") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          if (activeTabRef.current) {
+            testsHook.runFileTests(activeTabRef.current.path);
+          }
+        } else {
+          if (activeTabRef.current) {
+            const fileTests = testsHook.testFiles.find((f) => f.filePath === activeTabRef.current?.path);
+            if (fileTests && fileTests.children.length > 0) {
+              const first = fileTests.children[0];
+              const testCase = first.type === "test" ? first : first.children[0];
+              if (testCase) testsHook.runSingleTest(testCase);
+            } else {
+              testsHook.runFileTests(activeTabRef.current.path);
+            }
+          }
+        }
+      } else if (e.key === "F10") {
+        e.preventDefault();
+        if (debugStepsRef.current.length > 0) {
+          if (e.shiftKey) {
+            setDebugIndex((idx) => Math.max(0, idx - 1));
+          } else {
+            setDebugIndex((idx) => Math.min(debugStepsRef.current.length - 1, idx + 1));
+          }
+        }
       } else if (e.key === "F5") {
         e.preventDefault();
-        if (activeTabPath) runAnalysis(activeTabPath, activeTab.content);
+        const currentActive = openTabsRef.current.find(t => t.path === activeTabPathRef.current);
+        if (currentActive && currentActive.path.endsWith(".py")) {
+          handleRunPythonDebugger();
+        } else if (activeTabPathRef.current && currentActive) {
+          runAnalysis(activeTabPathRef.current, currentActive.content);
+        }
+      } else if (isCmd && e.shiftKey && key === "b") {
+        e.preventDefault();
+        snapshotHook.createSnapshot(
+          `Snapshot ${new Date().toLocaleTimeString()}`,
+          "Manual snapshot via shortcut",
+          openTabsRef.current,
+          activeTabPathRef.current
+        );
+        showToast("Snapshot created successfully");
+      } else if (e.key === "Escape") {
+        if (debugPanelOpen) {
+          setDebugPanelOpen(false);
+        }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeTabPath, openTabs, activeTab]);
+  }, []);
 
   // Apply Monaco Line Highlights & Luminance Heatmap
   useEffect(() => {
@@ -1163,6 +1974,57 @@ export default function IDEApp() {
     }, 50);
   };
 
+  const handleSelectSearchMatch = async (match: SearchMatchItem, index: number) => {
+    search.setSelectedResultIndex(index);
+    const targetFile = match.fullPath || (folderPath ? `${folderPath}/${match.file}` : match.file);
+    const fileName = match.file.split("/").pop() || match.file;
+
+    // Open or switch to tab
+    await handleOpenFile({ name: fileName, path: targetFile, isDirectory: false });
+
+    // Jump to line in Monaco editor
+    setTimeout(() => {
+      if (editorRef.current && monacoRef.current) {
+        const editor = editorRef.current;
+        const monaco = monacoRef.current;
+        editor.revealLineInCenter(match.line);
+        editor.setPosition({ lineNumber: match.line, column: match.column });
+        editor.focus();
+
+        try {
+          const decorations = [
+            {
+              range: new monaco.Range(match.line, match.column, match.line, match.column + match.matchText.length),
+              options: {
+                className: "bg-amber-400/50 text-black font-bold border-b-2 border-amber-400",
+                isWholeLine: false,
+              },
+            },
+          ];
+          searchMatchDecorationIdsRef.current = editor.deltaDecorations(
+            searchMatchDecorationIdsRef.current,
+            decorations
+          );
+        } catch (e) {}
+      }
+    }, 100);
+  };
+
+  const handleOpenTestFile = async (filePath: string, line?: number) => {
+    if (!filePath) return;
+    const name = filePath.split("/").pop() || filePath;
+    await handleOpenFile({ name, path: filePath, isDirectory: false });
+    if (line && editorRef.current) {
+      setTimeout(() => {
+        try {
+          editorRef.current.setPosition({ lineNumber: line, column: 1 });
+          editorRef.current.revealLineInCenter(line);
+          editorRef.current.focus();
+        } catch (e) {}
+      }, 100);
+    }
+  };
+
   useEffect(() => {
     if (findings.length > 0) {
       setSelectedFinding((prev) => {
@@ -1247,15 +2109,21 @@ export default function IDEApp() {
         console.log('[IDE-APP] handleSaveFile invoking writeFile for', activeTab.path);
         const res = await window.electronAPI.writeFile(activeTab.path, activeTab.content);
         if (res.success) {
-          setOpenTabs((prev) =>
-            prev.map((t) =>
+          setOpenTabs((prev) => {
+            const nextTabs = prev.map((t) =>
               t.path === activeTab.path
                 ? { ...t, savedContent: t.content, isDirty: false }
                 : t
-            )
-          );
+            );
+            const remainingDirty = nextTabs.filter((t) => t.isDirty);
+            if (remainingDirty.length === 0 && folderPath) {
+              flushRecoverySnapshot();
+            }
+            return nextTabs;
+          });
           showToast(`Saved ${activeTab.name}`);
           addLog(`[FS] File saved successfully to disk.`);
+          git.refreshStatus(folderPath || "");
         } else {
           addLog(`[ERROR] Save failed: ${res.error}`);
         }
@@ -1263,13 +2131,18 @@ export default function IDEApp() {
         console.error("[IDE-APP] Error saving file:", err);
       }
     } else {
-      setOpenTabs((prev) =>
-        prev.map((t) =>
+      setOpenTabs((prev) => {
+        const nextTabs = prev.map((t) =>
           t.path === activeTab.path
             ? { ...t, savedContent: t.content, isDirty: false }
             : t
-        )
-      );
+        );
+        const remainingDirty = nextTabs.filter((t) => t.isDirty);
+        if (remainingDirty.length === 0 && folderPath) {
+          flushRecoverySnapshot();
+        }
+        return nextTabs;
+      });
       showToast(`Saved ${activeTab.name}`);
       addLog(`[FS] Saved ${activeTab.name} (Mock).`);
     }
@@ -2075,6 +2948,105 @@ export default function IDEApp() {
     setFingerprintLoading(false);
   };
 
+  const handleRunBlastRadius = async (editedSource: string) => {
+    const fpath = activeTabPath || "demo-workspaces/ai_cart_project/src/cart_calculator.py";
+    addLog(`[BEHAVIOR-BLAST-RADIUS] Computing blast radius for edited source in: ${fpath}`);
+    if (typeof window !== "undefined" && window.electronAPI && (window.electronAPI as any).calculateBlastRadius) {
+      try {
+        const res = await (window.electronAPI as any).calculateBlastRadius({
+          original_path: fpath,
+          edited_source: editedSource,
+          workspace_graph: workspaceGraph,
+          max_depth: 3,
+        });
+        if (res && !res.error) {
+          setBlastRadiusResult(res);
+          addLog(`[BEHAVIOR-BLAST-RADIUS] Complete. Blast radius score: ${res.blast_radius_score || 0.0}`);
+        } else if (res?.error) {
+          addLog(`[BEHAVIOR-BLAST-RADIUS] Error: ${res.error}`);
+        }
+        return res;
+      } catch (err: any) {
+        addLog(`[BEHAVIOR-BLAST-RADIUS] Exception: ${err.message || String(err)}`);
+      }
+    }
+    return null;
+  };
+
+  const handleRunCounterfactual = async (candidateLine: string) => {
+    const fpath = activeTabPath || "demo-workspaces/ai_cart_project/src/cart_calculator.py";
+    addLog(`[COUNTERFACTUAL] Computing counterfactual execution world for line(s) '${candidateLine}' in: ${fpath}`);
+    if (typeof window !== "undefined" && window.electronAPI && (window.electronAPI as any).runCounterfactualAnalysis) {
+      try {
+        const res = await (window.electronAPI as any).runCounterfactualAnalysis({
+          original_path: fpath,
+          candidate_line: candidateLine,
+          workspace_graph: workspaceGraph,
+        });
+        if (res && !res.error) {
+          setCounterfactualResult(res);
+          addLog(`[COUNTERFACTUAL] Analysis complete. Equivalence score: ${Math.round((res.equivalence_score || 0) * 100)}%, Safe: ${res.safe_to_remove}`);
+        } else if (res?.error) {
+          addLog(`[COUNTERFACTUAL] Error: ${res.error}`);
+        }
+        return res;
+      } catch (err: any) {
+        addLog(`[COUNTERFACTUAL] Exception: ${err.message || String(err)}`);
+      }
+    }
+    return null;
+  };
+
+  const handleEvaluatePatchFirewall = async (patchText: string) => {
+    const fpath = activeTabPath || "demo-workspaces/ai_cart_project/src/cart_calculator.py";
+    addLog(`[PATCH-FIREWALL] Evaluating AI patch safety for: ${fpath}`);
+    setPatchFirewallLoading(true);
+    if (typeof window !== "undefined" && window.electronAPI && (window.electronAPI as any).evaluatePatchFirewall) {
+      try {
+        const res = await (window.electronAPI as any).evaluatePatchFirewall({
+          patch_text: patchText,
+          file_path: fpath,
+          workspace_graph: workspaceGraph,
+          max_depth: 3,
+        });
+        if (res && !res.error) {
+          setPatchFirewallReport(res);
+          addLog(`[PATCH-FIREWALL] Evaluation complete. Risk score: ${res.risk_score}/100, Level: ${res.risk_level}, Auto-apply: ${res.safe_to_auto_apply}`);
+        } else if (res?.error) {
+          addLog(`[PATCH-FIREWALL] Error: ${res.error}`);
+        }
+      } catch (err: any) {
+        addLog(`[PATCH-FIREWALL] Exception: ${err.message || String(err)}`);
+      }
+    }
+    setPatchFirewallLoading(false);
+  };
+
+  const handleEvaluateRepositoryFirewall = async (patchText: string) => {
+    const repoPath = folderPath || process.cwd();
+    addLog(`[REPO-FIREWALL] Evaluating repository-scale PR patch across files in: ${repoPath}`);
+    setRepositoryFirewallLoading(true);
+    if (typeof window !== "undefined" && window.electronAPI && (window.electronAPI as any).evaluateRepositoryFirewall) {
+      try {
+        const res = await (window.electronAPI as any).evaluateRepositoryFirewall({
+          patch_text: patchText,
+          repository_path: repoPath,
+          workspace_graph: workspaceGraph,
+          max_depth: 3,
+        });
+        if (res && !res.error) {
+          setRepositoryFirewallReport(res);
+          addLog(`[REPO-FIREWALL] Evaluation complete. Recommendation: ${res.merge_recommendation}, Risk Score: ${res.risk_score}/100, Files: ${res.files_analyzed}`);
+        } else if (res?.error) {
+          addLog(`[REPO-FIREWALL] Error: ${res.error}`);
+        }
+      } catch (err: any) {
+        addLog(`[REPO-FIREWALL] Exception: ${err.message || String(err)}`);
+      }
+    }
+    setRepositoryFirewallLoading(false);
+  };
+
   const handleJumpToStatement = async (file: string, line: number) => {
     const targetPath = folderPath ? `${folderPath}/${file}` : file;
     const fileName = file.split("/").pop() || file;
@@ -2379,6 +3351,14 @@ export default function IDEApp() {
         handleSaveFile();
       });
 
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI, () => {
+        handleRunAiCodeAction("explain");
+      });
+
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyR, () => {
+        handleRunAiCodeAction("refactor");
+      });
+
       editor.onDidChangeCursorPosition((e: any) => {
         setCursorPos({ line: e.position.lineNumber, col: e.position.column });
         if (activeTabPath) {
@@ -2390,6 +3370,35 @@ export default function IDEApp() {
           };
           triggerAutoSave();
         }
+      });
+
+      editor.onDidChangeCursorSelection((e: any) => {
+        const selection = editor.getSelection();
+        if (!selection || selection.isEmpty()) {
+          setSelectionInfo(null);
+          return;
+        }
+        const model = editor.getModel();
+        if (!model) return;
+        const selectedText = model.getValueInRange(selection);
+        if (!selectedText || !selectedText.trim()) {
+          setSelectionInfo(null);
+          return;
+        }
+
+        const visiblePos = editor.getScrolledVisiblePosition(selection.getStartPosition());
+        const domNode = editor.getDomNode ? editor.getDomNode() : null;
+        const rect = domNode ? domNode.getBoundingClientRect() : { left: 100, top: 100 };
+
+        setSelectionInfo({
+          text: selectedText,
+          x: rect.left + (visiblePos ? visiblePos.left : 100),
+          y: rect.top + (visiblePos ? visiblePos.top : 100),
+          startLineNumber: selection.startLineNumber,
+          endLineNumber: selection.endLineNumber,
+          startColumn: selection.startColumn,
+          endColumn: selection.endColumn,
+        });
       });
 
       editor.onDidScrollChange((e: any) => {
@@ -2687,6 +3696,88 @@ export default function IDEApp() {
           </button>
 
           <button
+            onClick={() => {
+              const next = mainView === "patch_firewall" ? "editor" : "patch_firewall";
+              setMainView(next);
+            }}
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
+              mainView === "patch_firewall"
+                ? "bg-red-950 text-red-300 border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.3)] font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300"
+            }`}
+            title="Toggle AI Patch Safety Firewall"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-red-400 shrink-0" />
+            <span>Patch Firewall</span>
+          </button>
+
+          <button
+            onClick={() => {
+              const next = mainView === "repository_patch_firewall" ? "editor" : "repository_patch_firewall";
+              setMainView(next);
+            }}
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
+              mainView === "repository_patch_firewall"
+                ? "bg-rose-950 text-rose-300 border-rose-500/50 shadow-[0_0_15px_rgba(244,63,94,0.3)] font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300"
+            }`}
+            title="Toggle Repository-Scale Patch Firewall (Pull Request Defense)"
+          >
+            <GitPullRequest className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <span>Repo Firewall</span>
+          </button>
+
+          <button
+            onClick={() => {
+              const next = mainView === "semantic_intent_radar" ? "editor" : "semantic_intent_radar";
+              setMainView(next);
+            }}
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
+              mainView === "semantic_intent_radar"
+                ? "bg-amber-950 text-amber-300 border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.3)] font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300"
+            }`}
+            title="Toggle Semantic Intent Drift Radar"
+          >
+            <Compass className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>Intent Radar</span>
+          </button>
+
+          <button
+            onClick={() => {
+              const next = mainView === "source_control" ? "editor" : "source_control";
+              setMainView(next);
+            }}
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
+              mainView === "source_control"
+                ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 shadow-[0_0_15px_rgba(6,182,212,0.3)] font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300"
+            }`}
+            title="Toggle Git Source Control (⌘⇧G)"
+          >
+            <GitBranch className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span>Source Control</span>
+            {git.isRepo && (git.staged.length > 0 || git.unstaged.length > 0 || git.untracked.length > 0) && (
+              <span className="px-1.5 py-0.2 rounded-full bg-cyan-900 text-cyan-300 text-[9.5px] font-bold">
+                {git.staged.length + git.unstaged.length + git.untracked.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setAgentPanelOpen((prev) => !prev)}
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
+              agentPanelOpen
+                ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 shadow-[0_0_15px_rgba(6,182,212,0.35)] font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-zinc-300 hover:text-white"
+            }`}
+            title="Toggle AI Agent Mode (⌘⇧I)"
+          >
+            <Bot className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span>Agent Mode</span>
+          </button>
+
+          <button
             onClick={() => setStartupModalOpen(true)}
             className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] text-zinc-400 hover:text-white transition-all"
             title="Open Workspace Hub / Recent Projects"
@@ -2697,14 +3788,107 @@ export default function IDEApp() {
 
           <button
             onClick={() => {
-              setSearchModalMode("files");
-              setShowSearchModal(true);
+              const next = mainView === "search" ? "editor" : "search";
+              setMainView(next);
             }}
-            className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] hover:border-purple-500/40 text-purple-300 hover:text-white transition-all shadow-sm"
-            title="Workspace Search (⌘P / ⌘⇧F / ⌘T)"
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
+              mainView === "search"
+                ? "bg-purple-950 text-purple-300 border-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.3)] font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-purple-300 hover:text-white"
+            }`}
+            title="Workspace Search & Replace (⌘⇧F)"
           >
             <Search className="w-3.5 h-3.5 text-purple-400 shrink-0" />
             <span>Search</span>
+            {search.totalMatches > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-purple-900 text-purple-300 text-[9.5px] font-bold">
+                {search.totalMatches}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => {
+              const next = mainView === "test_explorer" ? "editor" : "test_explorer";
+              setMainView(next);
+            }}
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
+              mainView === "test_explorer"
+                ? "bg-emerald-950 text-emerald-300 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.3)] font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-emerald-300 hover:text-white"
+            }`}
+            title="Test Explorer & Coverage Dashboard (⌘⇧T / F6)"
+          >
+            <FlaskConical className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span>Tests</span>
+            {testsHook.totalTests > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-emerald-900 text-emerald-300 text-[9.5px] font-bold">
+                {testsHook.totalTests}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => {
+              const next = mainView === "profiler" ? "editor" : "profiler";
+              setMainView(next);
+            }}
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
+              mainView === "profiler"
+                ? "bg-amber-950 text-amber-300 border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.3)] font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-amber-300 hover:text-white"
+            }`}
+            title="Performance Profiler (CPU, Memory, Timeline) (⌘⇧P / F7)"
+          >
+            <Flame className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>Profiler</span>
+            {profiler.cpuProfile && (
+              <span className="px-1.5 py-0.2 rounded-full bg-amber-900 text-amber-300 text-[9.5px] font-bold">
+                {profiler.cpuProfile.totalTime}ms
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => {
+              const next = mainView === "security_audit" ? "editor" : "security_audit";
+              setMainView(next);
+            }}
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
+              mainView === "security_audit"
+                ? "bg-red-950 text-red-300 border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.3)] font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-red-300 hover:text-white"
+            }`}
+            title="Security & Dependency Audit (⌘⇧S)"
+          >
+            <ShieldAlert className="w-3.5 h-3.5 text-red-400 shrink-0" />
+            <span>Security</span>
+            {(securityAudit.summary.critical + securityAudit.summary.high > 0) && (
+              <span className="px-1.5 py-0.2 rounded-full bg-red-900 text-red-300 text-[9.5px] font-bold">
+                {securityAudit.summary.critical + securityAudit.summary.high}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => {
+              const next = mainView === "snapshots" ? "editor" : "snapshots";
+              setMainView(next);
+            }}
+            className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all ${
+              mainView === "snapshots"
+                ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 shadow-[0_0_15px_rgba(6,182,212,0.3)] font-bold"
+                : "bg-[#141414] hover:bg-[#1f1f1f] border-[#262626] text-cyan-300 hover:text-white"
+            }`}
+            title="Workspace Snapshots & Checkpoints (⌘⇧B)"
+          >
+            <HistoryIcon className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span>Snapshots</span>
+            {snapshotHook.snapshots.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-cyan-900 text-cyan-300 text-[9.5px] font-bold">
+                {snapshotHook.snapshots.length}
+              </span>
+            )}
           </button>
 
           <button
@@ -2756,6 +3940,49 @@ export default function IDEApp() {
             <Play className="w-3.5 h-3.5 fill-purple-400 shrink-0" />
             <span>{analyzing ? "Analyzing..." : "Tomography (F5)"}</span>
           </button>
+
+          {activeTab && activeTab.path.endsWith(".py") && (
+            <button
+              onClick={handleExecutePython}
+              disabled={pythonRunning}
+              className="flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 font-bold transition-all shadow-sm cursor-pointer disabled:opacity-50"
+              title="Run Python file in browser via Pyodide WebAssembly"
+            >
+              <Play className="w-3.5 h-3.5 fill-emerald-300 text-emerald-300 shrink-0" />
+              <span>{pythonRunning ? "Running Python..." : "Run Python"}</span>
+            </button>
+          )}
+
+          {activeTab && activeTab.path.endsWith(".py") && (
+            <button
+              onClick={handleRunPythonDebugger}
+              disabled={debugRunning}
+              className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border font-bold transition-all shadow-sm cursor-pointer disabled:opacity-50 ${
+                debugPanelOpen
+                  ? "bg-cyan-950/80 border-cyan-500/60 text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.3)]"
+                  : "bg-cyan-950/40 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300"
+              }`}
+              title="Debug Python with Time-Travel (F5 / Step F10)"
+            >
+              <Bug className={`w-3.5 h-3.5 text-cyan-400 ${debugRunning ? "animate-spin" : ""}`} />
+              <span>{debugRunning ? "Tracing..." : "Debug Python"}</span>
+            </button>
+          )}
+
+          {activeTab && shouldShowPreview(activeTab.path) && (
+            <button
+              onClick={() => setShowLivePreview((prev) => !prev)}
+              className={`flex-none shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border font-bold transition-all shadow-sm cursor-pointer ${
+                showLivePreview
+                  ? "bg-cyan-950/80 border-cyan-500/60 text-cyan-300 shadow-cyan-glow"
+                  : "bg-[#141414] hover:bg-[#1f1f1f] border-cyan-500/30 text-cyan-400"
+              }`}
+              title="Toggle Milestone 26 Live Web Preview Pane"
+            >
+              <Globe className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span>{showLivePreview ? "Hide Web Preview" : "Live Web Preview"}</span>
+            </button>
+          )}
 
           {activeTabPath && undoAvailableForFile[activeTabPath] && (
             <button
@@ -2883,6 +4110,8 @@ export default function IDEApp() {
               onNodeClick={handleGraphNodeClick}
               onClose={() => setMainView("editor")}
               impactRadiusResult={impactRadiusResult}
+              blastRadiusResult={blastRadiusResult}
+              counterfactualResult={counterfactualResult}
             />
           ) : mainView === "clones" ? (
             <ClonePanel
@@ -2913,7 +4142,317 @@ export default function IDEApp() {
                 handleJumpToStatement(file, line);
                 setMainView("graph");
               }}
+              onRunBlastRadius={handleRunBlastRadius}
+              blastRadiusResult={blastRadiusResult}
+              currentFileContent={activeTab?.content || ""}
+              onRunCounterfactual={handleRunCounterfactual}
+              counterfactualResult={counterfactualResult}
             />
+          ) : mainView === "patch_firewall" ? (
+            <PatchFirewallPanel
+              report={patchFirewallReport}
+              loading={patchFirewallLoading}
+              onRunAnalysis={(patchText) => handleEvaluatePatchFirewall(patchText)}
+              onClose={() => setMainView("editor")}
+              currentFile={activeTabPath}
+            />
+          ) : mainView === "repository_patch_firewall" ? (
+            <RepositoryPatchFirewallPanel
+              report={repositoryFirewallReport}
+              loading={repositoryFirewallLoading}
+              onRunAnalysis={(patchText) => handleEvaluateRepositoryFirewall(patchText)}
+              onClose={() => setMainView("editor")}
+            />
+          ) : mainView === "semantic_intent_radar" ? (
+            <SemanticIntentRadarPanel
+              report={semanticIntentReport}
+              loading={semanticIntentLoading}
+              onRunAnalysis={(orig, edit) => handleAnalyzeSemanticIntentDrift(orig, edit)}
+              onClose={() => setMainView("editor")}
+            />
+          ) : mainView === "source_control" ? (
+            <div className="flex-1 flex overflow-hidden">
+              <div style={{ width: `${explorerWidth}px` }} className="shrink-0 h-full">
+                <SourceControlPanel
+                  isRepo={git.isRepo}
+                  currentBranch={git.currentBranch}
+                  branches={git.branches}
+                  staged={git.staged}
+                  unstaged={git.unstaged}
+                  untracked={git.untracked}
+                  lastCommit={git.lastCommit}
+                  loading={git.loading}
+                  statusMessage={git.statusMessage}
+                  errorMessage={git.errorMessage}
+                  onRefresh={() => git.refreshStatus(folderPath || "")}
+                  onStageFile={(f) => git.stageFile(f)}
+                  onUnstageFile={(f) => git.unstageFile(f)}
+                  onStageAll={() => git.stageAllFiles()}
+                  onUnstageAll={() => git.unstageAllFiles()}
+                  onCommit={(msg) => git.commitChanges(msg)}
+                  onCheckoutBranch={(b) => git.checkoutBranch(b)}
+                  onCreateBranch={(b) => git.createAndCheckoutBranch(b)}
+                  onDiscardFile={(f) => git.discardFile(f)}
+                  onOpenFileDiff={handleOpenGitDiff}
+                />
+              </div>
+              <div className="flex-1 h-full flex flex-col bg-[#08080a] border-l border-[#1f1f1f]">
+                {gitDiffModalFile && gitDiffData ? (
+                  <div className="h-full flex flex-col">
+                    <div className="h-9 bg-[#0d0d10] border-b border-[#1f1f1f] px-3 flex items-center justify-between text-xs text-zinc-300">
+                      <div className="flex items-center gap-2">
+                        <FileCode className="w-4 h-4 text-cyan-400" />
+                        <span className="font-bold text-zinc-100">{gitDiffModalFile.path}</span>
+                        <span className="text-zinc-500">({gitDiffModalFile.staged ? "Staged Diff vs HEAD" : "Working Tree Diff"})</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setGitDiffModalFile(null);
+                          setGitDiffData(null);
+                        }}
+                        className="p-1 rounded text-zinc-500 hover:text-zinc-200 cursor-pointer"
+                        title="Close Diff"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="flex-1 overflow-auto p-4 font-mono text-xs text-zinc-300 whitespace-pre-wrap bg-[#050507]">
+                      {gitDiffData.diff ? (
+                        gitDiffData.diff.split("\n").map((line, idx) => {
+                          let colorClass = "text-zinc-400";
+                          let bgClass = "";
+                          if (line.startsWith("+") && !line.startsWith("+++")) {
+                            colorClass = "text-emerald-300";
+                            bgClass = "bg-emerald-950/30";
+                          } else if (line.startsWith("-") && !line.startsWith("---")) {
+                            colorClass = "text-rose-300";
+                            bgClass = "bg-rose-950/30";
+                          } else if (line.startsWith("@@")) {
+                            colorClass = "text-cyan-400 font-bold";
+                            bgClass = "bg-cyan-950/20";
+                          }
+                          return (
+                            <div key={idx} className={`px-2 py-0.5 ${colorClass} ${bgClass}`}>
+                              {line}
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="text-zinc-600 italic">No textual diff detected for this file.</div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-zinc-600 font-mono text-xs">
+                    <GitBranch className="w-8 h-8 mb-2 text-zinc-700" />
+                    <div>Select a changed file from the sidebar to inspect diff</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : mainView === "search" ? (
+            <div className="flex-1 flex overflow-hidden">
+              <div style={{ width: `${explorerWidth}px` }} className="shrink-0 h-full">
+                <SearchPanel
+                  query={search.query}
+                  setQuery={search.setQuery}
+                  replaceText={search.replaceText}
+                  setReplaceText={search.setReplaceText}
+                  isRegex={search.isRegex}
+                  setIsRegex={search.setIsRegex}
+                  isCaseSensitive={search.isCaseSensitive}
+                  setIsCaseSensitive={search.setIsCaseSensitive}
+                  isWholeWord={search.isWholeWord}
+                  setIsWholeWord={search.setIsWholeWord}
+                  includeHidden={search.includeHidden}
+                  setIncludeHidden={search.setIncludeHidden}
+                  results={search.results}
+                  groupedResults={search.groupedResults}
+                  totalFiles={search.totalFiles}
+                  totalMatches={search.totalMatches}
+                  selectedResultIndex={search.selectedResultIndex}
+                  loading={search.loading}
+                  error={search.error}
+                  durationMs={search.durationMs}
+                  onSelectMatch={handleSelectSearchMatch}
+                  onReplaceSingle={(m) => search.replaceSingle(m)}
+                  onReplaceAllInFile={(f) => search.replaceAllInFile(f)}
+                  onReplaceAllInWorkspace={() => search.replaceAllInWorkspace()}
+                  onNavigateResult={(dir) => search.navigateResult(dir)}
+                />
+              </div>
+              <div className="flex-1 h-full flex flex-col bg-[#050507]">
+                {/* Multi-Tab Bar */}
+                <div className="h-9 bg-[#0a0a0a] border-b border-[#1f1f1f] flex items-center px-2 gap-1 font-mono text-xs overflow-x-auto shrink-0">
+                  {openTabs.map((tab) => (
+                    <div
+                      key={tab.path}
+                      onClick={() => {
+                        setActiveTabPath(tab.path);
+                        restoreTabCursor(tab.path);
+                        runAnalysis(tab.path, tab.content);
+                      }}
+                      className={`group px-3 py-1 rounded-t-lg flex items-center gap-2 cursor-pointer transition-all ${
+                        activeTabPath === tab.path
+                          ? "bg-[#050505] text-cyan-400 border-t border-x border-cyan-500/40 font-bold shadow-sm"
+                          : "text-zinc-400 hover:text-white hover:bg-zinc-900/40"
+                      }`}
+                    >
+                      <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>{tab.name}</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCloseTab(tab.path);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-opacity cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                {/* Editor Surface */}
+                <div className="flex-1 relative bg-[#050505] overflow-hidden">
+                  {activeTab ? (
+                    <MonacoEditor
+                      key={activeTab.path}
+                      width="100%"
+                      height="100%"
+                      language={getLanguageFromPath(activeTab.path)}
+                      value={activeTab.content ?? ""}
+                      onChange={handleEditorChange}
+                      onMount={handleEditorMount}
+                      options={{
+                        fontSize: 13,
+                        fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                        minimap: { enabled: false },
+                        scrollBeyondLastLine: false,
+                        automaticLayout: true,
+                        theme: "vs-dark",
+                        tabSize: 2,
+                        wordWrap: "on",
+                        padding: { top: 12, bottom: 12 },
+                        renderLineHighlight: "all",
+                        lineNumbers: "on",
+                        glyphMargin: true,
+                        cursorBlinking: "smooth",
+                        smoothScrolling: true,
+                      }}
+                    />
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-zinc-600 font-mono text-xs">
+                      No file selected. Click a search result to view.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : mainView === "test_explorer" ? (
+            <div className="flex-1 flex overflow-hidden">
+              <div style={{ width: `${explorerWidth + 40}px` }} className="shrink-0 h-full">
+                <TestExplorerPanel
+                  workspacePath={folderPath || ""}
+                  onOpenTestFile={handleOpenTestFile}
+                  testsHook={testsHook}
+                />
+              </div>
+              <div className="flex-1 h-full flex flex-col bg-[#050507]">
+                {/* Multi-Tab Bar */}
+                <div className="h-9 bg-[#0a0a0a] border-b border-[#1f1f1f] flex items-center px-2 gap-1 font-mono text-xs overflow-x-auto shrink-0">
+                  {openTabs.map((tab) => (
+                    <div
+                      key={tab.path}
+                      onClick={() => {
+                        setActiveTabPath(tab.path);
+                        restoreTabCursor(tab.path);
+                        runAnalysis(tab.path, tab.content);
+                      }}
+                      className={`group px-3 py-1 rounded-t-lg flex items-center gap-2 cursor-pointer transition-all ${
+                        activeTabPath === tab.path
+                          ? "bg-[#050505] text-cyan-400 border-t border-x border-cyan-500/40 font-bold shadow-sm"
+                          : "text-zinc-400 hover:text-white hover:bg-zinc-900/40"
+                      }`}
+                    >
+                      <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>{tab.name}</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCloseTab(tab.path);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-opacity cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Editor or Empty State */}
+                <div className="flex-1 relative overflow-hidden">
+                  {activeTab ? (
+                    <MonacoEditor
+                      height="100%"
+                      language={getLanguageFromPath(activeTab.path)}
+                      theme="echo-dark"
+                      value={activeTab.content}
+                      onChange={handleEditorChange}
+                      onMount={handleEditorMount}
+                      options={{
+                        minimap: { enabled: true },
+                        fontSize: 13,
+                        fontFamily: "var(--font-mono)",
+                        scrollBeyondLastLine: false,
+                        automaticLayout: true,
+                        tabSize: 4,
+                        wordWrap: "on",
+                        renderLineHighlight: "all",
+                        lineNumbers: "on",
+                        glyphMargin: true,
+                        cursorBlinking: "smooth",
+                        smoothScrolling: true,
+                      }}
+                    />
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-zinc-600 font-mono text-xs">
+                      No test file selected. Select a test from the Test Explorer to inspect code.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : mainView === "profiler" ? (
+            <div className="flex-1 flex overflow-hidden">
+              <div className="flex-1 h-full flex flex-col">
+                <ProfilerPanel
+                  profiler={profiler}
+                  activeCode={activeTab?.content || ""}
+                  activeFilePath={activeTab?.path || ""}
+                  onSelectFile={handleOpenTestFile}
+                />
+              </div>
+            </div>
+          ) : mainView === "security_audit" ? (
+            <div className="flex-1 flex overflow-hidden">
+              <div className="flex-1 h-full flex flex-col">
+                <SecurityAuditPanel
+                  auditHook={securityAudit}
+                  onOpenFile={handleOpenTestFile}
+                />
+              </div>
+            </div>
+          ) : mainView === "snapshots" ? (
+            <div className="flex-1 flex overflow-hidden">
+              <div className="flex-1 h-full flex flex-col">
+                <SnapshotPanel
+                  snapshotHook={snapshotHook}
+                  onOpenFile={handleOpenTestFile}
+                  openTabs={openTabs}
+                  activeTabPath={activeTabPath}
+                />
+              </div>
+            </div>
           ) : (
             <>
               {/* Multi-Tab Bar */}
@@ -2940,43 +4479,63 @@ export default function IDEApp() {
                       <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" title="Unsaved changes ●" />
                     )}
 
-                    <button
+                    <span
+                      role="button"
+                      tabIndex={0}
                       onClick={(e) => handleCloseTab(tab.path, e)}
-                      className="opacity-60 hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-opacity"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.stopPropagation();
+                          handleCloseTab(tab.path, e as any);
+                        }
+                      }}
+                      className="opacity-60 hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-opacity inline-block cursor-pointer"
                     >
                       <X className="w-3 h-3" />
-                    </button>
+                    </span>
                   </div>
                 ))}
               </div>
 
-              {/* Monaco Editor Container */}
-              <div ref={monacoWrapperRef} style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden" }} className="flex-1 min-w-0 min-h-0 relative overflow-hidden bg-[#050505]">
-                {activeTab ? (
-                  <MonacoEditor
-                    key={activeTab.path}
-                    width="100%"
-                    height="100%"
-                    language={getLanguageFromPath(activeTab.path)}
-                    value={activeTab.content ?? ""}
-                    onChange={handleEditorChange}
-                    onMount={handleEditorMount}
-                    options={{
-                      fontSize: 13,
-                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                      lineNumbers: "on",
-                      minimap: { enabled: true },
-                      bracketPairColorization: { enabled: true },
-                      "semanticHighlighting.enabled": true,
-                      wordWrap: "off",
-                      smoothScrolling: true,
-                      automaticLayout: true,
-                      padding: { top: 12 },
-                    }}
-                  />
-                ) : (
-                  <div className="w-full h-full bg-[#050505] text-zinc-500 flex items-center justify-center font-mono text-xs">
-                    No file selected
+              {/* Monaco Editor Container & Live Web Preview Split Pane */}
+              <div ref={monacoWrapperRef} style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden", display: "flex" }} className="flex-1 min-w-0 min-h-0 relative overflow-hidden bg-[#050505] flex">
+                <div style={{ flex: showLivePreview ? 0.5 : 1, minWidth: 0, height: "100%", position: "relative" }} className="h-full">
+                  {activeTab ? (
+                    <MonacoEditor
+                      key={activeTab.path}
+                      width="100%"
+                      height="100%"
+                      language={getLanguageFromPath(activeTab.path)}
+                      value={activeTab.content ?? ""}
+                      onChange={handleEditorChange}
+                      onMount={handleEditorMount}
+                      options={{
+                        fontSize: 13,
+                        fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                        lineNumbers: "on",
+                        minimap: { enabled: true },
+                        bracketPairColorization: { enabled: true },
+                        "semanticHighlighting.enabled": true,
+                        wordWrap: "off",
+                        smoothScrolling: true,
+                        automaticLayout: true,
+                        padding: { top: 12 },
+                      }}
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-[#050505] text-zinc-500 flex items-center justify-center font-mono text-xs">
+                      No file selected
+                    </div>
+                  )}
+                </div>
+
+                {showLivePreview && (
+                  <div style={{ flex: 0.5, minWidth: 0, height: "100%" }} className="h-full border-l border-[#1f1f1f]">
+                    <LiveWebPreviewPanel
+                      activeTab={activeTab}
+                      openTabs={openTabs}
+                      onClose={() => setShowLivePreview(false)}
+                    />
                   </div>
                 )}
               </div>
@@ -3018,9 +4577,17 @@ export default function IDEApp() {
 
             {/* Panel Tabs: Active File vs Project Scan vs Clones vs Semantic */}
             <div className="grid grid-cols-4 gap-1 p-1 bg-[#050505] rounded-xl border border-[#1f1f1f] text-[10px] font-mono">
-              <button
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => setRightPanelTab("file")}
-                className={`py-1.5 px-1 rounded-lg font-bold transition-all flex items-center justify-center gap-1 ${
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setRightPanelTab("file");
+                  }
+                }}
+                className={`py-1.5 px-1 rounded-lg font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
                   rightPanelTab === "file"
                     ? "bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 shadow-sm"
                     : "text-zinc-400 hover:text-white"
@@ -3030,10 +4597,18 @@ export default function IDEApp() {
                 <span className="px-1 py-0.2 rounded-full bg-zinc-800 text-[8px] text-zinc-300">
                   {findings.length}
                 </span>
-              </button>
-              <button
+              </div>
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => setRightPanelTab("project")}
-                className={`py-1.5 px-1 rounded-lg font-bold transition-all flex items-center justify-center gap-1 ${
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setRightPanelTab("project");
+                  }
+                }}
+                className={`py-1.5 px-1 rounded-lg font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
                   rightPanelTab === "project"
                     ? "bg-purple-950/80 text-purple-300 border border-purple-500/40 shadow-sm"
                     : "text-zinc-400 hover:text-white"
@@ -3045,10 +4620,18 @@ export default function IDEApp() {
                     {workspaceReport.total_ghost_lines}
                   </span>
                 )}
-              </button>
-              <button
+              </div>
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => setRightPanelTab("clones")}
-                className={`py-1.5 px-1 rounded-lg font-bold transition-all flex items-center justify-center gap-1 ${
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setRightPanelTab("clones");
+                  }
+                }}
+                className={`py-1.5 px-1 rounded-lg font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
                   rightPanelTab === "clones"
                     ? "bg-fuchsia-950/80 text-fuchsia-300 border border-fuchsia-500/40 shadow-sm"
                     : "text-zinc-400 hover:text-white"
@@ -3060,10 +4643,18 @@ export default function IDEApp() {
                     {structuralCloneGroups.length}
                   </span>
                 )}
-              </button>
-              <button
+              </div>
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => setRightPanelTab("semantic")}
-                className={`py-1.5 px-1 rounded-lg font-bold transition-all flex items-center justify-center gap-1 ${
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setRightPanelTab("semantic");
+                  }
+                }}
+                className={`py-1.5 px-1 rounded-lg font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
                   rightPanelTab === "semantic"
                     ? "bg-amber-950/80 text-amber-300 border border-amber-500/40 shadow-sm"
                     : "text-zinc-400 hover:text-white"
@@ -3075,7 +4666,7 @@ export default function IDEApp() {
                     {semanticCloneGroups.length}
                   </span>
                 )}
-              </button>
+              </div>
             </div>
 
             {rightPanelTab === "semantic" ? (
@@ -3127,10 +4718,18 @@ export default function IDEApp() {
 
                           <div className="space-y-1.5">
                             {group.occurrences.map((occ, oIdx) => (
-                              <button
+                              <div
                                 key={oIdx}
+                                role="button"
+                                tabIndex={0}
                                 onClick={() => handleOpenCloneOccurrence(occ)}
-                                className="w-full text-left p-2 bg-[#0d0d0d] hover:bg-zinc-900/70 hover:border-amber-400/80 transition-all rounded-lg border border-zinc-800/80 space-y-1 group"
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    handleOpenCloneOccurrence(occ);
+                                  }
+                                }}
+                                className="w-full text-left p-2 bg-[#0d0d0d] hover:bg-zinc-900/70 hover:border-amber-400/80 transition-all rounded-lg border border-zinc-800/80 space-y-1 group cursor-pointer"
                               >
                                 <div className="flex items-center justify-between text-[11px]">
                                   <span className="text-cyan-300 font-bold group-hover:text-cyan-200 truncate max-w-[140px]">
@@ -3143,7 +4742,7 @@ export default function IDEApp() {
                                 <div className="text-zinc-300 font-mono bg-[#050505] p-1.5 rounded border border-zinc-900 truncate text-[10px]">
                                   {occ.code}
                                 </div>
-                              </button>
+                              </div>
                             ))}
                           </div>
                         </div>
@@ -3151,13 +4750,20 @@ export default function IDEApp() {
                     ) : (
                       <div className="p-4 bg-[#050505] rounded-xl border border-[#1f1f1f] text-center text-zinc-500 text-xs font-mono space-y-2">
                         <p>No semantic clones scanned yet.</p>
-                        <button
+                        <span
+                          role="button"
+                          tabIndex={0}
                           onClick={handleScanSemanticClones}
-                          disabled={semanticCloneScanLoading}
-                          className="px-3 py-1.5 rounded-lg bg-amber-950 text-amber-300 border border-amber-500/40 text-[11px] font-bold hover:bg-amber-900 transition-all"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              handleScanSemanticClones();
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-amber-950 text-amber-300 border border-amber-500/40 text-[11px] font-bold hover:bg-amber-900 transition-all inline-block cursor-pointer"
                         >
                           {semanticCloneScanLoading ? "Scanning..." : "Find Semantic Clones"}
-                        </button>
+                        </span>
                       </div>
                     )}
                   </div>
@@ -3212,10 +4818,18 @@ export default function IDEApp() {
 
                           <div className="space-y-1.5">
                             {group.occurrences.map((occ, oIdx) => (
-                              <button
+                              <div
                                 key={oIdx}
+                                role="button"
+                                tabIndex={0}
                                 onClick={() => handleOpenCloneOccurrence(occ)}
-                                className="w-full text-left p-2 bg-[#0d0d0d] hover:bg-zinc-900/70 hover:border-fuchsia-400/80 transition-all rounded-lg border border-zinc-800/80 space-y-1 group"
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    handleOpenCloneOccurrence(occ);
+                                  }
+                                }}
+                                className="w-full text-left p-2 bg-[#0d0d0d] hover:bg-zinc-900/70 hover:border-fuchsia-400/80 transition-all rounded-lg border border-zinc-800/80 space-y-1 group cursor-pointer"
                               >
                                 <div className="flex items-center justify-between text-[11px]">
                                   <span className="text-cyan-300 font-bold group-hover:text-cyan-200 truncate max-w-[140px]">
@@ -3228,7 +4842,7 @@ export default function IDEApp() {
                                 <div className="text-zinc-300 font-mono bg-[#050505] p-1.5 rounded border border-zinc-900 truncate text-[10px]">
                                   {occ.code}
                                 </div>
-                              </button>
+                              </div>
                             ))}
                           </div>
                         </div>
@@ -3236,13 +4850,20 @@ export default function IDEApp() {
                     ) : (
                       <div className="p-4 bg-[#050505] rounded-xl border border-[#1f1f1f] text-center text-zinc-500 text-xs font-mono space-y-2">
                         <p>No structural clones scanned yet.</p>
-                        <button
+                        <span
+                          role="button"
+                          tabIndex={0}
                           onClick={handleScanStructuralClones}
-                          disabled={structuralCloneLoading}
-                          className="px-3 py-1.5 rounded-lg bg-fuchsia-950 text-fuchsia-300 border border-fuchsia-500/40 text-[11px] font-bold hover:bg-fuchsia-900 transition-all"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              handleScanStructuralClones();
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-fuchsia-950 text-fuchsia-300 border border-fuchsia-500/40 text-[11px] font-bold hover:bg-fuchsia-900 transition-all inline-block cursor-pointer"
                         >
                           {structuralCloneLoading ? "Scanning..." : "Find Clones"}
-                        </button>
+                        </span>
                       </div>
                     )}
                   </div>
@@ -3283,10 +4904,18 @@ export default function IDEApp() {
                       workspaceReport.files.map((file, i) => {
                         const hasGhosts = file.ghost_lines > 0;
                         return (
-                          <button
+                          <div
                             key={i}
+                            role="button"
+                            tabIndex={0}
                             onClick={() => handleOpenWorkspaceFile(file)}
-                            className="w-full text-left p-3 bg-[#050505] hover:bg-[#0d0d0d] hover:border-cyan-400 transition-all rounded-xl border border-zinc-800 space-y-1.5 group"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                handleOpenWorkspaceFile(file);
+                              }
+                            }}
+                            className="w-full text-left p-3 bg-[#050505] hover:bg-[#0d0d0d] hover:border-cyan-400 transition-all rounded-xl border border-zinc-800 space-y-1.5 group cursor-pointer"
                           >
                             <div className="flex items-center justify-between">
                               <span className="text-zinc-200 font-bold group-hover:text-cyan-300 truncate max-w-[160px]">
@@ -3308,19 +4937,26 @@ export default function IDEApp() {
                                 Ratio: {(file.ghost_ratio * 100).toFixed(1)}%
                               </span>
                             </div>
-                          </button>
+                          </div>
                         );
                       })
                     ) : (
                       <div className="p-4 bg-[#050505] rounded-xl border border-[#1f1f1f] text-center text-zinc-500 text-xs font-mono space-y-2">
                         <p>No project scan performed yet.</p>
-                        <button
+                        <span
+                          role="button"
+                          tabIndex={0}
                           onClick={handleRunWorkspaceScan}
-                          disabled={workspaceScanLoading}
-                          className="px-3 py-1.5 rounded-lg bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[11px] font-bold hover:bg-cyan-900 transition-all"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              handleRunWorkspaceScan();
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-cyan-950 text-cyan-300 border border-cyan-500/40 text-[11px] font-bold hover:bg-cyan-900 transition-all inline-block cursor-pointer"
                         >
                           {workspaceScanLoading ? "Scanning..." : "Run Workspace Scan"}
-                        </button>
+                        </span>
                       </div>
                     )}
                   </div>
@@ -3352,10 +4988,18 @@ export default function IDEApp() {
                       findings.map((f, i) => {
                         const isSelected = selectedFinding?.line === f.line;
                         return (
-                          <button
+                          <div
                             key={i}
+                            role="button"
+                            tabIndex={0}
                             onClick={() => handleFindingClick(f)}
-                            className={`w-full text-left p-2.5 bg-[#050505] hover:bg-[#0d0d0d] transition-all rounded-xl border space-y-1 group ${
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                handleFindingClick(f);
+                              }
+                            }}
+                            className={`w-full text-left p-2.5 bg-[#050505] hover:bg-[#0d0d0d] transition-all rounded-xl border space-y-1 group cursor-pointer ${
                               isSelected
                                 ? "border-cyan-400 bg-cyan-950/20 shadow-cyan-glow/20"
                                 : "border-cyan-500/30 hover:border-cyan-400/80"
@@ -3377,18 +5021,27 @@ export default function IDEApp() {
                               <p className="text-[11px] text-zinc-400 font-sans leading-tight flex-1">
                                 {f.reason}
                               </p>
-                              <button
+                              <span
+                                role="button"
+                                tabIndex={0}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleFindingClick(f);
                                   handleOpenDiffPreview(f);
                                 }}
-                                className="ml-2 px-2 py-0.5 rounded bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-[10px] font-bold whitespace-nowrap transition-all"
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.stopPropagation();
+                                    handleFindingClick(f);
+                                    handleOpenDiffPreview(f);
+                                  }
+                                }}
+                                className="ml-2 px-2 py-0.5 rounded bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-[10px] font-bold whitespace-nowrap transition-all inline-block cursor-pointer"
                               >
                                 Preview Surgery
-                              </button>
+                              </span>
                             </div>
-                          </button>
+                          </div>
                         );
                       })
                     ) : (
@@ -3429,6 +5082,171 @@ export default function IDEApp() {
         <div onMouseDown={startConsoleResize} className="resizer-row" />
       )}
 
+      {/* Pyodide Python Output Panel */}
+      <div className="h-44 bg-[#050505] border-t border-[#1f1f1f] flex flex-col font-mono text-xs shrink-0 z-20">
+        <div className="px-3 py-1.5 bg-[#0a0a0a] border-b border-[#1f1f1f] flex items-center justify-between text-[11px]">
+          <div className="flex items-center gap-2 font-bold text-emerald-400">
+            <Play className="w-3.5 h-3.5 fill-emerald-400" />
+            <span>Python Execution Output (Pyodide Wasm)</span>
+          </div>
+          {pythonOutput && (
+            <button
+              onClick={() => setPythonOutput("")}
+              className="text-[10px] text-zinc-500 hover:text-zinc-300 cursor-pointer"
+            >
+              Clear Output
+            </button>
+          )}
+        </div>
+        <div className="flex-1 p-3 overflow-y-auto font-mono text-xs whitespace-pre-wrap text-zinc-300">
+          {pythonOutput ? (
+            pythonOutput
+          ) : (
+            <span className="text-zinc-600">No output yet.</span>
+          )}
+        </div>
+      </div>
+
+      {/* Milestone 27 AI Execution Explainer Panel */}
+      {executionAnalysis && (
+        <div className="bg-[#09090b] border-t border-[#1f1f1f] p-3 flex flex-col font-mono text-xs shrink-0 z-20 space-y-2">
+          <div className="flex items-center justify-between border-b border-[#1f1f1f] pb-2">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-purple-400" />
+              <span className="font-bold text-zinc-100 uppercase tracking-wide text-[11px]">
+                AI Execution Explanation
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {executionAnalysis.status === "success" && (
+                <span className="px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-500/40 text-[10px] font-bold">
+                  ● SUCCESS
+                </span>
+              )}
+              {executionAnalysis.status === "runtime_error" && (
+                <span className="px-2 py-0.5 rounded-full bg-rose-950/80 text-rose-400 border border-rose-500/40 text-[10px] font-bold">
+                  ● RUNTIME ERROR
+                </span>
+              )}
+              {executionAnalysis.status === "syntax_error" && (
+                <span className="px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-400 border border-amber-500/40 text-[10px] font-bold">
+                  ● SYNTAX ERROR
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] text-zinc-300">
+            {/* Left Column: Summary, Error, Root Cause */}
+            <div className="space-y-2 bg-[#0d0d10] p-2.5 rounded-xl border border-[#1f1f1f]">
+              <div>
+                <strong className="text-zinc-400 block text-[10px] uppercase">Summary:</strong>
+                <span>{executionAnalysis.summary}</span>
+              </div>
+
+              {executionAnalysis.error && (
+                <div>
+                  <strong className="text-rose-400 block text-[10px] uppercase">Error:</strong>
+                  <code className="text-rose-300 bg-rose-950/40 px-1.5 py-0.5 rounded text-[11px] font-mono block">
+                    {executionAnalysis.error}
+                  </code>
+                </div>
+              )}
+
+              {executionAnalysis.rootCause && (
+                <div>
+                  <strong className="text-amber-400 block text-[10px] uppercase">Root Cause:</strong>
+                  <span>{executionAnalysis.rootCause}</span>
+                </div>
+              )}
+
+              {executionAnalysis.beginnerExplanation && (
+                <div className="pt-1 border-t border-[#1a1a1e] text-zinc-400 italic text-[10.5px]">
+                  💡 <strong>Beginner Explanation:</strong> {executionAnalysis.beginnerExplanation}
+                </div>
+              )}
+            </div>
+
+            {/* Right Column: Suggested Fix, Complexity, Variables, Safety */}
+            <div className="space-y-2 bg-[#0d0d10] p-2.5 rounded-xl border border-[#1f1f1f]">
+              {executionAnalysis.suggestedFix && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <strong className="text-cyan-400 text-[10px] uppercase">Suggested Fix:</strong>
+                    <button
+                      onClick={() => navigator.clipboard.writeText(executionAnalysis.suggestedFix || "")}
+                      className="px-2 py-0.5 rounded bg-cyan-950 hover:bg-cyan-900 text-cyan-300 text-[10px] font-bold border border-cyan-500/30 transition-all cursor-pointer"
+                    >
+                      Copy Suggested Fix
+                    </button>
+                  </div>
+                  <code className="text-cyan-300 bg-cyan-950/30 px-1.5 py-0.5 rounded text-[11px] font-mono block">
+                    {executionAnalysis.suggestedFix}
+                  </code>
+                </div>
+              )}
+
+              <div>
+                <strong className="text-purple-400 block text-[10px] uppercase">Complexity Estimate:</strong>
+                <span className="text-purple-300 font-bold">{executionAnalysis.complexity || "O(1)"}</span>
+              </div>
+
+              {Object.keys(executionAnalysis.variables).length > 0 && (
+                <div>
+                  <strong className="text-zinc-400 block text-[10px] uppercase">Variables Observed:</strong>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {Object.entries(executionAnalysis.variables).map(([k, v]) => (
+                      <span key={k} className="px-1.5 py-0.5 rounded bg-[#18181b] border border-[#27272a] text-[10px] font-mono">
+                        <strong className="text-cyan-300">{k}</strong> = <span className="text-zinc-300">{v}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {executionAnalysis.safetyWarnings.length > 0 && (
+                <div className="pt-1 border-t border-[#1a1a1e]">
+                  <strong className="text-rose-400 block text-[10px] uppercase">Safety Warnings:</strong>
+                  <ul className="list-disc list-inside text-rose-300 text-[10.5px]">
+                    {executionAnalysis.safetyWarnings.map((w, idx) => (
+                      <li key={idx}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Time-Travel Debugger v2 Panel */}
+      <DebuggerPanel
+        isOpen={debugPanelOpen}
+        onClose={() => setDebugPanelOpen(false)}
+        steps={debugSteps}
+        currentIndex={debugIndex}
+        onStepChange={(idx) => setDebugIndex(idx)}
+        onRestart={() => setDebugIndex(0)}
+        error={debugError}
+      />
+
+      {/* Integrated Terminal Panel */}
+      {showTerminalPanel && (
+        <div style={{ height: `${consoleHeight}px` }} className="shrink-0 z-20">
+          <TerminalPanel
+            tabs={terminalTabs}
+            activeTabId={activeTerminalTabId}
+            onSelectTab={(id) => setActiveTerminalTabId(id)}
+            onCreateTab={() => createTerminalTab(folderPath || "")}
+            onCloseTab={(id) => closeTerminalTab(id)}
+            onRestartTab={(id) => restartTerminalTab(id)}
+            onSendInput={(id, input) => sendTerminalInput(id, input)}
+            onClosePanel={() => setShowTerminalPanel(false)}
+          />
+        </div>
+      )}
+
       {/* 3. Bottom Console Panel & Status Bar */}
       {showConsole && (
         <div style={{ height: `${consoleHeight}px` }} className="bg-[#070707] border-t border-[#1f1f1f] p-3 flex flex-col justify-between font-mono text-xs shrink-0 z-20">
@@ -3443,9 +5261,60 @@ export default function IDEApp() {
               <span>File: <strong className="text-cyan-300">{activeTab?.name}</strong></span>
               <span>Lang: <strong className="text-purple-300">{getLanguageFromPath(activeTab?.path || "")}</strong></span>
               <span className="text-zinc-500">Analyzer: <strong className="text-emerald-400">Rust/Python AST Ready</strong></span>
+              {git.isRepo && git.currentBranch && (
+                <div
+                  onClick={() => setMainView("source_control")}
+                  className="flex items-center gap-1 text-cyan-300 font-bold hover:text-cyan-200 cursor-pointer bg-cyan-950/40 px-2 py-0.5 rounded border border-cyan-500/20"
+                  title={`Git Branch: ${git.currentBranch} (Click to open Source Control)`}
+                >
+                  <GitBranch className="w-3 h-3 text-cyan-400" />
+                  <span>{git.currentBranch}</span>
+                  {(git.staged.length > 0 || git.unstaged.length > 0 || git.untracked.length > 0) && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                  )}
+                </div>
+              )}
+
+              {/* AI Status Indicator */}
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#121216] border border-[#27272a] text-[10px] font-mono select-none">
+                {aiLoading ? (
+                  <span className="text-cyan-300 font-bold flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-cyan-400 animate-spin" />
+                    <span>AI Busy</span>
+                  </span>
+                ) : (
+                  <span className="text-zinc-400 font-bold flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-cyan-400" />
+                    <span>AI Ready</span>
+                  </span>
+                )}
+              </div>
+
+              {/* Debugger Status Indicator */}
+              {debugPanelOpen && (
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[10px] font-mono select-none">
+                  <Bug className="w-3 h-3 text-cyan-400" />
+                  <span>
+                    Debugging (Step {debugSteps.length > 0 ? debugIndex + 1 : 0}/{debugSteps.length})
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowTerminalPanel((prev) => !prev)}
+                className={`px-2 py-0.5 rounded font-mono text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                  showTerminalPanel
+                    ? "bg-cyan-950 text-cyan-300 border border-cyan-500/40"
+                    : "bg-[#141414] text-zinc-400 hover:text-white border border-[#262626]"
+                }`}
+                title="Toggle Integrated Terminal (⌘`)"
+              >
+                <TerminalIcon className="w-3 h-3 text-cyan-400" />
+                <span>Terminal {terminalTabs.length > 0 ? `(${terminalTabs.length})` : ""}</span>
+              </button>
+
               <span>Ln {cursorPos.line}, Col {cursorPos.col}</span>
               <span className="text-purple-400 font-bold">{findings.length} Ghost Lines</span>
               {activeTab?.isDirty ? (
@@ -3703,6 +5572,59 @@ export default function IDEApp() {
         onRestoreBackup={handleUndoSurgery}
         onToggleExplorer={() => setShowExplorer((prev) => !prev)}
         onToggleConsole={() => setShowConsole((prev) => !prev)}
+        onRestoreRecoverySession={handleRestoreSession}
+        onDiscardRecoverySession={handleDiscardRecovery}
+        onOpenTestExplorer={() => setMainView("test_explorer")}
+        onRunAllTests={testsHook.runAllTests}
+        onRunCurrentFileTests={() => {
+          if (activeTab) testsHook.runFileTests(activeTab.path);
+        }}
+        onOpenProfiler={() => setMainView("profiler")}
+        onProfileCurrentFile={() => {
+          if (activeTab) {
+            profiler.profilePython(activeTab.content, activeTab.path);
+            setMainView("profiler");
+          }
+        }}
+        onProfileCurrentTest={() => {
+          if (activeTab) {
+            profiler.profilePython(activeTab.content, activeTab.path);
+            setMainView("profiler");
+          }
+        }}
+        onProfileTerminal={() => {
+          if (activeTab) {
+            profiler.profilePython(activeTab.content, activeTab.path);
+            setMainView("profiler");
+          }
+        }}
+        onExportProfiler={profiler.exportProfile}
+        onClearProfilerDecorations={clearProfilerDecorations}
+        onOpenSecurityAudit={() => setMainView("security_audit")}
+        onRunSecurityScan={securityAudit.runScan}
+        onExportSecurityReport={securityAudit.exportMarkdown}
+        onCreateSnapshot={() => {
+          snapshotHook.createSnapshot(
+            `Snapshot ${new Date().toLocaleTimeString()}`,
+            "Manual snapshot",
+            openTabs,
+            activeTabPath
+          );
+          showToast("Snapshot created successfully");
+        }}
+        onOpenSnapshots={() => setMainView("snapshots")}
+        onCompareLatestSnapshot={() => {
+          if (snapshotHook.snapshots.length > 0) {
+            setMainView("snapshots");
+            snapshotHook.compareSnapshot(snapshotHook.snapshots[0].id);
+          }
+        }}
+        onRestoreLastSnapshot={() => {
+          if (snapshotHook.snapshots.length > 0) {
+            snapshotHook.restoreWorkspace(snapshotHook.snapshots[0].id);
+            showToast(`Restored to ${snapshotHook.snapshots[0].name}`);
+          }
+        }}
         openTabs={openTabs.map((t) => ({ path: t.path, name: t.name }))}
         onSelectTab={(path) => {
           setActiveTabPath(path);
@@ -3786,6 +5708,56 @@ export default function IDEApp() {
         entry={selectedHistoryEvent}
         onConfirmRestore={(id) => handleRestoreCheckpoint(id)}
         isRestoring={restoringHistory}
+      />
+
+      {/* Floating Inline AI Code Actions Toolbar */}
+      <InlineCodeActions
+        visible={!aiPanelOpen && !!selectionInfo && !!selectionInfo.text}
+        x={selectionInfo?.x || 0}
+        y={selectionInfo?.y || 0}
+        onAction={handleRunAiCodeAction}
+      />
+
+      {/* AI Code Actions Panel */}
+      <AIPanel
+        isOpen={aiPanelOpen}
+        onClose={() => setAiPanelOpen(false)}
+        loading={aiLoading}
+        response={aiResponse}
+        onApplyPatch={handleAiApplyPatch}
+        onPreviewDiff={handleAiPreviewDiff}
+      />
+
+      {/* AI Agent Mode Panel */}
+      <AgentPanel
+        isOpen={agentPanelOpen}
+        onClose={() => setAgentPanelOpen(false)}
+        workspacePath={folderPath || ""}
+        onPreviewDiff={(edit) => {
+          setDiffData({
+            file: edit.filePath,
+            original_source: edit.original,
+            transformed_source: edit.replacement,
+            changed_lines: [1],
+            ghost_count_before: 1,
+            ghost_count_after: 0,
+            causal_luminance_after: 0.0,
+          });
+          setShowSurgeryDiffModal(true);
+        }}
+        onApplyStep={handleApplyAgentStep}
+        onApplyAllApproved={handleApplyAllAgentApproved}
+        runningCommandOutput={agentRunningCommandOutput}
+      />
+
+      {/* Crash Recovery & Session Restore Modal */}
+      <RecoveryDialog
+        isOpen={recoveryDialogOpen}
+        snapshot={recoverySnapshot}
+        wasCrash={wasCrashDetected}
+        onRestore={handleRestoreSession}
+        onDiscard={handleDiscardRecovery}
+        onLater={() => setRecoveryDialogOpen(false)}
       />
 
     </div>

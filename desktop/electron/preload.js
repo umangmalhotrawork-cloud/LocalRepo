@@ -36,4 +36,97 @@ contextBridge.exposeInMainWorld('electronAPI', {
   compareFingerprints: (fingerprintA, fingerprintB) => ipcRenderer.invoke('behavior:compare-fingerprints', { fingerprint_a: fingerprintA, fingerprint_b: fingerprintB }),
   analyzeBehaviorHistory: (payload) => ipcRenderer.invoke('behavior:history', payload),
   calculateImpactRadius: (payload) => ipcRenderer.invoke('behavior:impact-radius', payload),
+  calculatePropagationTimeline: (payload) => ipcRenderer.invoke('behavior:propagation-timeline', payload),
+  calculateBlastRadius: (payload) => ipcRenderer.invoke('behavior:blast-radius', payload),
+  runCounterfactualAnalysis: (payload) => ipcRenderer.invoke('behavior:counterfactual', payload),
+  evaluatePatchFirewall: (payload) => ipcRenderer.invoke('behavior:patch-firewall', payload),
+  evaluateRepositoryFirewall: (payload) => ipcRenderer.invoke('behavior:repository-firewall', payload),
+  analyzeSemanticIntentDrift: (payload) => ipcRenderer.invoke('behavior:semantic-intent-drift', payload),
+  terminal: {
+    create: (options) => ipcRenderer.invoke('terminal:create', options),
+    write: (id, data) => ipcRenderer.invoke('terminal:write', { id, data }),
+    resize: (id, cols, rows) => ipcRenderer.invoke('terminal:resize', { id, cols, rows }),
+    kill: (id) => ipcRenderer.invoke('terminal:kill', id),
+    restart: (id) => ipcRenderer.invoke('terminal:restart', id),
+    list: () => ipcRenderer.invoke('terminal:list'),
+    onData: (callback) => {
+      const listener = (event, arg) => callback(arg);
+      ipcRenderer.on('terminal:data', listener);
+      return () => ipcRenderer.removeListener('terminal:data', listener);
+    },
+    onExit: (callback) => {
+      const listener = (event, arg) => callback(arg);
+      ipcRenderer.on('terminal:exit', listener);
+      return () => ipcRenderer.removeListener('terminal:exit', listener);
+    },
+  },
+  git: {
+    status: (workspacePath) => ipcRenderer.invoke('git:status', workspacePath),
+    diff: (workspacePath, file, staged) => ipcRenderer.invoke('git:diff', { workspacePath, file, staged }),
+    stage: (workspacePath, file) => ipcRenderer.invoke('git:stage', { workspacePath, file }),
+    unstage: (workspacePath, file) => ipcRenderer.invoke('git:unstage', { workspacePath, file }),
+    stageAll: (workspacePath) => ipcRenderer.invoke('git:stageAll', workspacePath),
+    unstageAll: (workspacePath) => ipcRenderer.invoke('git:unstageAll', workspacePath),
+    commit: (workspacePath, message) => ipcRenderer.invoke('git:commit', { workspacePath, message }),
+    branches: (workspacePath) => ipcRenderer.invoke('git:branches', workspacePath),
+    checkout: (workspacePath, branch) => ipcRenderer.invoke('git:checkout', { workspacePath, branch }),
+    createBranch: (workspacePath, branch) => ipcRenderer.invoke('git:createBranch', { workspacePath, branch }),
+    discard: (workspacePath, file) => ipcRenderer.invoke('git:discard', { workspacePath, file }),
+  },
+  search: {
+    run: (payload) => ipcRenderer.invoke('search:run', payload),
+    replace: (payload) => ipcRenderer.invoke('search:replace', payload),
+    replaceAll: (payload) => ipcRenderer.invoke('search:replaceAll', payload),
+    cancel: (id) => ipcRenderer.invoke('search:cancel', id),
+  },
+  ai: {
+    codeAction: (payload) => ipcRenderer.invoke('ai:code-action', payload),
+  },
+  agent: {
+    run: (payload) => ipcRenderer.invoke('agent:run', payload),
+  },
+  recovery: {
+    save: (payload) => ipcRenderer.invoke('recovery:save', payload),
+    load: (workspacePath) => ipcRenderer.invoke('recovery:load', workspacePath),
+    clear: (workspacePath) => ipcRenderer.invoke('recovery:clear', workspacePath),
+    list: () => ipcRenderer.invoke('recovery:list'),
+    checkCrash: () => ipcRenderer.invoke('recovery:check-crash'),
+  },
+  tests: {
+    discover: (workspacePath) => ipcRenderer.invoke('test:discover', workspacePath),
+    run: (payload) => ipcRenderer.invoke('test:run', payload),
+    runFile: (payload) => ipcRenderer.invoke('test:run-file', payload),
+    runAll: (payload) => ipcRenderer.invoke('test:run-all', payload),
+    coverage: (payload) => ipcRenderer.invoke('test:coverage', payload),
+  },
+  profiler: {
+    python: (payload) => ipcRenderer.invoke('profiler:python', payload),
+    javascript: (payload) => ipcRenderer.invoke('profiler:javascript', payload),
+    memory: (payload) => ipcRenderer.invoke('profiler:memory', payload),
+    react: (payload) => ipcRenderer.invoke('profiler:react', payload),
+    export: (payload) => ipcRenderer.invoke('profiler:export', payload),
+  },
+  security: {
+    scan: (workspacePath) => ipcRenderer.invoke('security:scan', workspacePath),
+    export: (payload) => ipcRenderer.invoke('security:export', payload),
+  },
+  snapshots: {
+    create: (payload) => ipcRenderer.invoke('snapshot:create', payload),
+    list: (workspacePath) => ipcRenderer.invoke('snapshot:list', workspacePath),
+    get: (payload) => ipcRenderer.invoke('snapshot:get', payload),
+    compare: (payload) => ipcRenderer.invoke('snapshot:compare', payload),
+    restoreFile: (payload) => ipcRenderer.invoke('snapshot:restore-file', payload),
+    restoreWorkspace: (payload) => ipcRenderer.invoke('snapshot:restore-workspace', payload),
+    delete: (payload) => ipcRenderer.invoke('snapshot:delete', payload),
+  },
+  hardening: {
+    checkHealth: () => ipcRenderer.invoke('health:check'),
+    reportCrash: (error, context) => ipcRenderer.invoke('crash:report', { error, context }),
+    listCrashes: () => ipcRenderer.invoke('crash:list'),
+    log: (level, category, message, meta) => ipcRenderer.invoke('logger:log', { level, category, message, meta }),
+    getRecentLogs: (limit) => ipcRenderer.invoke('logger:recent', limit),
+    getTelemetry: () => ipcRenderer.invoke('telemetry:get'),
+    setTelemetry: (enabled) => ipcRenderer.invoke('telemetry:set', enabled),
+    trackTelemetry: (eventName) => ipcRenderer.invoke('telemetry:track', eventName),
+  },
 });

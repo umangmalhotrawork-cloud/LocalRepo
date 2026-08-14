@@ -1,0 +1,60 @@
+{
+  "npm": {
+    "lodash": [
+      {
+        "affected": "<4.17.21",
+        "severity": "high",
+        "title": "Prototype Pollution in lodash",
+        "cve": "CVE-2020-8203",
+        "recommendation": "Upgrade lodash to >=4.17.21."
+      }
+    ],
+    "axios": [
+      {
+        "affected": "<0.21.1",
+        "severity": "medium",
+        "title": "Server-Side Request Forgery in axios",
+        "cve": "CVE-2020-28168",
+        "recommendation": "Upgrade axios to >=0.21.1."
+      }
+    ],
+    "json-schema": [
+      {
+        "affected": "<0.4.0",
+        "severity": "critical",
+        "title": "Prototype Pollution in json-schema",
+        "cve": "CVE-2021-3918",
+        "recommendation": "Upgrade json-schema to >=0.4.0."
+      }
+    ]
+  },
+  "pypi": {
+    "requests": [
+      {
+        "affected": "<2.31.0",
+        "severity": "medium",
+        "title": "Proxy-Authorization Header Leaked in Redirection",
+        "cve": "CVE-2023-32681",
+        "recommendation": "Upgrade requests to >=2.31.0."
+      }
+    ],
+    "cryptography": [
+      {
+        "affected": "<41.0.0",
+        "severity": "high",
+        "title": "Memory corruption in OpenSSL bindings",
+        "cve": "CVE-2023-38325",
+        "recommendation": "Upgrade cryptography to >=41.0.0."
+      }
+    ],
+    "flask": [
+      {
+        "affected": "<2.2.5",
+        "severity": "high",
+        "title": "Denial of Service via large cookies",
+        "cve": "CVE-2023-30861",
+        "recommendation": "Upgrade flask to >=2.2.5."
+      }
+    ]
+  }
+}

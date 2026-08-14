@@ -8,8 +8,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "electron:dev": "electron .",
-    "electron:start": "electron ."
+    "electron:dev": "concurrently -k -s first \"next dev -H 127.0.0.1 -p 3000\" \"wait-on http-get://127.0.0.1:3000/desktop && electron .\"",
+    "electron:start": "electron .",
+    "package:mac": "bash scripts/package-macos.sh",
+    "package:win": "powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
+    "package:linux": "bash scripts/package-linux.sh"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
@@ -17,8 +20,11 @@
     "framer-motion": "^11.15.0",
     "lucide-react": "^0.468.0",
     "next": "^15.1.0",
+    "node-pty": "^1.1.0",
+    "pyodide": "^314.0.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "simple-git": "^3.36.0",
     "tailwind-merge": "^2.5.5"
   },
   "devDependencies": {
@@ -33,6 +39,7 @@
     "eslint-config-next": "^15.1.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.16",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "wait-on": "^9.1.0"
   }
 }

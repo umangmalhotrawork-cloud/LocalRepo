@@ -36,6 +36,8 @@ interface WorkspaceGraphPanelProps {
   onNodeClick: (node: GraphNode) => void;
   onClose?: () => void;
   impactRadiusResult?: any;
+  blastRadiusResult?: any;
+  counterfactualResult?: any;
 }
 
 export default function WorkspaceGraphPanel({
@@ -45,6 +47,8 @@ export default function WorkspaceGraphPanel({
   onNodeClick,
   onClose,
   impactRadiusResult,
+  blastRadiusResult,
+  counterfactualResult,
 }: WorkspaceGraphPanelProps) {
   const [selectedFile, setSelectedFile] = useState<string>("ALL");
   const [selectedKind, setSelectedKind] = useState<string>("ALL");
@@ -71,9 +75,9 @@ export default function WorkspaceGraphPanel({
       if (selectedKind !== "ALL" && n.kind !== selectedKind) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const matchesLabel = n.label.toLowerCase().includes(q);
+        const matchesLabel = (n.label || "").toLowerCase().includes(q);
         const matchesCode = (n.code || "").toLowerCase().includes(q);
-        const matchesFile = n.file.toLowerCase().includes(q);
+        const matchesFile = (n.file || "").toLowerCase().includes(q);
         if (!matchesLabel && !matchesCode && !matchesFile) return false;
       }
       return true;
@@ -91,11 +95,12 @@ export default function WorkspaceGraphPanel({
     );
   }, [graph, filteredNodeIds]);
 
+  // Map impact radius classifications to nodes
   const impactNodeMap = useMemo(() => {
     if (!impactRadiusResult || !impactRadiusResult.impacted_nodes) return new Map();
     const map = new Map<string, any>();
 
-    if (impactRadiusResult.root_function) {
+    if (impactRadiusResult.root_function && impactRadiusResult.root_function.name) {
       const rootKey = `${impactRadiusResult.root_function.name}`.toLowerCase();
       map.set(rootKey, {
         classification: "ROOT_CHANGE",
@@ -105,9 +110,13 @@ export default function WorkspaceGraphPanel({
     }
 
     for (const node of impactRadiusResult.impacted_nodes) {
-      const symKey = `${node.symbol}`.toLowerCase();
-      map.set(symKey, node);
-      map.set(node.id, node);
+      if (node && node.symbol) {
+        const symKey = `${node.symbol}`.toLowerCase();
+        map.set(symKey, node);
+      }
+      if (node && node.id) {
+        map.set(node.id, node);
+      }
     }
     return map;
   }, [impactRadiusResult]);
@@ -555,12 +564,20 @@ export default function WorkspaceGraphPanel({
               const isSelected = selectedNodeId === node.id;
               const isHovered = hoveredNode?.id === node.id;
 
-              const impactData = impactNodeMap.get(node.id) || impactNodeMap.get(node.symbol.toLowerCase());
+              const impactData = impactNodeMap.get(node.id) || (node.symbol ? impactNodeMap.get(node.symbol.toLowerCase()) : null);
               const isImpactRoot = impactData?.classification === "ROOT_CHANGE";
               const isImpactObserved = impactData?.classification === "OBSERVED_CHANGE";
               const isImpactStatic = impactData?.classification === "STATIC_IMPACT";
 
-              const strokeColor = isImpactRoot
+              const isCfActive = counterfactualResult && !counterfactualResult.error;
+              const isCfSafe = isCfActive && counterfactualResult.safe_to_remove;
+              const isCfUnsafe = isCfActive && !counterfactualResult.safe_to_remove;
+
+              const strokeColor = isCfSafe
+                ? "#10b981"
+                : isCfUnsafe
+                ? "#f43f5e"
+                : isImpactRoot
                 ? "#f43f5e"
                 : isImpactObserved
                 ? "#f59e0b"
