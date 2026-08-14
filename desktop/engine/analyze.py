@@ -510,6 +510,7 @@ class IdentityTransformer(ast.NodeTransformer):
         return node
 
 def analyze_source(content, file_path="<string>"):
+    print(f"[ANALYZER] path={file_path} bytes={len(content.encode('utf-8'))}", file=sys.stderr)
     print(f"[ANALYZER_BUILD] {ANALYZER_BUILD}", file=sys.stderr)
     print(f"[ANALYZER_SCRIPT] {__file__}", file=sys.stderr)
     print(f"[ANALYZER_CWD] {os.getcwd()}", file=sys.stderr)
@@ -628,12 +629,22 @@ def rewrite_code(file_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Echo Nullity Python AST Analyzer & Rewrite Engine")
-    parser.add_argument("file", help="Path to Python file")
+    parser.add_argument("file", nargs="?", help="Path to Python file")
+    parser.add_argument("--stdin", action="store_true", help="Read source code from standard input")
+    parser.add_argument("--path", help="Logical source path used with --stdin")
     parser.add_argument("--mode", choices=["analyze", "rewrite"], default="analyze", help="Execution mode")
 
     args = parser.parse_args()
 
-    if args.mode == "rewrite":
+    if args.stdin:
+        if not args.path:
+            parser.error("--path is required when --stdin is used")
+        if args.mode != "analyze":
+            parser.error("--stdin is supported only with --mode analyze")
+        result = analyze_source(sys.stdin.read(), args.path)
+    elif not args.file:
+        parser.error("file is required unless --stdin is used")
+    elif args.mode == "rewrite":
         result = rewrite_code(args.file)
     else:
         result = analyze_code(args.file)

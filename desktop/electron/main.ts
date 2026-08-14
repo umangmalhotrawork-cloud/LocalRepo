@@ -226,30 +226,32 @@ ipcMain.handle('fs:read-dir', async (_, dirPath: string) => {
   }
 });
 
-ipcMain.handle('engine:analyze', async (_, filePath: string) => {
+ipcMain.handle('engine:analyze', async (_, payload: { filePath: string; content: string }) => {
+  const { filePath, content } = payload || {};
+  if (!filePath || typeof content !== 'string') {
+    return { error: 'Analysis requires a filePath and editor content.', findings: [], causal_luminance: 1.0 };
+  }
+
+  const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'analyze.py');
+  const args = [scriptPath, '--stdin', '--path', filePath, '--mode', 'analyze'];
+  console.log(`[IPC] Analyze path=${filePath} bytes=${Buffer.byteLength(content, 'utf8')}`);
+
   return new Promise((resolve) => {
-    const scriptPath = path.join(app.getAppPath(), 'desktop', 'engine', 'analyze.py');
-    execFile('python3', [scriptPath, filePath, '--mode', 'analyze'], (error, stdout, stderr) => {
-      if (error) {
-        console.error('Python analyze error:', stderr || error.message);
-        resolve({
-          error: stderr || error.message,
-          findings: [],
-          causal_luminance: 1.0,
-        });
-        return;
-      }
+    const child = execSpawn('python3', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.on('error', (error: Error) => resolve({ error: error.message, findings: [], causal_luminance: 1.0 }));
+    child.on('close', (code: number) => {
+      if (code !== 0) return resolve({ error: stderr || `Analyzer exited with code ${code}`, findings: [], causal_luminance: 1.0 });
       try {
-        const jsonResult = JSON.parse(stdout);
-        resolve(jsonResult);
-      } catch (parseError) {
-        resolve({
-          error: 'Failed to parse analyzer JSON output',
-          findings: [],
-          causal_luminance: 1.0,
-        });
+        resolve(JSON.parse(stdout));
+      } catch {
+        resolve({ error: 'Failed to parse analyzer JSON output', findings: [], causal_luminance: 1.0 });
       }
     });
+    child.stdin.end(content);
   });
 });
 

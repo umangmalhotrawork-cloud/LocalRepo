@@ -842,46 +842,49 @@ ipcMain.handle('fs:read-dir', async (_, dirPath) => {
   }
 });
 
-ipcMain.handle('engine:analyze', async (_, filePath) => {
+ipcMain.handle('engine:analyze', async (_, payload) => {
+  const { filePath, content } = payload || {};
+  if (typeof filePath !== 'string' || !filePath || typeof content !== 'string') {
+    return { error: 'Analysis requires a filePath and editor content.', findings: [], causal_luminance: 1.0 };
+  }
+
+  const isJS = /\.(js|jsx|ts|tsx)$/i.test(filePath);
+  const command = isJS ? 'node' : 'python3';
+  const scriptPath = path.join(
+    app.getAppPath(),
+    'desktop',
+    'engine',
+    isJS ? 'js_analyzer.js' : 'analyze.py'
+  );
+  const args = [scriptPath, '--stdin', '--path', filePath, '--mode', 'analyze'];
+  const bytes = Buffer.byteLength(content, 'utf8');
+  console.log(`[IPC] Analyze path=${filePath} bytes=${bytes}`);
+
   return new Promise((resolve) => {
-    const isJS = Boolean(filePath && filePath.match(/\.(js|jsx|ts|tsx)$/i));
-    const command = isJS ? 'node' : 'python3';
-    const scriptPath = isJS
-      ? path.join(app.getAppPath(), 'desktop', 'engine', 'js_analyzer.js')
-      : path.join(app.getAppPath(), 'desktop', 'engine', 'analyze.py');
+    const child = execSpawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
 
-    const args = [scriptPath, filePath, '--mode', 'analyze'];
-    console.log(`[IPC:engine:analyze] Command: ${command} | Script: ${scriptPath} | TargetFile: ${filePath} | Args: ${JSON.stringify(args)}`);
-
-    execFile(command, args, (error, stdout, stderr) => {
-      if (stderr) {
-        console.log(`[IPC:engine:analyze][PYTHON_STDERR]\n${stderr}`);
-      }
-      if (stdout) {
-        console.log(`[IPC:engine:analyze][PYTHON_STDOUT]\n${stdout}`);
-      }
-      if (error) {
-        console.error('[IPC:engine:analyze] Subprocess execution error:', stderr || error.message);
-        resolve({
-          error: stderr || error.message,
-          findings: [],
-          causal_luminance: 1.0,
-        });
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', (error) => {
+      console.error('[IPC] Analyze subprocess error:', error.message);
+      resolve({ error: error.message, findings: [], causal_luminance: 1.0 });
+    });
+    child.on('close', (code) => {
+      if (stderr) console.log(`[IPC:engine:analyze][STDERR]\n${stderr}`);
+      if (code !== 0) {
+        resolve({ error: stderr || `Analyzer exited with code ${code}`, findings: [], causal_luminance: 1.0 });
         return;
       }
       try {
-        const jsonResult = JSON.parse(stdout);
-        console.log(`[IPC:engine:analyze] Parsed JSON result: ${jsonResult.ghost_lines_count || 0} findings.`);
-        resolve(jsonResult);
+        resolve(JSON.parse(stdout));
       } catch (parseError) {
-        console.error('[IPC:engine:analyze] Failed to parse analyzer JSON output:', stdout);
-        resolve({
-          error: 'Failed to parse analyzer JSON output',
-          findings: [],
-          causal_luminance: 1.0,
-        });
+        console.error('[IPC] Analyze JSON parse error:', stdout);
+        resolve({ error: 'Failed to parse analyzer JSON output', findings: [], causal_luminance: 1.0 });
       }
     });
+    child.stdin.end(content);
   });
 });
 

@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFolder: () => ipcRenderer.invoke('dialog:open-folder'),
   readDir: (dirPath: string) => ipcRenderer.invoke('fs:read-dir', dirPath),
   readFile: (filePath: string) => ipcRenderer.invoke('fs:read-file', filePath),
-  analyzeFile: (filePath: string) => ipcRenderer.invoke('engine:analyze', filePath),
+  analyzeFile: (payload: { filePath: string; content: string }) => ipcRenderer.invoke('engine:analyze', payload),
   safeRemove: (filePath: string, lines: number[]) => ipcRenderer.invoke('engine:safe-remove', filePath, lines),
   runPythonFile: (filePath: string) => ipcRenderer.invoke('python:run-file', filePath),
   onPythonOutput: (callback: (data: any) => void) => {

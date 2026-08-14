@@ -1,6 +1,4 @@
-def calculate_cart_total(items, discount_code=None, tax_rate=0.08):
     """
-    Calculates total price for cart items with tax, discounts, and shipping.
     Contains AI-generated vacuous identity statements.
     """
 

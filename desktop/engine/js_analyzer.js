@@ -2,12 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const ts = require('typescript');
 
-function analyzeJS(filePath, mode = 'analyze') {
-  if (!fs.existsSync(filePath)) {
+function analyzeJS(filePath, mode = 'analyze', sourceContent) {
+  if (sourceContent === undefined && !fs.existsSync(filePath)) {
     return { error: `File not found: ${filePath}`, findings: [], causal_luminance: 1.0, ghost_lines: 0, total_lines: 0 };
   }
 
-  const code = fs.readFileSync(filePath, 'utf-8');
+  const code = sourceContent === undefined ? fs.readFileSync(filePath, 'utf-8') : sourceContent;
   const lines = code.split('\n');
   const total_lines = lines.length;
 
@@ -226,7 +226,8 @@ function analyzeJS(filePath, mode = 'analyze') {
 
 if (require.main === module) {
   const args = process.argv.slice(2);
-  const filePath = args[0];
+  const usesStdin = args.includes('--stdin');
+  const filePath = usesStdin ? args[args.indexOf('--path') + 1] : args[0];
   const mode = args.includes('--mode') ? args[args.indexOf('--mode') + 1] : 'analyze';
 
   if (!filePath) {
@@ -234,7 +235,7 @@ if (require.main === module) {
     process.exit(1);
   }
 
-  const result = analyzeJS(filePath, mode);
+  const result = analyzeJS(filePath, mode, usesStdin ? fs.readFileSync(0, 'utf-8') : undefined);
   console.log(JSON.stringify(result, null, 2));
 }
 

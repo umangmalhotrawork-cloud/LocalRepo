@@ -98,7 +98,7 @@ declare global {
       readFile: (path: string) => Promise<{ success: boolean; content?: string; error?: string }>;
       writeFile: (path: string, content: string) => Promise<{ success: boolean; error?: string }>;
       fileExists: (path: string) => Promise<{ success: boolean; exists: boolean }>;
-      analyzeFile: (path: string) => Promise<any>;
+      analyzeFile: (payload: { filePath: string; content: string }) => Promise<any>;
       previewSafeRemove: (path: string) => Promise<any>;
       applySafeRemove: (path: string, transformedContent: string) => Promise<any>;
       restoreBackup: (path: string) => Promise<any>;
@@ -571,6 +571,7 @@ export default function IDEApp() {
   const [semanticCloneScanLoading, setSemanticCloneScanLoading] = useState(false);
   const [luminance, setLuminance] = useState<number>(0.0);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [pythonOutput, setPythonOutput] = useState<string>("");
   const [pythonRunning, setPythonRunning] = useState<boolean>(false);
@@ -1026,7 +1027,7 @@ export default function IDEApp() {
           if (tabIndex !== -1) {
             setOpenTabs(prev => prev.map((t, idx) => idx === tabIndex ? { ...t, content: res.restored_content, isDirty: false } : t));
           }
-          runAnalysis(res.file, res.restored_content);
+          runAnalysis({ path: res.file, name: res.file.split("/").pop() || "file", content: res.restored_content, savedContent: res.restored_content, isDirty: false });
         }
         handleRunWorkspaceScan();
         handleLoadWorkspaceGraph();
@@ -1408,7 +1409,7 @@ export default function IDEApp() {
             };
             setOpenTabs([newTab]);
             setActiveTabPath(targetPath);
-            runAnalysis(targetPath, fileRes.content);
+            runAnalysis(newTab);
 
             console.log('[WORKSPACE] scan start', demo.folderPath);
             setWorkspaceLoading(true);
@@ -1554,7 +1555,7 @@ export default function IDEApp() {
 
           setActiveTabPath(activePath);
           const activeTabObj = restoredTabs.find((t) => t.path === activePath) || restoredTabs[0];
-          runAnalysis(activePath, activeTabObj.content);
+          runAnalysis(activeTabObj);
         }
 
         // 4. Background workspace scan & luminance calculation
@@ -1650,6 +1651,10 @@ export default function IDEApp() {
 
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
+
+  // Only the most recent active-tab request may update the shared analysis panel.
+  // This prevents a slower response from a previously selected tab overwriting it.
+  const analysisRequestIdRef = useRef(0);
 
   // Keyboard Shortcuts Listener
   useEffect(() => {
@@ -1756,11 +1761,7 @@ export default function IDEApp() {
       } else if (e.key === "F5") {
         e.preventDefault();
         const currentActive = openTabsRef.current.find(t => t.path === activeTabPathRef.current);
-        if (currentActive && currentActive.path.endsWith(".py")) {
-          handleRunPythonDebugger();
-        } else if (activeTabPathRef.current && currentActive) {
-          runAnalysis(activeTabPathRef.current, currentActive.content);
-        }
+        if (currentActive) runAnalysis(currentActive);
       } else if (isCmd && e.shiftKey && key === "b") {
         e.preventDefault();
         snapshotHook.createSnapshot(
@@ -1991,13 +1992,13 @@ export default function IDEApp() {
     if (existing) {
       setActiveTabPath(filePath);
       restoreTabCursor(filePath);
-      runAnalysis(filePath, existing.content);
+      runAnalysis(existing);
       return;
     }
 
     addLog(`[FS] Reading file from disk: ${fileName}`);
     let content = defaultCartCalculatorCode;
-    if (typeof window !== "undefined" && window.electronAPI && typeof filePath === "string" && !filePath.startsWith("demo-workspaces/")) {
+    if (typeof window !== "undefined" && window.electronAPI && typeof filePath === "string") {
       try {
         console.log('[IDE-APP] handleOpenFile invoking readFile for', filePath);
         const res = await window.electronAPI.readFile(filePath);
@@ -2022,7 +2023,7 @@ export default function IDEApp() {
     setOpenTabs((prev) => [...prev, newTab]);
     setActiveTabPath(filePath);
     restoreTabCursor(filePath);
-    runAnalysis(filePath, content);
+    runAnalysis(newTab);
   };
 
   const restoreTabCursor = (path: string) => {
@@ -2172,7 +2173,7 @@ export default function IDEApp() {
     if (activeTabPath === path && newTabs.length > 0) {
       const nextTab = newTabs[newTabs.length - 1];
       setActiveTabPath(nextTab.path);
-      runAnalysis(nextTab.path, nextTab.content);
+      runAnalysis(nextTab);
     }
   };
 
@@ -2180,7 +2181,7 @@ export default function IDEApp() {
     if (!activeTab || !activeTab.path) return;
     addLog(`[FS] Saving file: ${activeTab.name}`);
 
-    if (typeof window !== "undefined" && window.electronAPI && typeof activeTab.path === "string" && !activeTab.path.startsWith("demo-workspaces/")) {
+    if (typeof window !== "undefined" && window.electronAPI && typeof activeTab.path === "string") {
       try {
         console.log('[IDE-APP] handleSaveFile invoking writeFile for', activeTab.path);
         const res = await window.electronAPI.writeFile(activeTab.path, activeTab.content);
@@ -2224,75 +2225,39 @@ export default function IDEApp() {
     }
   };
 
-  const runAnalysis = async (path: string, content: string) => {
-    if (!path || typeof path !== "string") return;
+  const runAnalysis = async (tab: TabItem) => {
+    if (!tab?.path) return;
+    const { path, content } = tab;
+    const requestId = ++analysisRequestIdRef.current;
     setAnalyzing(true);
+    setAnalysisError(null);
     addLog(`[ENGINE] Running Python analyzer on ${path}...`);
-    console.log(`[RENDERER:runAnalysis] Active Tab Path: ${path} | Buffer Length: ${content ? content.length : 0}`);
+    const bytes = new TextEncoder().encode(content).length;
+    console.log(`[RENDERER] Analyze path=${path} bytes=${bytes}`);
 
-    if (typeof window !== "undefined" && window.electronAPI && typeof path === "string") {
-      try {
-        console.log('[RENDERER:runAnalysis] Invoking electronAPI.saveFile & analyzeFile for', path);
-        if ((window as any).electronAPI.saveFile) {
-          try {
-            await (window as any).electronAPI.saveFile(path, content);
-            console.log('[RENDERER:runAnalysis] Disk save completed prior to analysis.');
-          } catch (saveErr) {
-            console.warn('[RENDERER:runAnalysis] Disk save ignored/failed:', saveErr);
-          }
-        }
-        const res = await window.electronAPI.analyzeFile(path);
-        console.log('[RENDERER:runAnalysis] IPC response received:', res);
-        if (res && res.findings) {
-          setFindings(res.findings);
-          setLuminance(res.causal_luminance !== undefined ? res.causal_luminance : (res.findings.length > 0 ? 0.0 : 1.0));
-          addLog(`[ENGINE] Analysis complete: ${res.findings.length} ghost lines detected.`);
-        }
-      } catch (err) {
-        console.error("[RENDERER:runAnalysis] Error running AST analysis:", err);
+    try {
+      if (typeof window === "undefined" || !window.electronAPI?.analyzeFile) {
+        throw new Error("Electron analysis bridge is unavailable.");
       }
-    } else {
-      const lines = content.split("\n");
-      const clientFindings: Finding[] = [];
-      lines.forEach((l, i) => {
-        const trimmed = l.trim();
-        if (/(\*\s*1|\+\s*0|-\s*0|\/\s*1)/.test(trimmed)) {
-          clientFindings.push({
-            line: i + 1,
-            code: trimmed,
-            title: "Identity Operation",
-            reason: "Mathematical identity operation detected.",
-            luminance: 0.0,
-            status: "Verified Ghost Line",
-            category: "arithmetic_identity",
-          });
-        } else if (/^\s*([a-zA-Z_]\w*)\s*=\s*\1\s*$/.test(trimmed)) {
-          clientFindings.push({
-            line: i + 1,
-            code: trimmed,
-            title: "Vacuous Self-Assignment",
-            reason: "Variable is assigned to itself with zero state leverage.",
-            luminance: 0.0,
-            status: "Verified Ghost Line",
-            category: "vacuous_self_assignment",
-          });
-        } else if (/(gravity|velocity_y|position_y|jump_force)/i.test(trimmed) && (/(=\s*0|gravity\s*\*=\s*-1|velocity_y\s*\+=\s*gravity|position_y\s*-=\s*gravity|\*=\s*-1)/i.test(trimmed))) {
-          clientFindings.push({
-            line: i + 1,
-            code: trimmed,
-            title: "Potential Anti-Gravity Behavior",
-            reason: "Anti-gravity physics anomaly pattern detected.",
-            luminance: 0.05,
-            status: "Physics Anomaly",
-            category: "anti_gravity",
-          });
-        }
-      });
-      setFindings(clientFindings);
-      setLuminance(clientFindings.length > 0 ? 0.0 : 1.0);
-      addLog(`[ENGINE] Analysis complete: ${clientFindings.length} ghost lines detected.`);
+      const res = await window.electronAPI.analyzeFile({ filePath: path, content });
+      if (!res || res.error) throw new Error(res?.error || "Analyzer returned no result.");
+      if (!Array.isArray(res.findings)) throw new Error("Analyzer returned an invalid findings payload.");
+      if (requestId !== analysisRequestIdRef.current) return;
+
+      setFindings(res.findings);
+      setLuminance(res.causal_luminance !== undefined ? res.causal_luminance : (res.findings.length > 0 ? 0.0 : 1.0));
+      addLog(`[ENGINE] Analysis complete: ${res.findings.length} ghost lines detected.`);
+    } catch (err: any) {
+      if (requestId !== analysisRequestIdRef.current) return;
+      const message = err?.message || String(err);
+      console.error("[RENDERER] Analysis failed:", message);
+      setFindings([]);
+      setLuminance(1.0);
+      setAnalysisError(message);
+      addLog(`[ENGINE] Analysis failed: ${message}`);
+    } finally {
+      if (requestId === analysisRequestIdRef.current) setAnalyzing(false);
     }
-    setAnalyzing(false);
   };
 
   const handleRunWorkspaceScan = async () => {
@@ -3366,7 +3331,7 @@ export default function IDEApp() {
       setShowSurgeryDiffModal(false);
 
       // 1. Rerun single-file AST analysis
-      runAnalysis(activeTab.path, transformedContent);
+      runAnalysis({ ...activeTab, content: transformedContent, savedContent: transformedContent, isDirty: false });
 
       // 2. Refresh workspace dashboard, luminance, clones, semantics, and graph
       if (folderPath) {
@@ -3421,7 +3386,7 @@ export default function IDEApp() {
       setUndoAvailableForFile((prev) => ({ ...prev, [activeTab.path]: false }));
 
       // 1. Rerun AST analysis
-      runAnalysis(activeTab.path, restoredContent);
+      runAnalysis({ ...activeTab, content: restoredContent, savedContent: restoredContent, isDirty: false });
 
       // 2. Refresh workspace metrics & scans
       if (folderPath) {
@@ -3988,7 +3953,7 @@ export default function IDEApp() {
 
           {/* 9. Tomography / Run */}
           <button
-            onClick={() => activeTabPath && runAnalysis(activeTabPath, activeTab.content)}
+            onClick={() => activeTab && runAnalysis(activeTab)}
             disabled={analyzing}
             aria-label="Run Causal Tomography (F5)"
             className="min-h-[28px] px-2.5 py-1 rounded-lg bg-purple-950/80 hover:bg-purple-900 border border-purple-500/40 text-purple-300 font-bold text-xs flex items-center gap-1 transition-all shadow-sm cursor-pointer disabled:opacity-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-purple-400 shrink-0"
@@ -4334,7 +4299,7 @@ export default function IDEApp() {
                       onClick={() => {
                         setActiveTabPath(tab.path);
                         restoreTabCursor(tab.path);
-                        runAnalysis(tab.path, tab.content);
+                        runAnalysis(tab);
                       }}
                       className={`group px-3 py-1 rounded-t-lg flex items-center gap-2 cursor-pointer transition-all ${
                         activeTabPath === tab.path
@@ -4410,7 +4375,7 @@ export default function IDEApp() {
                       onClick={() => {
                         setActiveTabPath(tab.path);
                         restoreTabCursor(tab.path);
-                        runAnalysis(tab.path, tab.content);
+                        runAnalysis(tab);
                       }}
                       className={`group px-3 py-1 rounded-t-lg flex items-center gap-2 cursor-pointer transition-all ${
                         activeTabPath === tab.path
@@ -4508,7 +4473,7 @@ export default function IDEApp() {
                       setActiveTabPath(tab.path);
                       setMainView("editor");
                       restoreTabCursor(tab.path);
-                      runAnalysis(tab.path, tab.content);
+                      runAnalysis(tab);
                     }}
                     className={`group px-3 py-1 rounded-t-lg flex items-center gap-2 cursor-pointer transition-all ${
                       activeTabPath === tab.path
@@ -5090,7 +5055,7 @@ export default function IDEApp() {
                       })
                     ) : (
                       <div className="p-4 bg-[#050505] rounded-xl border border-[#1f1f1f] text-center text-zinc-500 text-xs font-mono">
-                        No vacuous ghost lines detected. Code is causally optimal.
+                        {analysisError ? `Analysis failed: ${analysisError}` : "No vacuous ghost lines detected. Code is causally optimal."}
                       </div>
                     )}
                   </div>
@@ -5456,7 +5421,7 @@ export default function IDEApp() {
         isOpen={cmdPaletteOpen}
         onClose={() => setCmdPaletteOpen(false)}
         onOpenFolder={handleOpenFolder}
-        onRunTomography={() => activeTabPath && runAnalysis(activeTabPath, activeTab.content)}
+        onRunTomography={() => activeTab && runAnalysis(activeTab)}
         onApplySafeRemove={handleOpenDiffPreview}
         onRestoreBackup={handleUndoSurgery}
         onToggleExplorer={() => setShowExplorer((prev) => !prev)}
