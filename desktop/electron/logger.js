@@ -13,12 +13,32 @@ class Logger {
   }
 
   getLogDir() {
+    if (this && this.logDir) {
+      return this.logDir;
+    }
+    if (process.env.ECHO_LOGS_DIR) {
+      return process.env.ECHO_LOGS_DIR;
+    }
+    let defaultDir = '';
     if (process.platform === 'darwin') {
-      return path.join(os.homedir(), 'Library', 'Application Support', 'echo-nullity', 'logs');
+      defaultDir = path.join(os.homedir(), 'Library', 'Application Support', 'echo-nullity', 'logs');
     } else if (process.platform === 'win32') {
-      return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'echo-nullity', 'logs');
+      defaultDir = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'echo-nullity', 'logs');
     } else {
-      return path.join(os.homedir(), '.config', 'echo-nullity', 'logs');
+      defaultDir = path.join(os.homedir(), '.config', 'echo-nullity', 'logs');
+    }
+    try {
+      if (!fs.existsSync(defaultDir)) {
+        fs.mkdirSync(defaultDir, { recursive: true });
+      }
+      const testFile = path.join(defaultDir, '.write-test');
+      fs.writeFileSync(testFile, 'ok');
+      fs.unlinkSync(testFile);
+      return defaultDir;
+    } catch (e) {
+      const fallback = path.join(process.cwd(), '.echo-nullity-logs');
+      try { fs.mkdirSync(fallback, { recursive: true }); } catch (_) {}
+      return fallback;
     }
   }
 
@@ -67,7 +87,17 @@ class Logger {
     try {
       fs.appendFileSync(this.mainLogFile, line, 'utf8');
     } catch (e) {
-      console.error('[LOGGER] Write failed:', e);
+      if (e.code === 'EPERM' || e.code === 'EACCES') {
+        const fallback = path.join(process.cwd(), '.echo-nullity-logs');
+        try { fs.mkdirSync(fallback, { recursive: true }); } catch (_) {}
+        this.logDir = fallback;
+        this.mainLogFile = path.join(this.logDir, 'app.log');
+        try {
+          fs.appendFileSync(this.mainLogFile, line, 'utf8');
+        } catch (_) {}
+      } else {
+        console.error('[LOGGER] Write failed:', e);
+      }
     }
 
     if (level === 'error') {

@@ -119,9 +119,9 @@
 }
 
 .ghost-code-line-text {
-  opacity: 0.35 !important;
+  opacity: 0.65 !important;
   text-decoration: line-through !important;
-  text-decoration-color: rgba(34, 211, 238, 0.6) !important;
+  text-decoration-color: rgba(34, 211, 238, 0.7) !important;
 }
 
 .ghost-code-glyph {

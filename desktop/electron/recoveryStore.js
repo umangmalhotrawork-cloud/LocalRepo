@@ -11,23 +11,46 @@ class RecoveryStore {
   }
 
   getUserDataPath() {
+    if (process.env.ECHO_RECOVERY_DIR) {
+      return process.env.ECHO_RECOVERY_DIR;
+    }
     try {
       if (app && typeof app.getPath === 'function') {
-        return app.getPath('userData');
+        const appPath = app.getPath('userData');
+        if (appPath) return appPath;
       }
     } catch (e) {}
 
     // Fallback standard location
     const homeDir = os.homedir();
-    return path.join(homeDir, 'Library', 'Application Support', 'echo-nullity');
+    const defaultDir = path.join(homeDir, 'Library', 'Application Support', 'echo-nullity');
+    try {
+      if (!fs.existsSync(defaultDir)) {
+        fs.mkdirSync(defaultDir, { recursive: true });
+      }
+      const testFile = path.join(defaultDir, '.write-test');
+      fs.writeFileSync(testFile, 'ok');
+      fs.unlinkSync(testFile);
+      return defaultDir;
+    } catch (e) {
+      const fallback = path.join(process.cwd(), '.echo-nullity-recovery');
+      try { fs.mkdirSync(fallback, { recursive: true }); } catch (_) {}
+      return fallback;
+    }
   }
 
   getRecoveryDir() {
     const dir = path.join(this.getUserDataPath(), 'recovery');
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    try {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      return dir;
+    } catch (e) {
+      const fallback = path.join(process.cwd(), '.echo-nullity-recovery');
+      try { fs.mkdirSync(fallback, { recursive: true }); } catch (_) {}
+      return fallback;
     }
-    return dir;
   }
 
   getSessionStatePath() {

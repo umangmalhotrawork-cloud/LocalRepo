@@ -10,12 +10,32 @@ class CrashReporter {
   }
 
   getCrashDir() {
+    if (this && this.crashDir) {
+      return this.crashDir;
+    }
+    if (process.env.ECHO_CRASH_DIR) {
+      return process.env.ECHO_CRASH_DIR;
+    }
+    let defaultDir = '';
     if (process.platform === 'darwin') {
-      return path.join(os.homedir(), 'Library', 'Application Support', 'echo-nullity', 'crashes');
+      defaultDir = path.join(os.homedir(), 'Library', 'Application Support', 'echo-nullity', 'crashes');
     } else if (process.platform === 'win32') {
-      return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'echo-nullity', 'crashes');
+      defaultDir = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'echo-nullity', 'crashes');
     } else {
-      return path.join(os.homedir(), '.config', 'echo-nullity', 'crashes');
+      defaultDir = path.join(os.homedir(), '.config', 'echo-nullity', 'crashes');
+    }
+    try {
+      if (!fs.existsSync(defaultDir)) {
+        fs.mkdirSync(defaultDir, { recursive: true });
+      }
+      const testFile = path.join(defaultDir, '.write-test');
+      fs.writeFileSync(testFile, 'ok');
+      fs.unlinkSync(testFile);
+      return defaultDir;
+    } catch (e) {
+      const fallback = path.join(process.cwd(), '.echo-nullity-crashes');
+      try { fs.mkdirSync(fallback, { recursive: true }); } catch (_) {}
+      return fallback;
     }
   }
 
@@ -60,12 +80,22 @@ class CrashReporter {
       },
     };
 
-    const filePath = path.join(this.crashDir, `${crashId}.json`);
+    let filePath = path.join(this.crashDir, `${crashId}.json`);
     try {
       fs.writeFileSync(filePath, JSON.stringify(report, null, 2), 'utf8');
       logger.error('CRASH_REPORTER', `Crash report written: ${crashId}`, { crashId, error: report.error.message });
     } catch (e) {
-      console.error('[CRASH_REPORTER] Failed to save crash report:', e);
+      if (e.code === 'EPERM' || e.code === 'EACCES') {
+        const fallback = path.join(process.cwd(), '.echo-nullity-crashes');
+        try { fs.mkdirSync(fallback, { recursive: true }); } catch (_) {}
+        this.crashDir = fallback;
+        filePath = path.join(this.crashDir, `${crashId}.json`);
+        try {
+          fs.writeFileSync(filePath, JSON.stringify(report, null, 2), 'utf8');
+        } catch (_) {}
+      } else {
+        console.error('[CRASH_REPORTER] Failed to save crash report:', e);
+      }
     }
 
     return report;

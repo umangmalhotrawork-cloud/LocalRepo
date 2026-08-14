@@ -32,3 +32,4 @@ __pycache__/
 *.pyc
 tsconfig.tsbuildinfo
 demo-workspaces/**/exports/
+.echo-nullity-*

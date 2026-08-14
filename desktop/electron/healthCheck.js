@@ -1,8 +1,8 @@
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const { execSync } = require('child_process');
 const { logger } = require('./logger');
+const { snapshotManager } = require('./snapshotManager');
 
 class HealthChecker {
   async runStartupHealthCheck() {
@@ -19,7 +19,7 @@ class HealthChecker {
 
     // 1. Snapshot Store Writable Check
     try {
-      const snapDir = path.join(os.homedir(), 'Library', 'Application Support', 'echo-nullity', 'snapshots');
+      const snapDir = snapshotManager.getStorageDir();
       fs.mkdirSync(snapDir, { recursive: true });
       const testFile = path.join(snapDir, '.health_test');
       fs.writeFileSync(testFile, 'ok', 'utf8');
@@ -31,7 +31,7 @@ class HealthChecker {
 
     // 2. Recovery Store Writable Check
     try {
-      const recDir = path.join(os.homedir(), 'Library', 'Application Support', 'echo-nullity');
+      const recDir = path.dirname(snapshotManager.getStorageDir());
       fs.mkdirSync(recDir, { recursive: true });
       const testFile = path.join(recDir, '.health_test');
       fs.writeFileSync(testFile, 'ok', 'utf8');

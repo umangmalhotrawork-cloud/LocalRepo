@@ -27,12 +27,32 @@ class SnapshotManager {
   }
 
   getStorageDir() {
+    if (this && this.storageBaseDir) {
+      return this.storageBaseDir;
+    }
+    if (process.env.ECHO_SNAPSHOT_DIR) {
+      return process.env.ECHO_SNAPSHOT_DIR;
+    }
+    let defaultDir = '';
     if (process.platform === 'darwin') {
-      return path.join(os.homedir(), 'Library', 'Application Support', 'echo-nullity', 'snapshots');
+      defaultDir = path.join(os.homedir(), 'Library', 'Application Support', 'echo-nullity', 'snapshots');
     } else if (process.platform === 'win32') {
-      return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'echo-nullity', 'snapshots');
+      defaultDir = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'echo-nullity', 'snapshots');
     } else {
-      return path.join(os.homedir(), '.config', 'echo-nullity', 'snapshots');
+      defaultDir = path.join(os.homedir(), '.config', 'echo-nullity', 'snapshots');
+    }
+    try {
+      if (!fs.existsSync(defaultDir)) {
+        fs.mkdirSync(defaultDir, { recursive: true });
+      }
+      const testFile = path.join(defaultDir, '.write-test');
+      fs.writeFileSync(testFile, 'ok');
+      fs.unlinkSync(testFile);
+      return defaultDir;
+    } catch (e) {
+      const fallback = path.join(process.cwd(), '.echo-nullity-snapshots');
+      try { fs.mkdirSync(fallback, { recursive: true }); } catch (_) {}
+      return fallback;
     }
   }
 
