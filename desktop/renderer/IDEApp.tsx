@@ -9,7 +9,7 @@ import {
   Terminal as TerminalIcon, Zap, X, Check, Save, RotateCcw, ArrowRight, 
   Command, Search, Cpu, Layers, Activity, BarChart3, CheckCircle2, AlertTriangle, ShieldCheck, ShieldAlert,
   LayoutDashboard, Clock, FileSearch, Network, Download, Flame, Sun, Moon, Copy, GitPullRequest, GitBranch, Compass, Globe, FileCode, Bug, Bot, FlaskConical,
-  History as HistoryIcon, Camera
+  History as HistoryIcon, Camera, Square, StepForward
 } from "lucide-react";
 
 import ConfirmDialog from "./components/ConfirmDialog";
@@ -46,6 +46,7 @@ import PatchFirewallPanel, { PatchFirewallReport } from "./components/PatchFirew
 import RepositoryPatchFirewallPanel, { RepositoryPatchFirewallReport } from "./components/RepositoryPatchFirewallPanel";
 import SemanticIntentRadarPanel, { SemanticIntentDriftReport } from "./components/SemanticIntentRadarPanel";
 import RecoveryDialog from "./components/RecoveryDialog";
+import BDGInspectorPanel from "./components/BDGInspectorPanel";
 import TestExplorerPanel from "./components/TestExplorerPanel";
 import { useTests, TestCase } from "./hooks/useTests";
 import ProfilerPanel from "./components/ProfilerPanel";
@@ -564,7 +565,7 @@ export default function IDEApp() {
   const [counterfactualResult, setCounterfactualResult] = useState<any>(null);
   const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
   const [startupModalOpen, setStartupModalOpen] = useState(false);
-  const [rightPanelTab, setRightPanelTab] = useState<"file" | "project" | "clones" | "semantic">("file");
+  const [rightPanelTab, setRightPanelTab] = useState<"file" | "project" | "clones" | "semantic" | "bdg">("file");
   const [structuralCloneGroups, setStructuralCloneGroups] = useState<StructuralCloneGroup[]>([]);
   const [structuralCloneLoading, setStructuralCloneLoading] = useState(false);
   const [semanticCloneGroups, setSemanticCloneGroups] = useState<SemanticCloneGroup[]>([]);
@@ -580,6 +581,9 @@ export default function IDEApp() {
   const [showTerminalPanel, setShowTerminalPanel] = useState<boolean>(false);
   const [analysisMenuOpen, setAnalysisMenuOpen] = useState<boolean>(false);
   const [terminalPanelMode, setTerminalPanelMode] = useState<"terminal" | "output" | "debug">("terminal");
+  const [showRightPanel, setShowRightPanel] = useState<boolean>(false);
+  const [activeActivity, setActiveActivity] = useState<"explorer" | "search" | "git" | "debug" | "analysis" | null>(null);
+  const [moreMenuOpen, setMoreMenuOpen] = useState<boolean>(false);
 
   const {
     tabs: terminalTabs,
@@ -1107,7 +1111,7 @@ export default function IDEApp() {
   const [closeConfirmTab, setCloseConfirmTab] = useState<TabItem | null>(null);
 
   // Pane Visibility & Resizing
-  const [showExplorer, setShowExplorer] = useState(true);
+  const [showExplorer, setShowExplorer] = useState(false);
   const [showConsole, setShowConsole] = useState(true);
   const [explorerWidth, setExplorerWidth] = useState(240);
   const [analysisWidth, setAnalysisWidth] = useState(300);
@@ -2152,6 +2156,9 @@ export default function IDEApp() {
         return t;
       })
     );
+    if (activeTabPath && typeof window !== "undefined" && (window as any).electronAPI?.updateBDGFile) {
+      (window as any).electronAPI.updateBDGFile(activeTabPath, val);
+    }
   };
 
   const handleCloseTab = (path: string, e?: React.MouseEvent) => {
@@ -3655,37 +3662,22 @@ export default function IDEApp() {
   if (typeof window !== "undefined") {
     console.log(`[P-METRICS] window=${window.innerWidth} root=${rootRef.current?.clientWidth} row=${contentRowRef.current?.clientWidth} exp=${explorerPanelRef.current?.clientWidth} edit=${editorPaneRef.current?.clientWidth} ana=${analysisPanelRef.current?.clientWidth} mon=${monacoWrapperRef.current?.clientWidth}`);
   }
-
-  return (
+return (
     <div ref={rootRef} style={{ width: "100vw", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }} className="flex flex-col h-screen w-screen bg-[#050505] text-white font-sans overflow-hidden select-none relative">
       
       {/* Animated Top Edge Cyan Scanline */}
       <div className="top-scanline" />
 
       {/* 1. Header Navigation Bar */}
-      <header className="h-12 bg-[#0a0a0d] border-b border-[#1f1f24] flex items-center justify-between px-3 text-xs font-mono shrink-0 z-20 shadow-md min-w-0 w-full select-none gap-2">
+      <header className="h-11 bg-[#0a0a0d] border-b border-[#1f1f24] flex items-center justify-between px-3 text-xs font-mono shrink-0 z-20 shadow-md min-w-0 w-full select-none gap-2">
         {/* Left Zone: Branding + Primary File Operations */}
-        <div className="flex-none shrink-0 flex items-center gap-1.5">
-          <div className="flex items-center gap-1.5 pr-1">
+        <div className="flex-none shrink-0 flex items-center gap-2">
+          <div className="flex items-center gap-1.5 pr-2 border-r border-[#1f1f24]">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping shrink-0" />
             <span className="font-heading font-bold text-xs text-white tracking-tight whitespace-nowrap">
               Echo Nullity
             </span>
           </div>
-
-          <button
-            onClick={() => setShowExplorer((prev) => !prev)}
-            aria-label="Toggle File Explorer sidebar"
-            className={`min-w-[28px] min-h-[28px] px-2 py-1 rounded-lg border text-xs flex items-center gap-1 transition-all cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
-              showExplorer
-                ? "bg-[#181820] text-cyan-300 border-cyan-500/40 font-bold"
-                : "bg-[#121216] text-zinc-400 border-[#24242e] hover:text-white"
-            }`}
-            title="Toggle File Explorer"
-          >
-            <FolderTree className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span className="hidden sm:inline">Explorer</span>
-          </button>
 
           <button
             onClick={handleOpenFolder}
@@ -3708,404 +3700,270 @@ export default function IDEApp() {
           </button>
         </div>
 
-        {/* Center Zone: Streamlined Primary Actions + Analysis Dropdown */}
-        <div className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto no-scrollbar scrollbar-none [&::-webkit-scrollbar]:hidden py-1">
-          
-          {/* 1. Analysis Dropdown (Consolidates 9 deep static analysis tools) */}
-          <div className="relative shrink-0">
+        {/* Center Zone: Quiet Contextual Execution Control */}
+        <div className="flex-1 min-w-0 flex items-center justify-center gap-2 py-1">
+          {/* Contextual Execution Control */}
+          {debugRunning || debugPanelOpen ? (
+            <div className="flex items-center gap-1 bg-cyan-950/80 p-0.5 rounded-lg border border-cyan-500/40 shrink-0">
+              <button
+                onClick={() => setDebugPanelOpen(false)}
+                className="px-2 py-0.5 rounded bg-red-950 hover:bg-red-900 text-red-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                title="Stop Debugging"
+              >
+                <Square className="w-3 h-3 text-red-400 fill-red-400" />
+                <span>Stop</span>
+              </button>
+              <button
+                onClick={() => handleRunPythonDebugger()}
+                className="px-2 py-0.5 rounded bg-cyan-900 hover:bg-cyan-800 text-cyan-200 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                title="Restart Debugging"
+              >
+                <RotateCcw className="w-3 h-3 text-cyan-300" />
+                <span>Restart</span>
+              </button>
+              <button
+                onClick={() => {
+                  if (debugSteps.length > 0) {
+                    setDebugIndex((idx) => Math.min(debugSteps.length - 1, idx + 1));
+                  }
+                }}
+                className="px-2 py-0.5 rounded bg-cyan-900 hover:bg-cyan-800 text-cyan-200 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                title="Step Over (F10)"
+              >
+                <StepForward className="w-3 h-3 text-cyan-300" />
+                <span>Step ({debugSteps.length > 0 ? `${debugIndex + 1}/${debugSteps.length}` : 0})</span>
+              </button>
+            </div>
+          ) : (
             <button
-              onClick={() => setAnalysisMenuOpen((prev) => !prev)}
-              aria-label="Toggle Analysis Tools Menu"
-              className={`min-h-[28px] px-2.5 py-1 rounded-lg border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
-                [
-                  "dashboard", "graph", "clones", "semantic_clones", "luminance",
-                  "behavior_fingerprint", "patch_firewall", "repository_patch_firewall", "semantic_intent_radar"
-                ].includes(mainView)
-                  ? "bg-purple-950 text-purple-300 border-purple-500/50 shadow-purple-glow"
-                  : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-purple-300"
-              }`}
+              type="button"
+              onClick={(e) => {
+                if (activeTab && activeTab.path.endsWith(".py")) {
+                  handleExecutePython(e);
+                } else {
+                  runAnalysis(activeTab || undefined);
+                }
+              }}
+              disabled={pythonRunning || analyzing}
+              aria-label="Run active file"
+              className="min-h-[28px] px-3.5 py-1 rounded-lg bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-300 font-bold text-xs flex items-center gap-1.5 transition-all shadow-emerald-glow cursor-pointer disabled:opacity-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400 shrink-0"
+              title="Run Code (F5)"
             >
-              <Sparkles className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-              <span>Analysis</span>
-              <ChevronDown className={`w-3 h-3 text-purple-400 transition-transform ${analysisMenuOpen ? "rotate-180" : ""}`} />
+              <Play className="w-3.5 h-3.5 fill-emerald-300 text-emerald-300 shrink-0" />
+              <span>
+                {pythonRunning
+                  ? "Running..."
+                  : activeTab?.path.endsWith(".py")
+                  ? "Run Python"
+                  : activeTab?.path.match(/\.(js|ts|jsx|tsx)$/)
+                  ? "Run JavaScript"
+                  : "Run"}
+              </span>
             </button>
+          )}
+        </div>
 
-            {analysisMenuOpen && (
-              <div className="absolute top-full left-0 mt-1 w-64 bg-[#0a0a0d] border border-[#1f1f24] rounded-xl shadow-2xl z-50 p-1.5 space-y-1 font-mono text-xs animate-fade-in">
-                <div className="px-2 py-1 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-                  Causal Engines &amp; Workspaces
-                </div>
-                
-                <button
-                  onClick={() => {
-                    setMainView(mainView === "dashboard" ? "editor" : "dashboard");
-                    setAnalysisMenuOpen(false);
-                  }}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
-                    mainView === "dashboard" ? "bg-purple-950/80 text-purple-300 font-bold" : "hover:bg-[#141418] text-zinc-300"
-                  }`}
-                >
-                  <LayoutDashboard className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                  <span>Workspace Dashboard</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setMainView(mainView === "graph" ? "editor" : "graph");
-                    if (!workspaceGraph) handleLoadWorkspaceGraph();
-                    setAnalysisMenuOpen(false);
-                  }}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
-                    mainView === "graph" ? "bg-cyan-950/80 text-cyan-300 font-bold" : "hover:bg-[#141418] text-zinc-300"
-                  }`}
-                >
-                  <Network className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                  <span>Provenance Graph</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setMainView(mainView === "clones" ? "editor" : "clones");
-                    if (!cloneReport) handleRunCloneScan();
-                    setAnalysisMenuOpen(false);
-                  }}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
-                    mainView === "clones" ? "bg-pink-950/80 text-pink-300 font-bold" : "hover:bg-[#141418] text-zinc-300"
-                  }`}
-                >
-                  <Layers className="w-3.5 h-3.5 text-pink-400 shrink-0" />
-                  <span>Structural Clones</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setMainView(mainView === "semantic_clones" ? "editor" : "semantic_clones");
-                    if (!semanticCloneReport) handleRunSemanticCloneScan();
-                    setAnalysisMenuOpen(false);
-                  }}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
-                    mainView === "semantic_clones" ? "bg-cyan-950/80 text-cyan-300 font-bold" : "hover:bg-[#141418] text-zinc-300"
-                  }`}
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                  <span>Semantic Clones</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setMainView(mainView === "luminance" ? "editor" : "luminance");
-                    if (!luminanceReport) handleRunLuminanceScan();
-                    setAnalysisMenuOpen(false);
-                  }}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
-                    mainView === "luminance" ? "bg-amber-950/80 text-amber-300 font-bold" : "hover:bg-[#141418] text-zinc-300"
-                  }`}
-                >
-                  <Flame className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>Causal Luminance</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setMainView(mainView === "behavior_fingerprint" ? "editor" : "behavior_fingerprint");
-                    if (!fingerprintReport) handleGenerateFingerprint();
-                    setAnalysisMenuOpen(false);
-                  }}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
-                    mainView === "behavior_fingerprint" ? "bg-cyan-950/80 text-cyan-300 font-bold" : "hover:bg-[#141418] text-zinc-300"
-                  }`}
-                >
-                  <Cpu className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                  <span>Behavioral Fingerprint</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setMainView(mainView === "patch_firewall" ? "editor" : "patch_firewall");
-                    setAnalysisMenuOpen(false);
-                  }}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
-                    mainView === "patch_firewall" ? "bg-red-950/80 text-red-300 font-bold" : "hover:bg-[#141418] text-zinc-300"
-                  }`}
-                >
-                  <ShieldCheck className="w-3.5 h-3.5 text-red-400 shrink-0" />
-                  <span>AI Patch Firewall</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setMainView(mainView === "repository_patch_firewall" ? "editor" : "repository_patch_firewall");
-                    setAnalysisMenuOpen(false);
-                  }}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
-                    mainView === "repository_patch_firewall" ? "bg-rose-950/80 text-rose-300 font-bold" : "hover:bg-[#141418] text-zinc-300"
-                  }`}
-                >
-                  <GitPullRequest className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                  <span>Repository Patch Defense</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setMainView(mainView === "semantic_intent_radar" ? "editor" : "semantic_intent_radar");
-                    setAnalysisMenuOpen(false);
-                  }}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 transition-all cursor-pointer ${
-                    mainView === "semantic_intent_radar" ? "bg-amber-950/80 text-amber-300 font-bold" : "hover:bg-[#141418] text-zinc-300"
-                  }`}
-                >
-                  <Compass className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>Semantic Intent Radar</span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* 2. Search */}
-          <button
-            onClick={() => setMainView(mainView === "search" ? "editor" : "search")}
-            aria-label="Workspace Search (Command+Shift+F)"
-            className={`min-h-[28px] px-2 py-1 rounded-lg border text-xs flex items-center gap-1 transition-all cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
-              mainView === "search"
-                ? "bg-purple-950 text-purple-300 border-purple-500/50 font-bold"
-                : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-purple-300"
-            }`}
-            title="Search & Replace (⌘⇧F)"
-          >
-            <Search className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-            <span className="hidden sm:inline">Search</span>
-            {search.totalMatches > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-purple-900 text-purple-300 text-[9px] font-bold">
-                {search.totalMatches}
-              </span>
-            )}
-          </button>
-
-          {/* 3. Source Control */}
-          <button
-            onClick={() => setMainView(mainView === "source_control" ? "editor" : "source_control")}
-            aria-label="Git Source Control (Command+Shift+G)"
-            className={`min-h-[28px] px-2 py-1 rounded-lg border text-xs flex items-center gap-1 transition-all cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
-              mainView === "source_control"
-                ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold"
-                : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-zinc-300"
-            }`}
-            title="Source Control (⌘⇧G)"
-          >
-            <GitBranch className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span className="hidden sm:inline">Git</span>
-            {git.isRepo && (git.staged.length + git.unstaged.length + git.untracked.length > 0) && (
-              <span className="px-1.5 py-0.2 rounded-full bg-cyan-900 text-cyan-300 text-[9px] font-bold">
-                {git.staged.length + git.unstaged.length + git.untracked.length}
-              </span>
-            )}
-          </button>
-
-          {/* 4. Tests */}
-          <button
-            onClick={() => setMainView(mainView === "test_explorer" ? "editor" : "test_explorer")}
-            aria-label="Test Explorer & Coverage (Command+Shift+T)"
-            className={`min-h-[28px] px-2 py-1 rounded-lg border text-xs flex items-center gap-1 transition-all cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
-              mainView === "test_explorer"
-                ? "bg-emerald-950 text-emerald-300 border-emerald-500/50 font-bold"
-                : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-emerald-300"
-            }`}
-            title="Tests (⌘⇧T / F6)"
-          >
-            <FlaskConical className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span className="hidden sm:inline">Tests</span>
-            {testsHook.totalTests > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-emerald-900 text-emerald-300 text-[9px] font-bold">
-                {testsHook.totalTests}
-              </span>
-            )}
-          </button>
-
-          {/* 5. Profiler */}
-          <button
-            onClick={() => setMainView(mainView === "profiler" ? "editor" : "profiler")}
-            aria-label="Performance Profiler (Command+Shift+P)"
-            className={`min-h-[28px] px-2 py-1 rounded-lg border text-xs flex items-center gap-1 transition-all cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
-              mainView === "profiler"
-                ? "bg-amber-950 text-amber-300 border-amber-500/50 font-bold"
-                : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-amber-300"
-            }`}
-            title="Profiler (⌘⇧P / F7)"
-          >
-            <Flame className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span className="hidden sm:inline">Profiler</span>
-          </button>
-
-          {/* 6. Security */}
-          <button
-            onClick={() => setMainView(mainView === "security_audit" ? "editor" : "security_audit")}
-            aria-label="Security & CVE Audit (Command+Shift+S)"
-            className={`min-h-[28px] px-2 py-1 rounded-lg border text-xs flex items-center gap-1 transition-all cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
-              mainView === "security_audit"
-                ? "bg-red-950 text-red-300 border-red-500/50 font-bold"
-                : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-red-300"
-            }`}
-            title="Security Audit (⌘⇧S)"
-          >
-            <ShieldAlert className="w-3.5 h-3.5 text-red-400 shrink-0" />
-            <span className="hidden sm:inline">Security</span>
-            {(securityAudit.summary.critical + securityAudit.summary.high > 0) && (
-              <span className="px-1.5 py-0.2 rounded-full bg-red-900 text-red-300 text-[9px] font-bold">
-                {securityAudit.summary.critical + securityAudit.summary.high}
-              </span>
-            )}
-          </button>
-
-          {/* 7. Snapshots */}
-          <button
-            onClick={() => setMainView(mainView === "snapshots" ? "editor" : "snapshots")}
-            aria-label="Workspace Snapshots & Checkpoints (Command+Shift+B)"
-            className={`min-h-[28px] px-2 py-1 rounded-lg border text-xs flex items-center gap-1 transition-all cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
-              mainView === "snapshots"
-                ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold"
-                : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-cyan-300"
-            }`}
-            title="Snapshots (⌘⇧B)"
-          >
-            <HistoryIcon className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span className="hidden sm:inline">Snapshots</span>
-          </button>
-
-          {/* 8. AI Agent Mode */}
+        {/* Right Zone: AI, Command Palette & More Menu */}
+        <div className="flex-none shrink-0 ml-auto flex items-center gap-1.5">
+          {/* AI Action */}
           <button
             onClick={() => setAgentPanelOpen((prev) => !prev)}
-            aria-label="Toggle Autonomous AI Agent Mode (Command+Shift+I)"
-            className={`min-h-[28px] px-2 py-1 rounded-lg border text-xs flex items-center gap-1 transition-all cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
+            className={`min-h-[28px] px-2.5 py-1 rounded-lg border text-xs flex items-center gap-1.5 transition-all cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
               agentPanelOpen
                 ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold shadow-[0_0_12px_rgba(6,182,212,0.3)]"
-                : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-zinc-300"
+                : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-cyan-300"
             }`}
             title="AI Agent Mode (⌘⇧I)"
           >
             <Bot className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span className="hidden sm:inline">Agent</span>
+            <span>AI</span>
           </button>
 
-          {/* 9. Tomography / Run */}
-          <button
-            onClick={() => activeTab && runAnalysis(activeTab)}
-            disabled={analyzing}
-            aria-label="Run Causal Tomography (F5)"
-            className="min-h-[28px] px-2.5 py-1 rounded-lg bg-purple-950/80 hover:bg-purple-900 border border-purple-500/40 text-purple-300 font-bold text-xs flex items-center gap-1 transition-all shadow-sm cursor-pointer disabled:opacity-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-purple-400 shrink-0"
-            title="Causal Tomography (F5)"
-          >
-            <Play className="w-3 h-3 fill-purple-400 shrink-0" />
-            <span>{analyzing ? "Analyzing..." : "Tomography (F5)"}</span>
-          </button>
-
-          {/* Contextual Python Execution (Only for .py files) */}
-          {activeTab && activeTab.path.endsWith(".py") && (
-            <button
-              type="button"
-              onClick={(e) => handleExecutePython(e)}
-              disabled={pythonRunning}
-              aria-label="Run Python file in local runtime"
-              className="min-h-[28px] px-2 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 font-bold text-xs flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400 shrink-0"
-              title="Run Python"
-            >
-              <Play className="w-3 h-3 fill-emerald-300 text-emerald-300 shrink-0" />
-              <span>{pythonRunning ? "Running..." : "Run Python"}</span>
-            </button>
-          )}
-
-          {/* Contextual Python Debugger (Only for .py files) */}
-          {activeTab && activeTab.path.endsWith(".py") && (
-            <button
-              onClick={handleRunPythonDebugger}
-              disabled={debugRunning}
-              aria-label="Debug Python with Time-Travel (F10)"
-              className={`min-h-[28px] px-2 py-1 rounded-lg border font-bold text-xs flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 shrink-0 ${
-                debugPanelOpen
-                  ? "bg-cyan-950 text-cyan-300 border-cyan-500/60"
-                  : "bg-cyan-950/40 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300"
-              }`}
-              title="Time-Travel Debugger (F10)"
-            >
-              <Bug className={`w-3.5 h-3.5 text-cyan-400 ${debugRunning ? "animate-spin" : ""}`} />
-              <span>{debugRunning ? "Tracing..." : "Debug"}</span>
-            </button>
-          )}
-
-          {/* Contextual Undo Surgery Button */}
-          {activeTabPath && undoAvailableForFile[activeTabPath] && (
-            <button
-              onClick={handleUndoSurgery}
-              aria-label="Undo last AST surgery"
-              className="min-h-[28px] px-2 py-1 rounded-lg bg-amber-950/80 hover:bg-amber-900 border border-amber-500/50 text-amber-300 font-bold text-xs flex items-center gap-1 transition-all cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-amber-400 shrink-0"
-              title="Undo Last Surgery"
-            >
-              <RotateCcw className="w-3 h-3 text-amber-400 shrink-0" />
-              <span>Undo</span>
-            </button>
-          )}
-
-          {/* Safe Remove Findings Action */}
-          <button
-            onClick={handleOpenDiffPreview}
-            disabled={findings.length === 0}
-            aria-label={`Preview Safe Remove Surgery for ${findings.length} findings`}
-            className="min-h-[28px] px-2.5 py-1 rounded-lg bg-cyan-400 hover:bg-cyan-300 text-black font-bold text-xs flex items-center gap-1 shadow-cyan-glow transition-all disabled:opacity-40 cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 shrink-0"
-          >
-            <Sparkles className="w-3.5 h-3.5 fill-black shrink-0" />
-            <span>Safe Remove ({findings.length})</span>
-          </button>
-        </div>
-
-        {/* Right Zone: Quick Palette & Tools */}
-        <div className="flex-none shrink-0 ml-auto flex items-center gap-1.5">
-          <button
-            onClick={() => setShowTerminalPanel((prev) => !prev)}
-            aria-label="Toggle Integrated Terminal Drawer (Command+`)"
-            className={`min-w-[28px] min-h-[28px] px-2 py-1 rounded-lg border text-xs flex items-center gap-1 transition-all cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
-              showTerminalPanel
-                ? "bg-cyan-950 text-cyan-300 border-cyan-500/40"
-                : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-zinc-300"
-            }`}
-            title="Terminal (⌘`)"
-          >
-            <TerminalIcon className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span className="hidden lg:inline">Terminal</span>
-          </button>
-
-          <button
-            onClick={() => setQuickOpenOpen(true)}
-            aria-label="Quick Open File (Command+P)"
-            className="min-w-[28px] min-h-[28px] px-2 py-1 rounded-lg bg-[#121216] hover:bg-[#1c1c24] border border-[#24242e] text-purple-300 transition-all flex items-center gap-1 cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-purple-400"
-            title="Quick Open (⌘P)"
-          >
-            <Search className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-            <span className="hidden lg:inline">⌘P</span>
-          </button>
-
+          {/* Command Palette (⌘K) */}
           <button
             onClick={() => setCmdPaletteOpen(true)}
-            aria-label="Open Command Palette (Command+K)"
             className="min-w-[28px] min-h-[28px] px-2 py-1 rounded-lg bg-[#121216] hover:bg-[#1c1c24] border border-[#24242e] text-cyan-300 transition-all flex items-center gap-1 cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400"
             title="Command Palette (⌘K)"
           >
             <Command className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span className="hidden lg:inline">⌘K</span>
+            <span className="hidden lg:inline text-[11px]">⌘K</span>
           </button>
 
-          <button
-            onClick={handleExportReport}
-            aria-label="Export complete workspace report"
-            className="min-w-[28px] min-h-[28px] px-2 py-1 rounded-lg bg-[#121216] hover:bg-[#1c1c24] border border-[#24242e] hover:border-emerald-500/40 text-zinc-300 hover:text-white transition-all flex items-center gap-1 cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400"
-            title="Export Report"
-          >
-            <Download className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          </button>
+          {/* More Menu Dropdown (⋯) */}
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setMoreMenuOpen((prev) => !prev)}
+              className="min-h-[28px] px-2 py-1 rounded-lg bg-[#121216] hover:bg-[#1c1c24] border border-[#24242e] text-zinc-300 text-xs font-mono flex items-center gap-1 cursor-pointer"
+              title="More Options"
+            >
+              <span>⋯</span>
+            </button>
+
+            {moreMenuOpen && (
+              <div className="absolute top-full right-0 mt-1 w-56 bg-[#0a0a0d] border border-[#1f1f24] rounded-xl shadow-2xl z-50 p-1.5 space-y-1 font-mono text-xs animate-fade-in">
+                <button
+                  onClick={() => {
+                    handleRunPythonDebugger();
+                    setMoreMenuOpen(false);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 text-cyan-300 hover:bg-[#141418] cursor-pointer"
+                >
+                  <Bug className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span>Debug (F10)</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setMainView(mainView === "test_explorer" ? "editor" : "test_explorer");
+                    setMoreMenuOpen(false);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 text-emerald-300 hover:bg-[#141418] cursor-pointer"
+                >
+                  <FlaskConical className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>Test Explorer (⌘⇧T)</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setMainView(mainView === "profiler" ? "editor" : "profiler");
+                    setMoreMenuOpen(false);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 text-amber-300 hover:bg-[#141418] cursor-pointer"
+                >
+                  <Flame className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Profiler (⌘⇧P)</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setMainView(mainView === "security_audit" ? "editor" : "security_audit");
+                    setMoreMenuOpen(false);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 text-red-300 hover:bg-[#141418] cursor-pointer"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                  <span>Security Audit (⌘⇧S)</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setMainView(mainView === "snapshots" ? "editor" : "snapshots");
+                    setMoreMenuOpen(false);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 text-cyan-300 hover:bg-[#141418] cursor-pointer"
+                >
+                  <HistoryIcon className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span>Snapshots (⌘⇧B)</span>
+                </button>
+                <div className="h-px bg-[#1f1f24] my-1" />
+                <button
+                  onClick={() => {
+                    handleExportReport();
+                    setMoreMenuOpen(false);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 text-emerald-300 hover:bg-[#141418] cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>Export Report</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
       {/* 2. Main Resizable Workspace Grid */}
       <div ref={contentRowRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", overflow: "hidden" }} className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
         
+        {/* Quiet 40px Vertical Activity Rail (Exactly 4 primary items) */}
+        <aside className="w-10 bg-[#08080a] border-r border-[#1f1f24] flex flex-col items-center py-3 gap-3 shrink-0 select-none z-20">
+          {/* 1. Explorer Icon */}
+          <button
+            onClick={() => {
+              if (showExplorer && mainView === "editor") {
+                setShowExplorer(false);
+                setActiveActivity(null);
+              } else {
+                setShowExplorer(true);
+                setActiveActivity("explorer");
+                if (mainView !== "editor") setMainView("editor");
+              }
+            }}
+            className={`p-2 rounded-xl transition-all cursor-pointer ${
+              showExplorer && mainView === "editor"
+                ? "bg-cyan-950 text-cyan-300 border border-cyan-500/40 shadow-sm"
+                : "text-zinc-400 hover:text-white hover:bg-[#141418]"
+            }`}
+            title="File Explorer (⌘B)"
+          >
+            <FolderTree className="w-4 h-4 text-cyan-400" />
+          </button>
+
+          {/* 2. Search Icon */}
+          <button
+            onClick={() => {
+              if (mainView === "search") {
+                setMainView("editor");
+                setActiveActivity(null);
+              } else {
+                setMainView("search");
+                setActiveActivity("search");
+              }
+            }}
+            className={`p-2 rounded-xl transition-all cursor-pointer ${
+              mainView === "search"
+                ? "bg-purple-950 text-purple-300 border border-purple-500/40 shadow-sm"
+                : "text-zinc-400 hover:text-white hover:bg-[#141418]"
+            }`}
+            title="Search & Replace (⌘⇧F)"
+          >
+            <Search className="w-4 h-4 text-purple-400" />
+          </button>
+
+          {/* 3. Source Control Icon */}
+          <button
+            onClick={() => {
+              if (mainView === "source_control") {
+                setMainView("editor");
+                setActiveActivity(null);
+              } else {
+                setMainView("source_control");
+                setActiveActivity("git");
+              }
+            }}
+            className={`p-2 rounded-xl transition-all cursor-pointer relative ${
+              mainView === "source_control"
+                ? "bg-cyan-950 text-cyan-300 border border-cyan-500/40 shadow-sm"
+                : "text-zinc-400 hover:text-white hover:bg-[#141418]"
+            }`}
+            title="Source Control (⌘⇧G)"
+          >
+            <GitBranch className="w-4 h-4 text-cyan-400" />
+            {git.isRepo && (git.staged.length + git.unstaged.length + git.untracked.length > 0) && (
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+            )}
+          </button>
+
+          {/* 4. Analysis Gateway Icon */}
+          <button
+            onClick={() => {
+              setShowRightPanel((prev) => !prev);
+              if (!showRightPanel) {
+                setRightPanelTab("file");
+              }
+            }}
+            className={`p-2 rounded-xl transition-all cursor-pointer relative ${
+              showRightPanel || ["dashboard", "graph", "clones", "semantic_clones", "luminance", "behavior_fingerprint", "patch_firewall", "repository_patch_firewall", "semantic_intent_radar"].includes(mainView)
+                ? "bg-purple-950 text-purple-300 border border-purple-500/40 shadow-sm"
+                : "text-zinc-400 hover:text-white hover:bg-[#141418]"
+            }`}
+            title="Causal Analysis & Tomography"
+          >
+            <Activity className="w-4 h-4 text-purple-400" />
+            {findings.length > 0 && (
+              <span className="absolute top-1 right-1 px-1 py-0.2 rounded-full bg-purple-900 text-purple-300 text-[8px] font-bold">
+                {findings.length}
+              </span>
+            )}
+          </button>
+        </aside>
+
         {/* Left Sidebar: File Explorer */}
         {showExplorer && (
           <div ref={explorerPanelRef} style={{ width: `${explorerWidth}px`, flexShrink: 0 }} className="bg-[#0a0a0a] border-r border-[#1f1f1f] flex flex-col justify-between shrink-0 select-none">
@@ -4584,8 +4442,8 @@ export default function IDEApp() {
                 )}
               </div>
 
-              {/* Gutter Heatmap & Luminance Panel */}
-              {activeFileLuminance && (
+              {/* Gutter Heatmap & Luminance Panel (Contextual - Only visible when Analysis is active) */}
+              {showRightPanel && activeFileLuminance && (
                 <CodeEditorPanel
                   filePath={activeTabPath}
                   fileLuminance={activeFileLuminance}
@@ -4605,22 +4463,34 @@ export default function IDEApp() {
         </div>
 
         {/* Resizer col 2 */}
-        <div onMouseDown={startAnalysisResize} className="resizer-col" />
+        {showRightPanel && (
+          <div onMouseDown={startAnalysisResize} className="resizer-col" />
+        )}
 
         {/* Right Pane: Tomography Analysis Panel */}
-        <div ref={analysisPanelRef} style={{ width: `${analysisWidth}px`, flexShrink: 0 }} className="bg-[#0a0a0a] border-l border-[#1f1f1f] flex flex-col justify-between p-4 space-y-4 shrink-0 overflow-y-auto select-none">
-          <div className="space-y-4">
-            
-            {/* Header */}
-            <div className="pb-3 border-b border-[#1f1f1f] flex items-center justify-between">
-              <span className="font-heading font-bold text-sm text-white">Tomography Panel</span>
-              <span className="px-2 py-0.5 rounded-full bg-cyan-950/80 border border-cyan-500/30 text-cyan-300 font-mono text-[10px]">
-                Luminance: {luminance.toFixed(2)}
-              </span>
-            </div>
+        {showRightPanel && (
+          <div ref={analysisPanelRef} style={{ width: `${analysisWidth}px`, flexShrink: 0 }} className="bg-[#0a0a0a] border-l border-[#1f1f1f] flex flex-col justify-between p-4 space-y-4 shrink-0 overflow-y-auto select-none">
+            <div className="space-y-4">
+              
+              {/* Header */}
+              <div className="pb-3 border-b border-[#1f1f1f] flex items-center justify-between">
+                <span className="font-heading font-bold text-sm text-white">Tomography Panel</span>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded-full bg-cyan-950/80 border border-cyan-500/30 text-cyan-300 font-mono text-[10px]">
+                    Luminance: {luminance.toFixed(2)}
+                  </span>
+                  <button
+                    onClick={() => setShowRightPanel(false)}
+                    className="p-1 rounded text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors cursor-pointer"
+                    title="Close Panel"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
 
-            {/* Panel Tabs: Active File vs Project Scan vs Clones vs Semantic */}
-            <div className="grid grid-cols-4 gap-1 p-1 bg-[#050505] rounded-xl border border-[#1f1f1f] text-[10px] font-mono">
+            {/* Panel Tabs: Active File vs Project Scan vs BDG vs Clones vs Semantic */}
+            <div className="grid grid-cols-5 gap-1 p-1 bg-[#050505] rounded-xl border border-[#1f1f1f] text-[10px] font-mono">
               <div
                 role="button"
                 tabIndex={0}
@@ -4641,6 +4511,24 @@ export default function IDEApp() {
                 <span className="px-1 py-0.2 rounded-full bg-zinc-800 text-[8px] text-zinc-300">
                   {findings.length}
                 </span>
+              </div>
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => setRightPanelTab("bdg")}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setRightPanelTab("bdg");
+                  }
+                }}
+                className={`py-1.5 px-1 rounded-lg font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  rightPanelTab === "bdg"
+                    ? "bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 shadow-sm"
+                    : "text-zinc-400 hover:text-white"
+                }`}
+              >
+                <span>BDG</span>
               </div>
               <div
                 role="button"
@@ -4713,7 +4601,15 @@ export default function IDEApp() {
               </div>
             </div>
 
-            {rightPanelTab === "semantic" ? (
+            {rightPanelTab === "bdg" ? (
+              <BDGInspectorPanel
+                workspacePath={folderPath || undefined}
+                activeFilePath={activeTabPath}
+                cursorLine={cursorPos.line}
+                selectedSymbol={(selectedFinding as any)?.symbol || (selectedFinding as any)?.code}
+                onJumpToSymbol={(f, l) => handleJumpToStatement(f, l)}
+              />
+            ) : rightPanelTab === "semantic" ? (
               /* Semantic Clones View */
               <div className="space-y-4">
                 {/* Semantic Clone Summary Metrics */}
@@ -5109,15 +5005,17 @@ export default function IDEApp() {
           </div>
 
           {/* Action Trigger */}
-          <button
-            onClick={handleOpenDiffPreview}
-            disabled={findings.length === 0}
-            className="w-full py-3 px-4 rounded-24 bg-cyan-400 hover:bg-cyan-300 text-black font-bold text-xs flex items-center justify-center gap-2 shadow-cyan-glow transition-all disabled:opacity-40"
-          >
-            <Zap className="w-4 h-4 fill-black" />
-            <span>Apply Safe Remove Surgery</span>
-          </button>
+          {findings.length > 0 && (
+            <button
+              onClick={handleOpenDiffPreview}
+              className="w-full py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-black font-bold text-xs flex items-center justify-center gap-2 shadow-cyan-glow transition-all cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4 fill-black" />
+              <span>Preview Safe Remove ({findings.length})</span>
+            </button>
+          )}
         </div>
+      )}
 
       </div>
 
