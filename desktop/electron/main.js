@@ -18,6 +18,10 @@ const { snapshotManager } = require('./snapshotManager');
 const { logger } = require('./logger');
 const { crashReporter } = require('./crashReporter');
 const { healthChecker } = require('./healthCheck');
+const bdgEngine = require('../engine/bdg_engine');
+const runtimeExecutionIndex = require('../engine/runtime_execution_index');
+const behavioralDiffEngine = require('../engine/behavioral_diff_engine');
+const aiSystemReasoningEngine = require('../engine/ai_system_reasoning_engine');
 
 process.on('uncaughtException', (err) => {
   logger.error('MAIN', `Uncaught exception: ${err.message}`, { stack: err.stack });
@@ -1244,6 +1248,150 @@ ipcMain.handle('behavior:semantic-intent-drift', async (_, payload) => {
   });
 });
 
+ipcMain.handle('bdg:getGraph', async (_, workspacePath) => {
+  try {
+    return bdgEngine.buildGraphForWorkspace(workspacePath);
+  } catch (e) {
+    return { nodes: {}, edges: [], error: e.message };
+  }
+});
+
+ipcMain.handle('bdg:querySymbolDependencies', async (_, { symbol, relPath, line }) => {
+  try {
+    return bdgEngine.querySymbolDependencies(symbol, relPath, line);
+  } catch (e) {
+    return { node: null, callers: [], callees: [], reads: [], writes: [], externalEffects: [], directDependencies: [], transitiveDependencies: [] };
+  }
+});
+
+ipcMain.handle('bdg:updateFile', async (_, { fullPath, content }) => {
+  try {
+    return bdgEngine.updateFile(fullPath, content);
+  } catch (e) {
+    return { nodes: {}, edges: [], error: e.message };
+  }
+});
+
+ipcMain.handle('bdg:calculateBlastRadius', async (_, { symbol, relPath, line }) => {
+  try {
+    return bdgEngine.calculateBlastRadiusBySymbol(symbol, relPath, line);
+  } catch (e) {
+    return {
+      targetNode: null,
+      certainItems: [],
+      probableItems: [],
+      inferredItems: [],
+      affectedFiles: [],
+      affectedFunctions: [],
+      externalEffects: [],
+      coveringTests: [],
+      riskSummary: { filesAffectedCount: 0, functionsAffectedCount: 0, externalSystemsCount: 0, testsCount: 0, riskLevel: 'LOW' }
+    };
+  }
+});
+
+ipcMain.handle('runtime:getTelemetry', async (_, nodeId) => {
+  try {
+    return runtimeExecutionIndex.getTelemetryForNode(nodeId);
+  } catch (e) {
+    return { observed: false, executionCount: 0, lastSeen: null, averageDurationMs: null, errorCount: 0, observedCallers: [], sessions: [] };
+  }
+});
+
+ipcMain.handle('runtime:getCallChainComparison', async (_, nodeId) => {
+  try {
+    return runtimeExecutionIndex.getStaticVsRuntimeCallChain(nodeId);
+  } catch (e) {
+    return { staticCallers: [], runtimeCallers: [], unobservedCallers: [] };
+  }
+});
+
+ipcMain.handle('runtime:getSessions', async () => {
+  try {
+    return runtimeExecutionIndex.getActiveSessionList();
+  } catch (e) {
+    return [];
+  }
+});
+
+ipcMain.handle('runtime:recordEvent', async (_, event) => {
+  try {
+    return runtimeExecutionIndex.recordEvent(event);
+  } catch (e) {
+    return null;
+  }
+});
+
+ipcMain.handle('bdg:simulateWhatIf', async (_, { symbol, relPath, line, operation, secondarySymbol }) => {
+  try {
+    return bdgEngine.simulateWhatIfBySymbol(symbol, relPath, line, operation, secondarySymbol);
+  } catch (e) {
+    return {
+      operation: operation || 'remove-node',
+      targetNode: null,
+      originalRiskLevel: 'LOW',
+      hypotheticalRiskLevel: 'LOW',
+      removedEdges: [],
+      newlyDisconnectedNodes: [],
+      newlyAffectedNodes: [],
+      runtimeObservedImpact: { observedExecutionsLost: 0, errorCountSaved: 0, observedCallersImpacted: [] },
+      predictedRisks: ['Simulation error: ' + e.message]
+    };
+  }
+});
+
+ipcMain.handle('bdg:getBehavioralDiff', async (_, workspacePath) => {
+  try {
+    let gitStatus = { modifiedFiles: [], stagedFiles: [] };
+    if (workspacePath && fs.existsSync(path.join(workspacePath, '.git'))) {
+      try {
+        const { execSync } = require('child_process');
+        const statusStr = execSync('git status --porcelain', { cwd: workspacePath, encoding: 'utf-8' });
+        const lines = statusStr.split('\n').filter(Boolean);
+        for (const line of lines) {
+          const file = line.substring(3).trim();
+          if (line.startsWith(' M') || line.startsWith('M ') || line.startsWith('??')) {
+            gitStatus.modifiedFiles.push(file);
+          }
+        }
+      } catch (e) {
+        // Fallback for non-git workspace
+      }
+    }
+    return behavioralDiffEngine.computeBehavioralDiff(null, null, gitStatus);
+  } catch (e) {
+    return {
+      gitStatus: { modifiedFiles: [], stagedFiles: [] },
+      hasBehavioralChange: false,
+      textualChangeOnly: false,
+      structuralChanges: [],
+      impactedFunctions: [],
+      impactedFiles: [],
+      impactedTests: [],
+      impactedDbOps: [],
+      impactedExternalApis: [],
+      runtimeEvidenceSummary: { totalObservedExecutions: 0, observedCallers: [], errorsInvolved: 0 },
+      whatIfPredictions: [],
+      riskLevel: 'LOW'
+    };
+  }
+});
+ipcMain.handle('ai:generateProposal', async (_, { symbol, relPath, line, goal }) => {
+  try {
+    return aiSystemReasoningEngine.generateProposal(symbol, relPath, line, goal);
+  } catch (e) {
+    return null;
+  }
+});
+
+ipcMain.handle('ai:applyProposal', async (_, { proposalId, approved }) => {
+  try {
+    return aiSystemReasoningEngine.applyProposal(proposalId, approved);
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
+});
+
 ipcMain.handle('surgery:preview', async (_, payload) => {
   const { file, approved_lines = [] } = payload;
   const absPath = path.isAbsolute(file) ? file : path.join(app.getAppPath(), file);
@@ -1730,6 +1878,23 @@ ipcMain.handle('python:run-file', async (event, filePath) => {
       child.on('close', (code) => {
         const exitCode = code !== null ? code : 1;
         console.log(`[PYTHON] Process closed with exit code:`, exitCode);
+
+        // Record Runtime Execution Intelligence event
+        try {
+          const relName = path.basename(filePath);
+          runtimeExecutionIndex.recordEvent({
+            file: relName,
+            eventType: exitCode === 0 ? 'execute' : 'error',
+            timestamp: Date.now(),
+            executionCount: 1,
+            success: exitCode === 0,
+            sessionId: 'session_current',
+            sessionType: 'current'
+          });
+        } catch (recErr) {
+          console.error('[PYTHON] Failed to record runtime event:', recErr);
+        }
+
         event.sender.send('python:output', {
           filePath,
           exitCode,
