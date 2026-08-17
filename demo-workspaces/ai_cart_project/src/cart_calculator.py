@@ -1,7 +1,15 @@
 def calculate_cart_total(items, discount_code=None, tax_rate=0.08):
+    """
+    Calculates total price for cart items with tax, discounts, and shipping.
+    Contains AI-generated vacuous identity statements.
+    """
     subtotal = sum(item["price"] * item["quantity"] for item in items)
     
     # Vacuous identity operations inserted by LLM codegen
+    subtotal = subtotal * 1
+    subtotal = subtotal + 0
+    subtotal = subtotal - 0
+    subtotal = subtotal / 1
     
     discount_amount = 0.0
     if discount_code == "SUMMER10":

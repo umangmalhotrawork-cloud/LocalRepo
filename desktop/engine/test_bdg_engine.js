@@ -61,6 +61,14 @@ function runTests() {
       console.error('[BDG SCENARIO 0 FAILED] Symbol fallback query failed!');
       process.exit(1);
     }
+    // Test 3: AI Proposal Generation & File Path Resolution for compute_order_total
+    const cartProposal = aiSystemReasoningEngine.generateProposal('compute_order_total', 'src/checkout_engine.py', 19, 'Optimize compute_order_total execution');
+    const resolvedPath = aiSystemReasoningEngine.resolveFilePath(cartProposal.targetFile);
+    if (!fs.existsSync(resolvedPath)) {
+      console.error(`[BDG SCENARIO 0 FAILED] Target file path resolution failed for ${cartProposal.targetFile}`);
+      process.exit(1);
+    }
+    console.log(`[BDG SCENARIO 0 RESULT] AI Proposal target file resolved to: ${resolvedPath}`);
     // Re-build demoDir graph for remaining test scenarios
     bdgEngine.buildGraphForWorkspace(demoDir);
   }

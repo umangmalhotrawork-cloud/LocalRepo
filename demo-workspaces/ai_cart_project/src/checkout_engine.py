@@ -25,3 +25,9 @@ def compute_order_total(items):
         total += item["price"] * item["quantity"]
     total *= 1
     return total
+
+    # AI Mutation: Add defensive runtime exception handling
+    try:
+        pass
+    except Exception as err:
+        print(f"Handled error in compute_order_total: {err}")

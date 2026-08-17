@@ -77,8 +77,7 @@ class AISystemReasoningEngine {
     let absPath = targetNode.file;
 
     try {
-      const isAbs = path.isAbsolute(targetNode.file);
-      absPath = isAbs ? targetNode.file : path.join(process.cwd(), targetNode.file);
+      absPath = this.resolveFilePath(targetNode.file);
       if (fs.existsSync(absPath)) {
         const fullText = fs.readFileSync(absPath, 'utf-8');
         const lines = fullText.split('\n');
@@ -123,11 +122,15 @@ class AISystemReasoningEngine {
 
   resolveFilePath(file) {
     if (path.isAbsolute(file) && fs.existsSync(file)) return file;
+    const activeWorkspace = bdgEngine.workspacePath;
     const candidates = [
+      activeWorkspace ? (path.isAbsolute(file) ? file : path.join(activeWorkspace, file)) : null,
       path.join(process.cwd(), file),
+      path.join(process.cwd(), 'demo-workspaces', 'ai_cart_project', file),
       path.join(process.cwd(), 'demo-workspaces', 'bdg_test_sample', file),
+      path.join(__dirname, '..', '..', 'demo-workspaces', 'ai_cart_project', file),
       path.join(__dirname, '..', '..', 'demo-workspaces', 'bdg_test_sample', file),
-    ];
+    ].filter(Boolean);
     for (const c of candidates) {
       if (fs.existsSync(c)) return c;
     }
