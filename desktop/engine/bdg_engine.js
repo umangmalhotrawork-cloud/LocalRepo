@@ -594,6 +594,7 @@ class BDGEngine {
       };
     }
 
+    const operation = request.operation || "remove-node";
     const clonedNodes = JSON.parse(JSON.stringify(this.nodes));
     let clonedEdges = JSON.parse(JSON.stringify(this.edges));
 
@@ -601,10 +602,34 @@ class BDGEngine {
     const removedEdges = [];
     const disconnectedNodeIds = new Set();
 
-    if (request.operation === "remove-node") {
+    if (operation === "remove-node") {
       delete clonedNodes[targetNodeId];
       clonedEdges = clonedEdges.filter((e) => {
-        if (e.source === targetNodeId && e.relationship === "external-call") {
+        if (e.source === targetNodeId || e.target === targetNodeId) {
+          removedEdges.push(e);
+          return false;
+        }
+        return true;
+      });
+    } else if (operation === "remove-call") {
+      clonedEdges = clonedEdges.filter((e) => {
+        if ((e.source === targetNodeId || e.target === targetNodeId) && (e.relationship === "calls" || e.relationship === "invokes")) {
+          removedEdges.push(e);
+          return false;
+        }
+        return true;
+      });
+    } else if (operation === "remove-write") {
+      clonedEdges = clonedEdges.filter((e) => {
+        if ((e.source === targetNodeId || e.target === targetNodeId) && (e.relationship === "writes" || e.relationship === "mutates" || e.relationship === "reads")) {
+          removedEdges.push(e);
+          return false;
+        }
+        return true;
+      });
+    } else if (operation === "disable-external-api") {
+      clonedEdges = clonedEdges.filter((e) => {
+        if ((e.source === targetNodeId || e.target === targetNodeId) && (e.relationship === "external-call" || e.relationship === "invokes")) {
           removedEdges.push(e);
           return false;
         }
@@ -612,7 +637,7 @@ class BDGEngine {
       });
     } else if (operation === "disable-database-op") {
       clonedEdges = clonedEdges.filter((e) => {
-        if (e.source === targetNodeId && ["database-read", "database-write"].includes(e.relationship)) {
+        if ((e.source === targetNodeId || e.target === targetNodeId) && ["database-read", "database-write"].includes(e.relationship)) {
           removedEdges.push(e);
           return false;
         }
@@ -633,7 +658,6 @@ class BDGEngine {
     }
 
     // Evaluate hypothetical risk level
-    const operation = request.operation || "remove-node";
     const affectedFiles = originalBlast.affectedFiles;
     let hypotheticalRiskLevel = "LOW";
     if (newlyDisconnectedNodes.length > 3 || (originalBlast.externalEffects.length > 0 && operation !== "disable-external-api")) {

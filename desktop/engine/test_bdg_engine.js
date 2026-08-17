@@ -68,7 +68,16 @@ function runTests() {
       console.error(`[BDG SCENARIO 0 FAILED] Target file path resolution failed for ${cartProposal.targetFile}`);
       process.exit(1);
     }
-    console.log(`[BDG SCENARIO 0 RESULT] AI Proposal target file resolved to: ${resolvedPath}`);
+    // Test 4: Regression coverage for all 5 What-If operations
+    const whatIfOps = ["remove-node", "remove-call", "remove-write", "disable-external-api", "disable-database-op"];
+    for (const op of whatIfOps) {
+      const simRes = bdgEngine.simulateWhatIfBySymbol('compute_order_total', 'src/checkout_engine.py', 19, op);
+      if (!simRes || simRes.targetNode?.symbol !== 'compute_order_total') {
+        console.error(`[BDG WHAT-IF FAILED] Simulation failed for operation: ${op}`);
+        process.exit(1);
+      }
+      console.log(`[BDG WHAT-IF PASSED] Operation '${op}' executed cleanly for compute_order_total (Risk: ${simRes.hypotheticalRiskLevel})`);
+    }
     // Re-build demoDir graph for remaining test scenarios
     bdgEngine.buildGraphForWorkspace(demoDir);
   }
