@@ -39,6 +39,7 @@ import {
   BehavioralDiffReport,
   AIReasoningProposal,
   MultiFileImpactReport,
+  RuntimeEvidenceReport,
 } from "../../engine/bdg_schema";
 
 interface BDGInspectorPanelProps {
@@ -62,6 +63,7 @@ export default function BDGInspectorPanel({
   const [impactReport, setImpactReport] = useState<MultiFileImpactReport | null>(null);
   const [runtimeTelemetry, setRuntimeTelemetry] = useState<BDGNodeRuntimeTelemetry | null>(null);
   const [callChainComparison, setCallChainComparison] = useState<RuntimeCallChainComparison | null>(null);
+  const [evidenceReport, setEvidenceReport] = useState<RuntimeEvidenceReport | null>(null);
   const [sessions, setSessions] = useState<any[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>("session_current");
   const [whatIfResult, setWhatIfResult] = useState<WhatIfComparisonResult | null>(null);
@@ -75,6 +77,7 @@ export default function BDGInspectorPanel({
   const fetchBDGDependencies = async (symbolToQuery?: string) => {
     setLoading(true);
     setImpactReport(null);
+    setEvidenceReport(null);
     try {
       if (typeof window !== "undefined" && (window as any).electronAPI) {
         const relPath = activeFilePath
@@ -105,21 +108,24 @@ export default function BDGInspectorPanel({
         }
 
         if (targetNodeId) {
-          const [tel, comp, whatif, impact] = await Promise.all([
+          const [tel, comp, whatif, impact, evidence] = await Promise.all([
             (window as any).electronAPI.getRuntimeTelemetry?.(targetNodeId),
             (window as any).electronAPI.getRuntimeCallChainComparison?.(targetNodeId),
             (window as any).electronAPI.simulateBDGWhatIf?.(targetSymbol, targetFile, targetLine, selectedWhatIfOp),
             (window as any).electronAPI.analyzeMultiFileImpact?.(targetSymbol, targetFile, targetLine, workspacePath),
+            (window as any).electronAPI.correlateRuntimeEvidence?.(targetSymbol, targetFile, targetLine, workspacePath),
           ]);
           setRuntimeTelemetry(tel || null);
           setCallChainComparison(comp || null);
           setWhatIfResult(whatif || null);
           setImpactReport(impact || null);
+          setEvidenceReport(evidence || null);
         } else {
           setRuntimeTelemetry(null);
           setCallChainComparison(null);
           setWhatIfResult(null);
           setImpactReport(null);
+          setEvidenceReport(null);
         }
       }
     } catch (e) {
@@ -660,6 +666,154 @@ export default function BDGInspectorPanel({
                     </div>
                   )}
                 </div>
+
+                {/* RUNTIME EVIDENCE CORRELATION */}
+                {evidenceReport && evidenceReport.correlatedDependencies.length > 0 && (
+                  <div className="p-3 bg-[#0d0d12] rounded-xl border border-[#1f1f24] space-y-2.5">
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <span className="text-emerald-300 flex items-center gap-1.5 truncate">
+                        <Network className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span className="truncate">EVIDENCE CORRELATION: <span className="text-white font-mono">{evidenceReport.targetSymbol}</span></span>
+                      </span>
+                      {renderRiskBadge(evidenceReport.riskLevel)}
+                    </div>
+
+                    <div className="text-[10px] text-zinc-400 border-t border-[#1f1f24] pt-2">
+                      <span className="text-zinc-500 font-bold block">CORRELATION SUMMARY:</span>
+                      <span className="text-cyan-200">{evidenceReport.riskExplanation}</span>
+                    </div>
+
+                    {/* Summary Metrics */}
+                    <div className="grid grid-cols-4 gap-1.5 text-center text-[10px] pt-1">
+                      <div className="bg-[#050505] p-1.5 rounded border border-[#1a1a20]">
+                        <span className="text-zinc-500 block">Total</span>
+                        <span className="text-white font-bold">{evidenceReport.summary.totalDependencies}</span>
+                      </div>
+                      <div className="bg-[#050505] p-1.5 rounded border border-[#1a1a20]">
+                        <span className="text-zinc-500 block">Confirmed</span>
+                        <span className="text-emerald-400 font-bold">{evidenceReport.summary.confirmedCount}</span>
+                      </div>
+                      <div className="bg-[#050505] p-1.5 rounded border border-[#1a1a20]">
+                        <span className="text-zinc-500 block">Static Only</span>
+                        <span className="text-amber-400 font-bold">{evidenceReport.summary.staticOnlyCount}</span>
+                      </div>
+                      <div className="bg-[#050505] p-1.5 rounded border border-[#1a1a20]">
+                        <span className="text-zinc-500 block">Runtime Only</span>
+                        <span className="text-rose-400 font-bold">{evidenceReport.summary.runtimeOnlyCount}</span>
+                      </div>
+                    </div>
+
+                    {/* Overall Confidence */}
+                    <div className="flex items-center gap-2 pt-1 border-t border-[#1f1f24]">
+                      <span className="text-[10px] text-zinc-500 font-bold">CONFIDENCE:</span>
+                      <div className="flex-1 bg-[#050505] rounded-full h-2 border border-[#1a1a20] overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            evidenceReport.summary.overallConfidence >= 0.8 ? "bg-emerald-500" :
+                            evidenceReport.summary.overallConfidence >= 0.5 ? "bg-amber-500" : "bg-rose-500"
+                          }`}
+                          style={{ width: `${Math.round(evidenceReport.summary.overallConfidence * 100)}%` }}
+                        />
+                      </div>
+                      <span className={`text-[10px] font-bold ${
+                        evidenceReport.summary.overallConfidence >= 0.8 ? "text-emerald-400" :
+                        evidenceReport.summary.overallConfidence >= 0.5 ? "text-amber-400" : "text-rose-400"
+                      }`}>
+                        {Math.round(evidenceReport.summary.overallConfidence * 100)}%
+                      </span>
+                    </div>
+
+                    {/* CONFIRMED Dependencies */}
+                    {evidenceReport.correlatedDependencies.filter(d => d.classification === "CONFIRMED").length > 0 && (
+                      <div className="space-y-1 pt-1 border-t border-[#1f1f24]">
+                        <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest block">
+                          CONFIRMED ({evidenceReport.correlatedDependencies.filter(d => d.classification === "CONFIRMED").length})
+                        </span>
+                        {evidenceReport.correlatedDependencies.filter(d => d.classification === "CONFIRMED").map((dep, idx) => (
+                          <div key={`ev-confirmed-${dep.node?.id || "item"}-${idx}`} className="text-[10px] bg-[#050505] p-1.5 rounded border border-[#1a1a20] flex items-center justify-between gap-1.5">
+                            <div className="flex items-center gap-1.5 min-w-0 truncate">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                              <span className="text-emerald-300 truncate">{dep.node?.symbol}</span>
+                              <span className="text-zinc-600 shrink-0">·</span>
+                              <span className="text-zinc-500 shrink-0">{dep.relationship}</span>
+                            </div>
+                            <span className="text-emerald-400 font-bold shrink-0">{dep.confidenceScore.toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* STATIC_ONLY Dependencies */}
+                    {evidenceReport.correlatedDependencies.filter(d => d.classification === "STATIC_ONLY").length > 0 && (
+                      <div className="space-y-1 pt-1 border-t border-[#1f1f24]">
+                        <span className="text-[10px] font-bold text-amber-400 uppercase tracking-widest block">
+                          STATIC ONLY ({evidenceReport.correlatedDependencies.filter(d => d.classification === "STATIC_ONLY").length})
+                        </span>
+                        {evidenceReport.correlatedDependencies.filter(d => d.classification === "STATIC_ONLY").map((dep, idx) => (
+                          <div key={`ev-static-${dep.node?.id || "item"}-${idx}`} className="text-[10px] bg-[#050505] p-1.5 rounded border border-[#1a1a20] flex items-center justify-between gap-1.5">
+                            <div className="flex items-center gap-1.5 min-w-0 truncate">
+                              <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                              <span className="text-amber-300 truncate">{dep.node?.symbol}</span>
+                              <span className="text-zinc-600 shrink-0">·</span>
+                              <span className="text-zinc-500 shrink-0">{dep.relationship}</span>
+                            </div>
+                            <span className="text-amber-400 font-bold shrink-0">{dep.confidenceScore.toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* RUNTIME_ONLY Dependencies */}
+                    {evidenceReport.correlatedDependencies.filter(d => d.classification === "RUNTIME_ONLY").length > 0 && (
+                      <div className="space-y-1 pt-1 border-t border-[#1f1f24]">
+                        <span className="text-[10px] font-bold text-rose-400 uppercase tracking-widest block">
+                          RUNTIME ONLY ({evidenceReport.correlatedDependencies.filter(d => d.classification === "RUNTIME_ONLY").length})
+                        </span>
+                        {evidenceReport.correlatedDependencies.filter(d => d.classification === "RUNTIME_ONLY").map((dep, idx) => (
+                          <div key={`ev-runtime-${dep.node?.id || "item"}-${idx}`} className="text-[10px] bg-[#050505] p-1.5 rounded border border-[#1a1a20] flex items-center justify-between gap-1.5">
+                            <div className="flex items-center gap-1.5 min-w-0 truncate">
+                              <Zap className="w-3 h-3 text-rose-400 shrink-0" />
+                              <span className="text-rose-300 truncate">{dep.node?.symbol}</span>
+                              <span className="text-zinc-600 shrink-0">·</span>
+                              <span className="text-zinc-500 shrink-0">{dep.relationship}</span>
+                            </div>
+                            <span className="text-rose-400 font-bold shrink-0">{dep.confidenceScore.toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Caller Correlation */}
+                    {(evidenceReport.callerCorrelation.confirmedCallers.length > 0 ||
+                      evidenceReport.callerCorrelation.unobservedCallers.length > 0 ||
+                      evidenceReport.callerCorrelation.unexpectedCallers.length > 0) && (
+                      <div className="space-y-1 pt-1 border-t border-[#1f1f24]">
+                        <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest block">CALLER CORRELATION</span>
+                        {evidenceReport.callerCorrelation.confirmedCallers.map((caller, idx) => (
+                          <div key={`cc-confirmed-${idx}`} className="text-[10px] bg-[#050505] p-1.5 rounded border border-[#1a1a20] flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                            <span className="text-emerald-300">{caller}</span>
+                            <span className="text-zinc-600 text-[9px]">confirmed</span>
+                          </div>
+                        ))}
+                        {evidenceReport.callerCorrelation.unobservedCallers.map((caller, idx) => (
+                          <div key={`cc-unobserved-${idx}`} className="text-[10px] bg-[#050505] p-1.5 rounded border border-[#1a1a20] flex items-center gap-1.5">
+                            <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                            <span className="text-amber-300">{caller.symbol}</span>
+                            <span className="text-zinc-600 text-[9px]">unobserved</span>
+                          </div>
+                        ))}
+                        {evidenceReport.callerCorrelation.unexpectedCallers.map((caller, idx) => (
+                          <div key={`cc-unexpected-${idx}`} className="text-[10px] bg-[#050505] p-1.5 rounded border border-[#1a1a20] flex items-center gap-1.5">
+                            <Zap className="w-3 h-3 text-rose-400 shrink-0" />
+                            <span className="text-rose-300">{caller}</span>
+                            <span className="text-zinc-600 text-[9px]">unexpected</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

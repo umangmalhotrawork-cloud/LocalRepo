@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getRuntimeCallChainComparison: (nodeId) => ipcRenderer.invoke('runtime:getCallChainComparison', nodeId),
   getRuntimeSessions: () => ipcRenderer.invoke('runtime:getSessions'),
   recordRuntimeEvent: (event) => ipcRenderer.invoke('runtime:recordEvent', event),
+  correlateRuntimeEvidence: (symbol, relPath, line, workspacePath) => ipcRenderer.invoke('runtime:correlateEvidence', { symbol, relPath, line, workspacePath }),
   simulateBDGWhatIf: (symbol, relPath, line, operation, secondarySymbol) => ipcRenderer.invoke('bdg:simulateWhatIf', { symbol, relPath, line, operation, secondarySymbol }),
   getBDGBehavioralDiff: (workspacePath) => ipcRenderer.invoke('bdg:getBehavioralDiff', workspacePath),
   generateAIReasoningProposal: (symbol, relPath, line, goal) => ipcRenderer.invoke('ai:generateProposal', { symbol, relPath, line, goal }),

@@ -114,6 +114,41 @@ function runTests() {
       process.exit(1);
     }
     console.log('[MULTI-FILE IMPACT PASSED] Sequential query symbol switches verified successfully.');
+
+    // Test 8: Non-existent symbol resolution test (xyz_completely_nonexistent_987654)
+    console.log('[NON-EXISTENT SYMBOL TEST] Testing query for non-existent symbol xyz_completely_nonexistent_987654 with active editor line 8...');
+    const nonexistentQuery = bdgEngine.querySymbolDependencies('xyz_completely_nonexistent_987654', 'src/checkout_engine.py', 8);
+    console.log(`[NON-EXISTENT SYMBOL RESULT] Resolved Node: ${nonexistentQuery.node ? nonexistentQuery.node.symbol : 'null'}`);
+    if (nonexistentQuery.node !== null) {
+      console.error(`[NON-EXISTENT SYMBOL FAILED] Non-existent symbol resolved to ${nonexistentQuery.node.symbol} (${nonexistentQuery.node.id}) instead of null!`);
+      process.exit(1);
+    }
+
+    const nonexistentBlast = bdgEngine.calculateBlastRadiusBySymbol('xyz_completely_nonexistent_987654', 'src/checkout_engine.py', 8);
+    if (nonexistentBlast.targetNode !== null) {
+      console.error(`[NON-EXISTENT SYMBOL FAILED] Blast radius for non-existent symbol resolved to ${nonexistentBlast.targetNode.symbol} instead of null!`);
+      process.exit(1);
+    }
+
+    const nonexistentImpact = bdgEngine.analyzeMultiFileImpact('xyz_completely_nonexistent_987654', 'src/checkout_engine.py', 8);
+    if (nonexistentImpact.targetNode !== null) {
+      console.error(`[NON-EXISTENT SYMBOL FAILED] Impact analysis for non-existent symbol resolved to ${nonexistentImpact.targetNode.symbol} instead of null!`);
+      process.exit(1);
+    }
+
+    // Verify valid symbols still resolve correctly
+    const validCheck1 = bdgEngine.querySymbolDependencies('compute_order_total', 'src/checkout_engine.py', 8);
+    if (!validCheck1.node || validCheck1.node.symbol !== 'compute_order_total') {
+      console.error('[NON-EXISTENT SYMBOL FAILED] Valid symbol compute_order_total failed to resolve!');
+      process.exit(1);
+    }
+    const validCheck2 = bdgEngine.querySymbolDependencies('process_checkout', 'src/checkout_engine.py', 19);
+    if (!validCheck2.node || validCheck2.node.symbol !== 'process_checkout') {
+      console.error('[NON-EXISTENT SYMBOL FAILED] Valid symbol process_checkout failed to resolve!');
+      process.exit(1);
+    }
+    console.log('[NON-EXISTENT SYMBOL PASSED] Non-existent symbol correctly returns null and valid symbols resolve cleanly.');
+
     // Re-build demoDir graph for remaining test scenarios
     bdgEngine.buildGraphForWorkspace(demoDir);
   }
@@ -197,7 +232,115 @@ function runTests() {
   }
   console.log('[AI SCENARIO 8 RESULT] Source file on disk perfectly restored by rollback protection.');
 
-  console.log('\n[SUCCESS] ALL AI SYSTEM REASONING + MUTATION REGRESSION SCENARIOS PASSED CLEANLY.');
+  // --- RUNTIME EVIDENCE CORRELATION REGRESSION SCENARIOS ---
+
+  // Rebuild ai_cart_project graph for evidence correlation tests
+  bdgEngine.buildGraphForWorkspace(cartProjectDir);
+  runtimeExecutionIndex.clear();
+
+  // Record runtime events for some compute_order_total dependencies
+  runtimeExecutionIndex.recordEvent({
+    symbol: 'compute_order_total', file: 'src/checkout_engine.py',
+    eventType: 'execute', timestamp: Date.now(),
+    executionCount: 25, durationMs: 12, success: true,
+    callerSymbol: 'test_compute_order_total',
+    sessionId: 'session_evidence_test', sessionType: 'test_run'
+  });
+  runtimeExecutionIndex.recordEvent({
+    symbol: 'total', file: 'src/checkout_engine.py',
+    eventType: 'execute', timestamp: Date.now(),
+    executionCount: 10, success: true,
+    callerSymbol: 'compute_order_total',
+    sessionId: 'session_evidence_test', sessionType: 'test_run'
+  });
+  runtimeExecutionIndex.recordEvent({
+    symbol: 'items', file: 'src/checkout_engine.py',
+    eventType: 'execute', timestamp: Date.now(),
+    executionCount: 8, success: true,
+    callerSymbol: 'compute_order_total',
+    sessionId: 'session_evidence_test', sessionType: 'test_run'
+  });
+
+  // Test 9: Runtime Evidence Correlation — Basic Classification
+  console.log('[EVIDENCE SCENARIO 9] Testing runtime evidence correlation for compute_order_total...');
+  const evidence = runtimeExecutionIndex.correlateRuntimeEvidence('compute_order_total', 'src/checkout_engine.py', 19);
+  console.log(`[EVIDENCE SCENARIO 9 RESULT] Target: ${evidence.targetSymbol}, Total: ${evidence.summary.totalDependencies}, Confirmed: ${evidence.summary.confirmedCount}, Static-Only: ${evidence.summary.staticOnlyCount}, Runtime-Only: ${evidence.summary.runtimeOnlyCount}`);
+
+  if (evidence.targetSymbol !== 'compute_order_total') {
+    console.error('[EVIDENCE SCENARIO 9 FAILED] Target symbol must be compute_order_total');
+    process.exit(1);
+  }
+  if (evidence.correlatedDependencies.length === 0) {
+    console.error('[EVIDENCE SCENARIO 9 FAILED] Must have at least one correlated dependency');
+    process.exit(1);
+  }
+  if (evidence.summary.totalDependencies === 0) {
+    console.error('[EVIDENCE SCENARIO 9 FAILED] Total dependencies must be > 0');
+    process.exit(1);
+  }
+  // Verify at least one CONFIRMED dependency
+  const confirmedDeps = evidence.correlatedDependencies.filter(d => d.classification === 'CONFIRMED');
+  if (confirmedDeps.length === 0) {
+    console.error('[EVIDENCE SCENARIO 9 FAILED] Must have at least one CONFIRMED dependency (total/items were observed)');
+    process.exit(1);
+  }
+  // Verify confidence scores are in [0,1]
+  for (const dep of evidence.correlatedDependencies) {
+    if (dep.confidenceScore < 0 || dep.confidenceScore > 1) {
+      console.error(`[EVIDENCE SCENARIO 9 FAILED] Confidence score ${dep.confidenceScore} out of range for ${dep.node?.symbol}`);
+      process.exit(1);
+    }
+  }
+  // Verify overall confidence is in [0,1]
+  if (evidence.summary.overallConfidence < 0 || evidence.summary.overallConfidence > 1) {
+    console.error('[EVIDENCE SCENARIO 9 FAILED] Overall confidence out of range');
+    process.exit(1);
+  }
+  console.log(`[EVIDENCE SCENARIO 9 PASSED] Evidence correlation verified: ${confirmedDeps.length} CONFIRMED, confidence ${evidence.summary.overallConfidence}`);
+
+  // Test 10: Sequential Symbol Switch Clears Evidence Report
+  console.log('[EVIDENCE SCENARIO 10] Testing sequential symbol switch for evidence correlation...');
+  const ev1 = runtimeExecutionIndex.correlateRuntimeEvidence('compute_order_total', 'src/checkout_engine.py', 19);
+  if (ev1.targetSymbol !== 'compute_order_total') {
+    console.error('[EVIDENCE SCENARIO 10 FAILED] First query target must be compute_order_total');
+    process.exit(1);
+  }
+  const ev2 = runtimeExecutionIndex.correlateRuntimeEvidence('process_checkout', 'src/checkout_engine.py', 1);
+  if (ev2.targetSymbol !== 'process_checkout') {
+    console.error('[EVIDENCE SCENARIO 10 FAILED] Second query target must be process_checkout');
+    process.exit(1);
+  }
+  if (ev2.targetSymbol === ev1.targetSymbol) {
+    console.error('[EVIDENCE SCENARIO 10 FAILED] Evidence report must not be stale after symbol switch');
+    process.exit(1);
+  }
+  console.log('[EVIDENCE SCENARIO 10 PASSED] Sequential symbol switch produces distinct evidence reports.');
+
+  // Test 11: Non-Existent Symbol Returns Empty Evidence Report
+  console.log('[EVIDENCE SCENARIO 11] Testing non-existent symbol evidence correlation...');
+  const evNone = runtimeExecutionIndex.correlateRuntimeEvidence('nonexistent_symbol_xyz_12345');
+  if (evNone.targetNode !== null) {
+    console.error('[EVIDENCE SCENARIO 11 FAILED] Non-existent symbol must return null targetNode');
+    process.exit(1);
+  }
+  if (evNone.correlatedDependencies.length !== 0) {
+    console.error('[EVIDENCE SCENARIO 11 FAILED] Non-existent symbol must have 0 correlated dependencies');
+    process.exit(1);
+  }
+  if (evNone.summary.totalDependencies !== 0) {
+    console.error('[EVIDENCE SCENARIO 11 FAILED] Non-existent symbol must have 0 total dependencies');
+    process.exit(1);
+  }
+  if (evNone.riskLevel !== 'LOW') {
+    console.error('[EVIDENCE SCENARIO 11 FAILED] Non-existent symbol must be LOW risk');
+    process.exit(1);
+  }
+  console.log('[EVIDENCE SCENARIO 11 PASSED] Non-existent symbol returns empty evidence report.');
+
+  // Re-build demoDir graph to leave state clean for future extensions
+  bdgEngine.buildGraphForWorkspace(demoDir);
+
+  console.log('\n[SUCCESS] ALL AI SYSTEM REASONING + MUTATION + EVIDENCE CORRELATION REGRESSION SCENARIOS PASSED CLEANLY.');
 }
 
 if (require.main === module) {

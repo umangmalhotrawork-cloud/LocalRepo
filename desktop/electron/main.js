@@ -1328,6 +1328,17 @@ ipcMain.handle('runtime:recordEvent', async (_, event) => {
   }
 });
 
+ipcMain.handle('runtime:correlateEvidence', async (_, { symbol, relPath, line, workspacePath }) => {
+  try {
+    if (workspacePath && fs.existsSync(workspacePath) && (Object.keys(bdgEngine.nodes).length === 0 || bdgEngine.workspacePath !== workspacePath)) {
+      bdgEngine.buildGraphForWorkspace(workspacePath);
+    }
+    return runtimeExecutionIndex.correlateRuntimeEvidence(symbol, relPath, line);
+  } catch (e) {
+    return null;
+  }
+});
+
 ipcMain.handle('bdg:simulateWhatIf', async (_, { symbol, relPath, line, operation, secondarySymbol }) => {
   try {
     return bdgEngine.simulateWhatIfBySymbol(symbol, relPath, line, operation, secondarySymbol);

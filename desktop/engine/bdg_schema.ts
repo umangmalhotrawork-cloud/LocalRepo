@@ -237,3 +237,49 @@ export interface AIReasoningProposal {
     message: string;
   };
 }
+
+export type EvidenceClassification = "CONFIRMED" | "STATIC_ONLY" | "RUNTIME_ONLY";
+
+export interface CorrelatedDependency {
+  node: BDGNode;
+  relationship: BDGRelationshipType | string;
+  classification: EvidenceClassification;
+  staticEvidence: {
+    present: boolean;
+    edgeCount: number;
+    depth: number;
+  };
+  runtimeEvidence: {
+    observed: boolean;
+    executionCount: number;
+    errorCount: number;
+    lastSeen: number | null;
+    averageDurationMs: number | null;
+  };
+  confidenceScore: number;
+  reasoning: string;
+}
+
+export interface RuntimeEvidenceReport {
+  targetSymbol: string;
+  targetFile: string;
+  targetNode: BDGNode | null;
+  targetTelemetry: BDGNodeRuntimeTelemetry | null;
+  correlatedDependencies: CorrelatedDependency[];
+  summary: {
+    totalDependencies: number;
+    confirmedCount: number;
+    staticOnlyCount: number;
+    runtimeOnlyCount: number;
+    overallConfidence: number;
+  };
+  callerCorrelation: {
+    staticCallers: BDGNode[];
+    runtimeCallers: string[];
+    confirmedCallers: string[];
+    unobservedCallers: BDGNode[];
+    unexpectedCallers: string[];
+  };
+  riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  riskExplanation: string;
+}

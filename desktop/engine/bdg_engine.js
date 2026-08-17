@@ -280,17 +280,14 @@ class BDGEngine {
       targetNode = Object.values(this.nodes).find(
         (n) => n.symbol === symbol && isFileMatch(n.file, relPath)
       );
-    }
-
-    if (!targetNode && relPath && line) {
+      if (!targetNode) {
+        targetNode = Object.values(this.nodes).find(
+          (n) => n.symbol === symbol || n.symbol.endsWith(`.${symbol}`) || n.id.endsWith(`::${symbol}`)
+        );
+      }
+    } else if (relPath && line) {
       targetNode = Object.values(this.nodes).find(
         (n) => isFileMatch(n.file, relPath) && n.location.line <= line && (n.location.endLine || n.location.line + 20) >= line
-      );
-    }
-
-    if (!targetNode && symbol) {
-      targetNode = Object.values(this.nodes).find(
-        (n) => n.symbol === symbol || n.symbol.endsWith(`.${symbol}`) || n.id.endsWith(`::${symbol}`)
       );
     }
 
@@ -544,21 +541,20 @@ class BDGEngine {
             n.symbol.includes(symbol)) &&
           isFileMatch(n.file, relPath)
       );
-    }
-    if (!targetNode && relPath && line) {
+      if (!targetNode) {
+        targetNode = Object.values(this.nodes).find(
+          (n) =>
+            n.symbol === symbol ||
+            n.symbol.endsWith(`.${symbol}`) ||
+            n.id.endsWith(`::${symbol}`)
+        );
+      }
+    } else if (relPath && line) {
       targetNode = Object.values(this.nodes).find(
         (n) =>
           isFileMatch(n.file, relPath) &&
           n.location.line <= line &&
           (n.location.endLine || n.location.line + 20) >= line
-      );
-    }
-    if (!targetNode && symbol) {
-      targetNode = Object.values(this.nodes).find(
-        (n) =>
-          n.symbol === symbol ||
-          n.symbol.endsWith(`.${symbol}`) ||
-          n.id.endsWith(`::${symbol}`)
       );
     }
 
@@ -589,18 +585,17 @@ class BDGEngine {
           (n.symbol === symbolOrId || n.symbol.endsWith(`.${symbolOrId}`) || n.symbol.includes(symbolOrId)) &&
           isFileMatch(n.file, relPath)
       );
-    }
-    if (!targetNode && relPath && line) {
+      if (!targetNode) {
+        targetNode = Object.values(this.nodes).find(
+          (n) => n.symbol === symbolOrId || n.symbol.endsWith(`.${symbolOrId}`) || n.id.endsWith(`::${symbolOrId}`)
+        );
+      }
+    } else if (!targetNode && relPath && line) {
       targetNode = Object.values(this.nodes).find(
         (n) =>
           isFileMatch(n.file, relPath) &&
           n.location.line <= line &&
           (n.location.endLine || n.location.line + 20) >= line
-      );
-    }
-    if (!targetNode && symbolOrId) {
-      targetNode = Object.values(this.nodes).find(
-        (n) => n.symbol === symbolOrId || n.symbol.endsWith(`.${symbolOrId}`) || n.id.endsWith(`::${symbolOrId}`)
       );
     }
 
@@ -904,15 +899,14 @@ class BDGEngine {
           (n.symbol === symbol || n.symbol.endsWith(`.${symbol}`) || n.symbol.includes(symbol)) &&
           isFileMatch(n.file, relPath)
       );
-    }
-    if (!targetNode && relPath && line) {
+      if (!targetNode) {
+        targetNode = Object.values(this.nodes).find(
+          (n) => n.symbol === symbol || n.symbol.endsWith(`.${symbol}`) || n.id.endsWith(`::${symbol}`)
+        );
+      }
+    } else if (relPath && line) {
       targetNode = Object.values(this.nodes).find(
         (n) => isFileMatch(n.file, relPath) && n.location.line <= line && (n.location.endLine || n.location.line + 20) >= line
-      );
-    }
-    if (!targetNode && symbol) {
-      targetNode = Object.values(this.nodes).find(
-        (n) => n.symbol === symbol || n.symbol.endsWith(`.${symbol}`) || n.id.endsWith(`::${symbol}`)
       );
     }
 

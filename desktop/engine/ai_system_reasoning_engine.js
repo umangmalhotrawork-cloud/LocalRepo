@@ -26,24 +26,23 @@ class AISystemReasoningEngine {
       if (nodeFile === targetPath) return true;
       if (nodeFile.endsWith(targetPath) || targetPath.endsWith(nodeFile)) return true;
       if (path.basename(nodeFile) === path.basename(targetPath)) return true;
-      return false;
     };
+    let targetNode = null;
 
-    let targetNode = Object.values(bdgEngine.nodes).find(
-      (n) =>
-        (n.symbol === targetSymbol || n.symbol.endsWith(`.${targetSymbol}`) || n.symbol.includes(targetSymbol)) &&
-        isFileMatch(n.file, relPath)
-    );
-
-    if (!targetNode && relPath && line) {
+    if (targetSymbol) {
+      targetNode = Object.values(bdgEngine.nodes).find(
+        (n) =>
+          (n.symbol === targetSymbol || n.symbol.endsWith(`.${targetSymbol}`) || n.symbol.includes(targetSymbol)) &&
+          isFileMatch(n.file, relPath)
+      );
+      if (!targetNode) {
+        targetNode = Object.values(bdgEngine.nodes).find(
+          (n) => n.symbol === targetSymbol || n.symbol.endsWith(`.${targetSymbol}`) || n.id.endsWith(`::${targetSymbol}`)
+        );
+      }
+    } else if (relPath && line) {
       targetNode = Object.values(bdgEngine.nodes).find(
         (n) => isFileMatch(n.file, relPath) && n.location.line <= line && (n.location.endLine || n.location.line + 20) >= line
-      );
-    }
-
-    if (!targetNode && targetSymbol) {
-      targetNode = Object.values(bdgEngine.nodes).find(
-        (n) => n.symbol === targetSymbol || n.symbol.endsWith(`.${targetSymbol}`) || n.id.endsWith(`::${targetSymbol}`)
       );
     }
 
