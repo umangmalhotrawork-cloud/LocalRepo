@@ -262,15 +262,29 @@ class BDGEngine {
   querySymbolDependencies(symbol, relPath, line) {
     let targetNode = null;
 
+    const isFileMatch = (nodeFile, targetPath) => {
+      if (!targetPath) return true;
+      if (nodeFile === targetPath) return true;
+      if (nodeFile.endsWith(targetPath) || targetPath.endsWith(nodeFile)) return true;
+      if (path.basename(nodeFile) === path.basename(targetPath)) return true;
+      return false;
+    };
+
     if (symbol) {
       targetNode = Object.values(this.nodes).find(
-        (n) => n.symbol === symbol && (!relPath || n.file === relPath)
+        (n) => n.symbol === symbol && isFileMatch(n.file, relPath)
       );
     }
 
     if (!targetNode && relPath && line) {
       targetNode = Object.values(this.nodes).find(
-        (n) => n.file === relPath && n.location.line <= line && (n.location.endLine || n.location.line) >= line
+        (n) => isFileMatch(n.file, relPath) && n.location.line <= line && (n.location.endLine || n.location.line + 20) >= line
+      );
+    }
+
+    if (!targetNode && symbol) {
+      targetNode = Object.values(this.nodes).find(
+        (n) => n.symbol === symbol || n.symbol.endsWith(`.${symbol}`) || n.id.endsWith(`::${symbol}`)
       );
     }
 
@@ -507,16 +521,38 @@ class BDGEngine {
    */
   calculateBlastRadiusBySymbol(symbol, relPath, line) {
     let targetNode = null;
+    const isFileMatch = (nodeFile, targetPath) => {
+      if (!targetPath) return true;
+      if (nodeFile === targetPath) return true;
+      if (nodeFile.endsWith(targetPath) || targetPath.endsWith(nodeFile))
+        return true;
+      if (path.basename(nodeFile) === path.basename(targetPath)) return true;
+      return false;
+    };
+
     if (symbol) {
       targetNode = Object.values(this.nodes).find(
         (n) =>
-          (n.symbol === symbol || n.symbol.endsWith(`.${symbol}`) || n.symbol.includes(symbol)) &&
-          (!relPath || n.file === relPath)
+          (n.symbol === symbol ||
+            n.symbol.endsWith(`.${symbol}`) ||
+            n.symbol.includes(symbol)) &&
+          isFileMatch(n.file, relPath)
       );
     }
     if (!targetNode && relPath && line) {
       targetNode = Object.values(this.nodes).find(
-        (n) => n.file === relPath && n.location.line <= line && (n.location.endLine || n.location.line) >= line
+        (n) =>
+          isFileMatch(n.file, relPath) &&
+          n.location.line <= line &&
+          (n.location.endLine || n.location.line + 20) >= line
+      );
+    }
+    if (!targetNode && symbol) {
+      targetNode = Object.values(this.nodes).find(
+        (n) =>
+          n.symbol === symbol ||
+          n.symbol.endsWith(`.${symbol}`) ||
+          n.id.endsWith(`::${symbol}`)
       );
     }
 
@@ -543,49 +579,24 @@ class BDGEngine {
         removedEdges: [],
         newlyDisconnectedNodes: [],
         newlyAffectedNodes: [],
-        runtimeObservedImpact: { observedExecutionsLost: 0, errorCountSaved: 0, observedCallersImpacted: [] },
-        predictedRisks: ["Target symbol not found in graph."]
+        runtimeObservedImpact: {
+          observedExecutionsLost: 0,
+          errorCountSaved: 0,
+          observedCallersImpacted: [],
+        },
+        predictedRisks: ["Target node not found"],
       };
     }
 
-    const originalBlast = this.calculateBlastRadius(targetNodeId);
-
-    // Deep-clone BDG nodes and edges for in-memory simulation
     const clonedNodes = JSON.parse(JSON.stringify(this.nodes));
     let clonedEdges = JSON.parse(JSON.stringify(this.edges));
 
+    const originalBlast = this.calculateBlastRadius(targetNodeId);
     const removedEdges = [];
-    const operation = request.operation || "remove-node";
+    const disconnectedNodeIds = new Set();
 
-    if (operation === "remove-node") {
+    if (request.operation === "remove-node") {
       delete clonedNodes[targetNodeId];
-      clonedEdges = clonedEdges.filter((e) => {
-        if (e.source === targetNodeId || e.target === targetNodeId) {
-          removedEdges.push(e);
-          return false;
-        }
-        return true;
-      });
-    } else if (operation === "remove-call") {
-      clonedEdges = clonedEdges.filter((e) => {
-        if (
-          (e.source === targetNodeId && e.relationship === "calls") ||
-          (request.secondaryNodeId && e.target === request.secondaryNodeId)
-        ) {
-          removedEdges.push(e);
-          return false;
-        }
-        return true;
-      });
-    } else if (operation === "remove-variable-write") {
-      clonedEdges = clonedEdges.filter((e) => {
-        if (e.source === targetNodeId && ["reads", "writes"].includes(e.relationship)) {
-          removedEdges.push(e);
-          return false;
-        }
-        return true;
-      });
-    } else if (operation === "disable-external-api") {
       clonedEdges = clonedEdges.filter((e) => {
         if (e.source === targetNodeId && e.relationship === "external-call") {
           removedEdges.push(e);
@@ -616,6 +627,7 @@ class BDGEngine {
     }
 
     // Evaluate hypothetical risk level
+    const operation = request.operation || "remove-node";
     const affectedFiles = originalBlast.affectedFiles;
     let hypotheticalRiskLevel = "LOW";
     if (newlyDisconnectedNodes.length > 3 || (originalBlast.externalEffects.length > 0 && operation !== "disable-external-api")) {

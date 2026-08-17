@@ -77,11 +77,11 @@ export default function BDGInspectorPanel({
         const relPath = activeFilePath
           ? activeFilePath.split("/").slice(-2).join("/")
           : undefined;
-        const sym = symbolToQuery || searchSymbol || selectedSymbol || "";
+        const sym = symbolToQuery !== undefined && symbolToQuery !== "" ? symbolToQuery : (searchSymbol || selectedSymbol || "");
 
         const [res, blast, sessionList, diff] = await Promise.all([
-          (window as any).electronAPI.queryBDGSymbolDependencies(sym, relPath, cursorLine),
-          (window as any).electronAPI.calculateBDGBlastRadius(sym, relPath, cursorLine),
+          (window as any).electronAPI.queryBDGSymbolDependencies(sym, relPath, cursorLine, workspacePath),
+          (window as any).electronAPI.calculateBDGBlastRadius(sym, relPath, cursorLine, workspacePath),
           (window as any).electronAPI.getRuntimeSessions?.() || Promise.resolve([]),
           (window as any).electronAPI.getBDGBehavioralDiff?.(workspacePath) || Promise.resolve(null),
         ]);
@@ -180,16 +180,16 @@ export default function BDGInspectorPanel({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0a0d] text-white font-sans text-xs select-none p-3 space-y-3 overflow-y-auto">
+    <div className="flex flex-col h-full bg-[#0a0a0d] text-white font-sans text-xs select-none p-3 space-y-3 overflow-y-auto overflow-x-hidden w-full max-w-full min-w-0">
       {/* Header */}
-      <div className="flex items-center justify-between pb-2 border-b border-[#1f1f24]">
-        <div className="flex items-center gap-2">
-          <Network className="w-4 h-4 text-cyan-400" />
-          <span className="font-heading font-bold text-sm text-white">Behavioral Dependency Graph</span>
+      <div className="flex items-center justify-between pb-2 border-b border-[#1f1f24] w-full min-w-0 gap-2">
+        <div className="flex items-center gap-2 min-w-0 truncate">
+          <Network className="w-4 h-4 text-cyan-400 shrink-0" />
+          <span className="font-heading font-bold text-sm text-white truncate">Behavioral Dependency Graph</span>
         </div>
         <button
           onClick={() => fetchBDGDependencies()}
-          className="p-1 rounded bg-[#141418] hover:bg-[#1f1f24] text-zinc-400 hover:text-white transition-colors"
+          className="p-1 rounded bg-[#141418] hover:bg-[#1f1f24] text-zinc-400 hover:text-white transition-colors shrink-0"
           title="Refresh Graph & Reasoning Query"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-cyan-400" : ""}`} />
@@ -197,20 +197,20 @@ export default function BDGInspectorPanel({
       </div>
 
       {/* Query Search Input */}
-      <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-zinc-500" />
+      <form onSubmit={handleSearchSubmit} className="flex items-center gap-2 w-full min-w-0">
+        <div className="relative flex-1 min-w-0">
+          <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-zinc-500 shrink-0" />
           <input
             type="text"
             value={searchSymbol}
             onChange={(e) => setSearchSymbol(e.target.value)}
             placeholder="Search symbol (e.g. process_checkout)..."
-            className="w-full pl-8 pr-3 py-1.5 bg-[#050505] border border-[#1f1f24] rounded-lg text-xs font-mono text-zinc-200 focus:outline-none focus:border-cyan-500/50"
+            className="w-full pl-8 pr-3 py-1.5 bg-[#050505] border border-[#1f1f24] rounded-lg text-xs font-mono text-zinc-200 focus:outline-none focus:border-cyan-500/50 min-w-0"
           />
         </div>
         <button
           type="submit"
-          className="px-3 py-1.5 bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 font-mono font-bold rounded-lg text-xs transition-colors"
+          className="px-3 py-1.5 bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 font-mono font-bold rounded-lg text-xs transition-colors shrink-0"
         >
           Query
         </button>
@@ -218,45 +218,45 @@ export default function BDGInspectorPanel({
 
       {/* Target Node Overview & Metrics */}
       {queryResult?.node ? (
-        <div className="p-3 bg-[#0d0d12] rounded-xl border border-[#1f1f24] space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+        <div className="p-3 bg-[#0d0d12] rounded-xl border border-[#1f1f24] space-y-2 w-full min-w-0">
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <div className="flex items-center gap-2 min-w-0 truncate">
               {renderNodeBadge(queryResult.node)}
-              <span className="font-mono font-bold text-sm text-white">{queryResult.node.symbol}</span>
+              <span className="font-mono font-bold text-sm text-white truncate">{queryResult.node.symbol}</span>
             </div>
-            {blastResult && renderRiskBadge(blastResult.riskSummary.riskLevel)}
+            {blastResult && <div className="shrink-0">{renderRiskBadge(blastResult.riskSummary.riskLevel)}</div>}
           </div>
 
-          <div className="text-[11px] font-mono text-zinc-400 flex items-center justify-between">
-            <div className="flex items-center gap-1.5 truncate">
+          <div className="text-[11px] font-mono text-zinc-400 flex items-center justify-between gap-2 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0 truncate">
               <FileCode className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
               <span className="truncate">{queryResult.node.file}</span>
             </div>
-            <span className="text-zinc-500 text-[10px]">L{queryResult.node.location.line}</span>
+            <span className="text-zinc-500 text-[10px] shrink-0">L{queryResult.node.location.line}</span>
           </div>
 
           {/* Quick Metrics */}
-          <div className="grid grid-cols-4 gap-2 pt-2 border-t border-[#1f1f24] text-center font-mono text-[10px]">
-            <div className="bg-[#050505] p-1.5 rounded-lg border border-[#1a1a20]">
-              <span className="text-zinc-500 block">Callers</span>
-              <span className="text-cyan-400 font-bold text-xs">{queryResult.callers.length}</span>
+          <div className="grid grid-cols-4 gap-1 pt-2 border-t border-[#1f1f24] text-center font-mono text-[10px] w-full min-w-0">
+            <div className="bg-[#050505] p-1 rounded-lg border border-[#1a1a20] min-w-0">
+              <span className="text-zinc-500 block truncate text-[9px]">Callers</span>
+              <span className="text-cyan-400 font-bold text-xs block truncate">{queryResult.callers.length}</span>
             </div>
-            <div className="bg-[#050505] p-1.5 rounded-lg border border-[#1a1a20]">
-              <span className="text-zinc-500 block">Callees</span>
-              <span className="text-purple-400 font-bold text-xs">{queryResult.callees.length}</span>
+            <div className="bg-[#050505] p-1 rounded-lg border border-[#1a1a20] min-w-0">
+              <span className="text-zinc-500 block truncate text-[9px]">Callees</span>
+              <span className="text-purple-400 font-bold text-xs block truncate">{queryResult.callees.length}</span>
             </div>
-            <div className="bg-[#050505] p-1.5 rounded-lg border border-[#1a1a20]">
-              <span className="text-zinc-500 block">Executions</span>
-              <span className="text-emerald-400 font-bold text-xs">{runtimeTelemetry?.executionCount || 0}</span>
+            <div className="bg-[#050505] p-1 rounded-lg border border-[#1a1a20] min-w-0">
+              <span className="text-zinc-500 block truncate text-[9px]">Executions</span>
+              <span className="text-emerald-400 font-bold text-xs block truncate">{runtimeTelemetry?.executionCount || 0}</span>
             </div>
-            <div className="bg-[#050505] p-1.5 rounded-lg border border-[#1a1a20]">
-              <span className="text-zinc-500 block">Errors</span>
-              <span className="text-rose-400 font-bold text-xs">{runtimeTelemetry?.errorCount || 0}</span>
+            <div className="bg-[#050505] p-1 rounded-lg border border-[#1a1a20] min-w-0">
+              <span className="text-zinc-500 block truncate text-[9px]">Errors</span>
+              <span className="text-rose-400 font-bold text-xs block truncate">{runtimeTelemetry?.errorCount || 0}</span>
             </div>
           </div>
         </div>
       ) : (
-        <div className="p-4 bg-[#0d0d12] rounded-xl border border-[#1f1f24] text-center font-mono text-zinc-500 text-xs">
+        <div className="p-4 bg-[#0d0d12] rounded-xl border border-[#1f1f24] text-center font-mono text-zinc-500 text-xs w-full min-w-0">
           Select a symbol or place cursor on code to inspect dependencies, run What-If simulations, and execute AI reasoning & mutation pipelines.
         </div>
       )}
@@ -264,80 +264,83 @@ export default function BDGInspectorPanel({
       {/* Sub Tabs */}
       {queryResult?.node && (
         <>
-          <div className="grid grid-cols-8 gap-1 p-1 bg-[#050505] rounded-xl border border-[#1f1f1f] text-[10px] font-mono">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 p-1 bg-[#050505] rounded-xl border border-[#1f1f1f] text-[10px] font-mono w-full min-w-0">
             <button
               onClick={() => setActiveTab("aireason")}
-              className={`py-1.5 rounded-lg text-center font-bold transition-all flex items-center justify-center gap-1 ${
+              className={`py-1.5 px-1 rounded-lg text-center font-bold transition-all flex items-center justify-center gap-1 min-w-0 truncate ${
                 activeTab === "aireason" ? "bg-cyan-950 text-cyan-300 border border-cyan-500/40 shadow-sm" : "text-zinc-400 hover:text-white"
               }`}
             >
               <Bot className="w-3 h-3 text-cyan-400 shrink-0" />
-              <span>AI Reason</span>
+              <span className="truncate">AI Reason</span>
             </button>
             <button
               onClick={() => setActiveTab("impact")}
-              className={`py-1.5 rounded-lg text-center font-bold transition-all flex items-center justify-center gap-1 ${
+              className={`py-1.5 px-1 rounded-lg text-center font-bold transition-all flex items-center justify-center gap-1 min-w-0 truncate ${
                 activeTab === "impact" ? "bg-purple-950 text-purple-300 border border-purple-500/40 shadow-sm" : "text-zinc-400 hover:text-white"
               }`}
             >
               <GitCompare className="w-3 h-3 text-purple-400 shrink-0" />
-              <span>Impact</span>
+              <span className="truncate">Impact</span>
             </button>
             <button
               onClick={() => setActiveTab("whatif")}
-              className={`py-1.5 rounded-lg text-center font-bold transition-all flex items-center justify-center gap-1 ${
+              className={`py-1.5 px-1 rounded-lg text-center font-bold transition-all flex items-center justify-center gap-1 min-w-0 truncate ${
                 activeTab === "whatif" ? "bg-purple-950 text-purple-300 border border-purple-500/40 shadow-sm" : "text-zinc-400 hover:text-white"
               }`}
             >
               <Sparkles className="w-3 h-3 text-purple-400 shrink-0" />
-              <span>WhatIf</span>
+              <span className="truncate">WhatIf</span>
             </button>
             <button
               onClick={() => setActiveTab("runtime")}
-              className={`py-1.5 rounded-lg text-center font-bold transition-all flex items-center justify-center gap-1 ${
+              className={`py-1.5 px-1 rounded-lg text-center font-bold transition-all flex items-center justify-center gap-1 min-w-0 truncate ${
                 activeTab === "runtime" ? "bg-emerald-950 text-emerald-300 border border-emerald-500/40 shadow-sm" : "text-zinc-400 hover:text-white"
               }`}
             >
               <Zap className="w-3 h-3 text-emerald-400 shrink-0" />
-              <span>Runtime</span>
+              <span className="truncate">Runtime</span>
             </button>
             <button
               onClick={() => setActiveTab("blast")}
-              className={`py-1.5 rounded-lg text-center font-bold transition-all flex items-center justify-center gap-1 ${
+              className={`py-1.5 px-1 rounded-lg text-center font-bold transition-all flex items-center justify-center gap-1 min-w-0 truncate ${
                 activeTab === "blast" ? "bg-rose-950 text-rose-300 border border-rose-500/40 shadow-sm" : "text-zinc-400 hover:text-white"
               }`}
             >
               <Flame className="w-3 h-3 text-rose-400 shrink-0" />
-              <span>Blast</span>
+              <span className="truncate">Blast</span>
             </button>
             <button
               onClick={() => setActiveTab("callers")}
-              className={`py-1.5 rounded-lg text-center font-bold transition-all ${
+              className={`py-1.5 px-1 rounded-lg text-center font-bold transition-all flex items-center justify-center gap-1 min-w-0 truncate ${
                 activeTab === "callers" ? "bg-cyan-950 text-cyan-300 border border-cyan-500/40" : "text-zinc-400 hover:text-white"
               }`}
             >
-              Callers
+              <Code2 className="w-3 h-3 text-cyan-400 shrink-0" />
+              <span className="truncate">Callers</span>
             </button>
             <button
               onClick={() => setActiveTab("callees")}
-              className={`py-1.5 rounded-lg text-center font-bold transition-all ${
+              className={`py-1.5 px-1 rounded-lg text-center font-bold transition-all flex items-center justify-center gap-1 min-w-0 truncate ${
                 activeTab === "callees" ? "bg-purple-950 text-purple-300 border border-purple-500/40" : "text-zinc-400 hover:text-white"
               }`}
             >
-              Callees
+              <ArrowRight className="w-3 h-3 text-purple-400 shrink-0" />
+              <span className="truncate">Callees</span>
             </button>
             <button
               onClick={() => setActiveTab("dataflow")}
-              className={`py-1.5 rounded-lg text-center font-bold transition-all ${
+              className={`py-1.5 px-1 rounded-lg text-center font-bold transition-all flex items-center justify-center gap-1 min-w-0 truncate ${
                 activeTab === "dataflow" ? "bg-amber-950 text-amber-300 border border-amber-500/40" : "text-zinc-400 hover:text-white"
               }`}
             >
-              Data
+              <Database className="w-3 h-3 text-amber-400 shrink-0" />
+              <span className="truncate">Data</span>
             </button>
           </div>
 
           {/* Tab Content List */}
-          <div className="flex-1 space-y-2 overflow-y-auto font-mono text-[11px]">
+          <div className="flex-1 space-y-2 overflow-y-auto font-mono text-[11px] w-full min-w-0">
             {/* AI SYSTEM REASONING + MUTATION TAB */}
             {activeTab === "aireason" && (
               <div className="space-y-3 font-mono">

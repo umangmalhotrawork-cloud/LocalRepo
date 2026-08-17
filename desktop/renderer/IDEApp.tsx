@@ -851,6 +851,7 @@ export default function IDEApp() {
   }, [debugIndex, debugSteps, debugPanelOpen]);
 
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
+  const [selectedCodeSymbol, setSelectedCodeSymbol] = useState<string>("");
   const [cursorPositions, setCursorPositions] = useState<Record<string, { line: number; col: number }>>({});
 
   const activeFileLuminance = useMemo<FileLuminanceReport | null>(() => {
@@ -3476,6 +3477,13 @@ export default function IDEApp() {
 
       editor.onDidChangeCursorPosition((e: any) => {
         setCursorPos({ line: e.position.lineNumber, col: e.position.column });
+        const model = editor.getModel();
+        if (model) {
+          const word = model.getWordAtPosition(e.position);
+          if (word && word.word && word.word.trim()) {
+            setSelectedCodeSymbol(word.word.trim());
+          }
+        }
         if (activeTabPath) {
           editorStatesRef.current[activeTabPath] = {
             cursorLine: e.position.lineNumber,
@@ -3496,7 +3504,11 @@ export default function IDEApp() {
         const model = editor.getModel();
         if (!model) return;
         const selectedText = model.getValueInRange(selection);
-        if (!selectedText || !selectedText.trim()) {
+        if (selectedText && selectedText.trim()) {
+          if (!selectedText.includes('\n')) {
+            setSelectedCodeSymbol(selectedText.trim());
+          }
+        } else {
           setSelectionInfo(null);
           return;
         }
@@ -4606,7 +4618,7 @@ return (
                 workspacePath={folderPath || undefined}
                 activeFilePath={activeTabPath}
                 cursorLine={cursorPos.line}
-                selectedSymbol={(selectedFinding as any)?.symbol || (selectedFinding as any)?.code}
+                selectedSymbol={selectedCodeSymbol || (selectedFinding as any)?.symbol || (selectedFinding as any)?.code}
                 onJumpToSymbol={(f, l) => handleJumpToStatement(f, l)}
               />
             ) : rightPanelTab === "semantic" ? (

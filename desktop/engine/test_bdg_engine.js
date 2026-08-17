@@ -41,9 +41,32 @@ function runTests() {
   });
 
   const servicesPath = path.join(demoDir, 'services.py');
-  const originalFileContent = fs.readFileSync(servicesPath, 'utf-8');
+  // Scenario 0: BDG Symbol Selection / Query Integration Test (compute_order_total)
+  console.log('[BDG SCENARIO 0] Querying Python function symbol compute_order_total (Full Query Path)...');
+  const cartProjectDir = path.join(__dirname, '..', '..', 'demo-workspaces', 'ai_cart_project');
+  if (fs.existsSync(cartProjectDir)) {
+    // Test 1: Query with unbuilt/empty graph + workspacePath auto-build in querySymbolDependencies
+    bdgEngine.nodes = {};
+    bdgEngine.edges = [];
+    bdgEngine.buildGraphForWorkspace(cartProjectDir);
+    const computeTotalQueryResult = bdgEngine.querySymbolDependencies('compute_order_total', 'src/checkout_engine.py', 19);
+    console.log(`[BDG SCENARIO 0 RESULT] Resolved Node Symbol: ${computeTotalQueryResult.node?.symbol}, File: ${computeTotalQueryResult.node?.file}, Type: ${computeTotalQueryResult.node?.type}`);
+    if (!computeTotalQueryResult.node || computeTotalQueryResult.node.symbol !== 'compute_order_total') {
+      console.error('[BDG SCENARIO 0 FAILED] Failed to resolve compute_order_total BDG node!');
+      process.exit(1);
+    }
+    // Test 2: Fallback query without file path
+    const fallbackResult = bdgEngine.querySymbolDependencies('compute_order_total');
+    if (!fallbackResult.node || fallbackResult.node.symbol !== 'compute_order_total') {
+      console.error('[BDG SCENARIO 0 FAILED] Symbol fallback query failed!');
+      process.exit(1);
+    }
+    // Re-build demoDir graph for remaining test scenarios
+    bdgEngine.buildGraphForWorkspace(demoDir);
+  }
 
   // --- AI SYSTEM REASONING + MUTATION REGRESSION SCENARIOS ---
+  const originalFileContent = fs.readFileSync(servicesPath, 'utf-8');
 
   // Scenario 1: Reasoning Pipeline Generation (Understand -> Reason -> Simulate -> Explain -> Propose)
   console.log('[AI SCENARIO 1] Running multi-stage AI reasoning pipeline...');

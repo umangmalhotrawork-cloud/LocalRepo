@@ -1256,8 +1256,11 @@ ipcMain.handle('bdg:getGraph', async (_, workspacePath) => {
   }
 });
 
-ipcMain.handle('bdg:querySymbolDependencies', async (_, { symbol, relPath, line }) => {
+ipcMain.handle('bdg:querySymbolDependencies', async (_, { symbol, relPath, line, workspacePath }) => {
   try {
+    if ((!bdgEngine.nodes || Object.keys(bdgEngine.nodes).length === 0) && workspacePath && fs.existsSync(workspacePath)) {
+      bdgEngine.buildGraphForWorkspace(workspacePath);
+    }
     return bdgEngine.querySymbolDependencies(symbol, relPath, line);
   } catch (e) {
     return { node: null, callers: [], callees: [], reads: [], writes: [], externalEffects: [], directDependencies: [], transitiveDependencies: [] };
@@ -1272,8 +1275,11 @@ ipcMain.handle('bdg:updateFile', async (_, { fullPath, content }) => {
   }
 });
 
-ipcMain.handle('bdg:calculateBlastRadius', async (_, { symbol, relPath, line }) => {
+ipcMain.handle('bdg:calculateBlastRadius', async (_, { symbol, relPath, line, workspacePath }) => {
   try {
+    if ((!bdgEngine.nodes || Object.keys(bdgEngine.nodes).length === 0) && workspacePath && fs.existsSync(workspacePath)) {
+      bdgEngine.buildGraphForWorkspace(workspacePath);
+    }
     return bdgEngine.calculateBlastRadiusBySymbol(symbol, relPath, line);
   } catch (e) {
     return {
