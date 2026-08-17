@@ -1256,12 +1256,12 @@ ipcMain.handle('bdg:getGraph', async (_, workspacePath) => {
   }
 });
 
-ipcMain.handle('bdg:querySymbolDependencies', async (_, { symbol, relPath, line, workspacePath }) => {
+ipcMain.handle('bdg:querySymbolDependencies', async (_, { symbol, relPath, line, workspacePath, targetNodeId }) => {
   try {
-    if ((!bdgEngine.nodes || Object.keys(bdgEngine.nodes).length === 0) && workspacePath && fs.existsSync(workspacePath)) {
+    if ((!bdgEngine.nodes || Object.keys(bdgEngine.nodes).length === 0 || (workspacePath && bdgEngine.workspacePath !== workspacePath)) && workspacePath && fs.existsSync(workspacePath)) {
       bdgEngine.buildGraphForWorkspace(workspacePath);
     }
-    return bdgEngine.querySymbolDependencies(symbol, relPath, line);
+    return bdgEngine.querySymbolDependencies(symbol, relPath, line, targetNodeId);
   } catch (e) {
     return { node: null, callers: [], callees: [], reads: [], writes: [], externalEffects: [], directDependencies: [], transitiveDependencies: [] };
   }
@@ -1275,12 +1275,12 @@ ipcMain.handle('bdg:updateFile', async (_, { fullPath, content }) => {
   }
 });
 
-ipcMain.handle('bdg:calculateBlastRadius', async (_, { symbol, relPath, line, workspacePath }) => {
+ipcMain.handle('bdg:calculateBlastRadius', async (_, { symbol, relPath, line, workspacePath, targetNodeId }) => {
   try {
-    if ((!bdgEngine.nodes || Object.keys(bdgEngine.nodes).length === 0) && workspacePath && fs.existsSync(workspacePath)) {
+    if ((!bdgEngine.nodes || Object.keys(bdgEngine.nodes).length === 0 || (workspacePath && bdgEngine.workspacePath !== workspacePath)) && workspacePath && fs.existsSync(workspacePath)) {
       bdgEngine.buildGraphForWorkspace(workspacePath);
     }
-    return bdgEngine.calculateBlastRadiusBySymbol(symbol, relPath, line);
+    return bdgEngine.calculateBlastRadiusBySymbol(symbol, relPath, line, targetNodeId);
   } catch (e) {
     return {
       targetNode: null,
@@ -1328,20 +1328,20 @@ ipcMain.handle('runtime:recordEvent', async (_, event) => {
   }
 });
 
-ipcMain.handle('runtime:correlateEvidence', async (_, { symbol, relPath, line, workspacePath }) => {
+ipcMain.handle('runtime:correlateEvidence', async (_, { symbol, relPath, line, workspacePath, targetNodeId }) => {
   try {
     if (workspacePath && fs.existsSync(workspacePath) && (Object.keys(bdgEngine.nodes).length === 0 || bdgEngine.workspacePath !== workspacePath)) {
       bdgEngine.buildGraphForWorkspace(workspacePath);
     }
-    return runtimeExecutionIndex.correlateRuntimeEvidence(symbol, relPath, line);
+    return runtimeExecutionIndex.correlateRuntimeEvidence(symbol, relPath, line, targetNodeId);
   } catch (e) {
     return null;
   }
 });
 
-ipcMain.handle('bdg:simulateWhatIf', async (_, { symbol, relPath, line, operation, secondarySymbol }) => {
+ipcMain.handle('bdg:simulateWhatIf', async (_, { symbol, relPath, line, operation, secondarySymbol, targetNodeId }) => {
   try {
-    return bdgEngine.simulateWhatIfBySymbol(symbol, relPath, line, operation, secondarySymbol);
+    return bdgEngine.simulateWhatIfBySymbol(symbol, relPath, line, operation, secondarySymbol, targetNodeId);
   } catch (e) {
     return {
       operation: operation || 'remove-node',
@@ -1357,12 +1357,12 @@ ipcMain.handle('bdg:simulateWhatIf', async (_, { symbol, relPath, line, operatio
   }
 });
 
-ipcMain.handle('bdg:analyzeMultiFileImpact', async (_, { symbol, relPath, line, workspacePath }) => {
+ipcMain.handle('bdg:analyzeMultiFileImpact', async (_, { symbol, relPath, line, workspacePath, targetNodeId }) => {
   try {
     if (workspacePath && fs.existsSync(workspacePath) && (Object.keys(bdgEngine.nodes).length === 0 || bdgEngine.workspacePath !== workspacePath)) {
       bdgEngine.buildGraphForWorkspace(workspacePath);
     }
-    return bdgEngine.analyzeMultiFileImpact(symbol, relPath, line);
+    return bdgEngine.analyzeMultiFileImpact(symbol, relPath, line, targetNodeId);
   } catch (e) {
     return null;
   }
@@ -1404,9 +1404,9 @@ ipcMain.handle('bdg:getBehavioralDiff', async (_, workspacePath) => {
     };
   }
 });
-ipcMain.handle('ai:generateProposal', async (_, { symbol, relPath, line, goal }) => {
+ipcMain.handle('ai:generateProposal', async (_, { symbol, relPath, line, goal, targetNodeId }) => {
   try {
-    return aiSystemReasoningEngine.generateProposal(symbol, relPath, line, goal);
+    return aiSystemReasoningEngine.generateProposal(symbol, relPath, line, goal, targetNodeId);
   } catch (e) {
     return null;
   }

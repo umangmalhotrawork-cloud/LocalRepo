@@ -85,15 +85,13 @@ export default function BDGInspectorPanel({
           : undefined;
         const sym = symbolToQuery !== undefined && symbolToQuery !== "" ? symbolToQuery : (searchSymbol || selectedSymbol || "");
 
-        const [res, blast, sessionList, diff] = await Promise.all([
+        const [res, sessionList, diff] = await Promise.all([
           (window as any).electronAPI.queryBDGSymbolDependencies(sym, relPath, cursorLine, workspacePath),
-          (window as any).electronAPI.calculateBDGBlastRadius(sym, relPath, cursorLine, workspacePath),
           (window as any).electronAPI.getRuntimeSessions?.() || Promise.resolve([]),
           (window as any).electronAPI.getBDGBehavioralDiff?.(workspacePath) || Promise.resolve(null),
         ]);
 
         setQueryResult(res);
-        setBlastResult(blast);
         setSessions(sessionList || []);
         setDiffReport(diff || null);
 
@@ -101,26 +99,29 @@ export default function BDGInspectorPanel({
         const targetSymbol = targetNode?.symbol || sym;
         const targetFile = targetNode?.file || relPath;
         const targetLine = targetNode?.location?.line || cursorLine;
-        const targetNodeId = targetNode?.id || blast?.targetNode?.id;
+        const targetNodeId = targetNode?.id;
 
         if (targetSymbol) {
           setUserGoal((prev) => (prev && !prev.includes(targetSymbol) ? `Optimize ${targetSymbol} execution & error safety` : prev));
         }
 
         if (targetNodeId) {
-          const [tel, comp, whatif, impact, evidence] = await Promise.all([
+          const [blast, tel, comp, whatif, impact, evidence] = await Promise.all([
+            (window as any).electronAPI.calculateBDGBlastRadius(targetSymbol, targetFile, targetLine, workspacePath, targetNodeId),
             (window as any).electronAPI.getRuntimeTelemetry?.(targetNodeId),
             (window as any).electronAPI.getRuntimeCallChainComparison?.(targetNodeId),
-            (window as any).electronAPI.simulateBDGWhatIf?.(targetSymbol, targetFile, targetLine, selectedWhatIfOp),
-            (window as any).electronAPI.analyzeMultiFileImpact?.(targetSymbol, targetFile, targetLine, workspacePath),
-            (window as any).electronAPI.correlateRuntimeEvidence?.(targetSymbol, targetFile, targetLine, workspacePath),
+            (window as any).electronAPI.simulateBDGWhatIf?.(targetSymbol, targetFile, targetLine, selectedWhatIfOp, undefined, targetNodeId),
+            (window as any).electronAPI.analyzeMultiFileImpact?.(targetSymbol, targetFile, targetLine, workspacePath, targetNodeId),
+            (window as any).electronAPI.correlateRuntimeEvidence?.(targetSymbol, targetFile, targetLine, workspacePath, targetNodeId),
           ]);
+          setBlastResult(blast || null);
           setRuntimeTelemetry(tel || null);
           setCallChainComparison(comp || null);
           setWhatIfResult(whatif || null);
           setImpactReport(impact || null);
           setEvidenceReport(evidence || null);
         } else {
+          setBlastResult(null);
           setRuntimeTelemetry(null);
           setCallChainComparison(null);
           setWhatIfResult(null);
@@ -142,7 +143,7 @@ export default function BDGInspectorPanel({
       const targetFile = targetNode?.file || (activeFilePath ? activeFilePath.split("/").slice(-2).join("/") : undefined);
       const targetLine = targetNode?.location?.line || cursorLine;
       const goal = userGoal || `Optimize ${targetSymbol} execution & error safety`;
-      const proposal = await (window as any).electronAPI.generateAIReasoningProposal?.(targetSymbol, targetFile, targetLine, goal);
+      const proposal = await (window as any).electronAPI.generateAIReasoningProposal?.(targetSymbol, targetFile, targetLine, goal, targetNode?.id);
       setAiProposal(proposal || null);
     }
   };
@@ -155,7 +156,9 @@ export default function BDGInspectorPanel({
         targetNode.symbol,
         targetNode.file,
         targetNode.location.line,
-        op
+        op,
+        undefined,
+        targetNode.id
       );
       setWhatIfResult(whatif || null);
     }

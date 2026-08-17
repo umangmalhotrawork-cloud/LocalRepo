@@ -32,7 +32,7 @@ class AISystemReasoningEngine {
     if (targetSymbol) {
       targetNode = Object.values(bdgEngine.nodes).find(
         (n) =>
-          (n.symbol === targetSymbol || n.symbol.endsWith(`.${targetSymbol}`) || n.symbol.includes(targetSymbol)) &&
+          (n.symbol === targetSymbol || n.symbol.endsWith(`.${targetSymbol}`)) &&
           isFileMatch(n.file, relPath)
       );
       if (!targetNode) {
@@ -47,13 +47,46 @@ class AISystemReasoningEngine {
     }
 
     if (!targetNode) {
-      targetNode = Object.values(bdgEngine.nodes)[0] || {
-        id: "target::generic",
-        symbol: targetSymbol || "process_user_order",
-        file: relPath || "services.py",
-        location: { line: line || 1, col: 1 },
-        type: "function",
-        language: "python"
+      return {
+        id: `prop_${Date.now()}_err`,
+        targetSymbol: targetSymbol || "unknown",
+        targetFile: relPath || "unknown",
+        startLine: line || 1,
+        problemSummary: "Target symbol not found in workspace graph",
+        whyItMatters: "Cannot generate AI reasoning proposal for non-existent target.",
+        affectedCallersDependencies: [],
+        runtimeEvidence: {
+          observed: false,
+          executionCount: 0,
+          lastSeen: null,
+          averageDurationMs: null,
+          errorCount: 0,
+          observedCallers: [],
+          sessions: []
+        },
+        predictedBlastRadius: {
+          filesAffectedCount: 0,
+          functionsAffectedCount: 0,
+          externalSystemsCount: 0,
+          testsCount: 0,
+          riskLevel: "LOW"
+        },
+        whatIfResult: {
+          operation: "remove-node",
+          targetNode: null,
+          originalRiskLevel: "LOW",
+          hypotheticalRiskLevel: "LOW",
+          removedEdges: [],
+          newlyDisconnectedNodes: [],
+          newlyAffectedNodes: [],
+          runtimeObservedImpact: { observedExecutionsLost: 0, errorCountSaved: 0, observedCallersImpacted: [] },
+          predictedRisks: ["Target symbol not found in workspace graph"]
+        },
+        originalCode: "",
+        proposedCode: "",
+        expectedBehavioralImpact: "None",
+        verificationPlan: "None",
+        status: "error"
       };
     }
 

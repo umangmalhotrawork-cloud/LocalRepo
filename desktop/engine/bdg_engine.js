@@ -265,8 +265,11 @@ class BDGEngine {
   /**
    * Queries symbol dependencies for editor context (by symbol, file, or line).
    */
-  querySymbolDependencies(symbol, relPath, line) {
-    let targetNode = null;
+  querySymbolDependencies(symbol, relPath, line, targetNodeId) {
+    let targetNode = (targetNodeId && this.nodes[targetNodeId]) || null;
+    if (!targetNode && symbol && this.nodes[symbol]) {
+      targetNode = this.nodes[symbol];
+    }
 
     const isFileMatch = (nodeFile, targetPath) => {
       if (!targetPath) return true;
@@ -276,7 +279,7 @@ class BDGEngine {
       return false;
     };
 
-    if (symbol) {
+    if (!targetNode && symbol) {
       targetNode = Object.values(this.nodes).find(
         (n) => n.symbol === symbol && isFileMatch(n.file, relPath)
       );
@@ -522,8 +525,11 @@ class BDGEngine {
   /**
    * Helper to query blast radius by symbol name, file, or line.
    */
-  calculateBlastRadiusBySymbol(symbol, relPath, line) {
-    let targetNode = null;
+  calculateBlastRadiusBySymbol(symbol, relPath, line, targetNodeId) {
+    let targetNode = (targetNodeId && this.nodes[targetNodeId]) || null;
+    if (!targetNode && symbol && this.nodes[symbol]) {
+      targetNode = this.nodes[symbol];
+    }
     const isFileMatch = (nodeFile, targetPath) => {
       if (!targetPath) return true;
       if (nodeFile === targetPath) return true;
@@ -533,12 +539,10 @@ class BDGEngine {
       return false;
     };
 
-    if (symbol) {
+    if (!targetNode && symbol) {
       targetNode = Object.values(this.nodes).find(
         (n) =>
-          (n.symbol === symbol ||
-            n.symbol.endsWith(`.${symbol}`) ||
-            n.symbol.includes(symbol)) &&
+          (n.symbol === symbol || n.symbol.endsWith(`.${symbol}`)) &&
           isFileMatch(n.file, relPath)
       );
       if (!targetNode) {
@@ -549,7 +553,7 @@ class BDGEngine {
             n.id.endsWith(`::${symbol}`)
         );
       }
-    } else if (relPath && line) {
+    } else if (!targetNode && relPath && line) {
       targetNode = Object.values(this.nodes).find(
         (n) =>
           isFileMatch(n.file, relPath) &&
@@ -568,8 +572,8 @@ class BDGEngine {
   /**
    * Performs recursive multi-file impact analysis across the entire loaded BDG graph starting from a symbol.
    */
-  analyzeMultiFileImpact(symbolOrId, relPath, line) {
-    let targetNode = this.nodes[symbolOrId] || null;
+  analyzeMultiFileImpact(symbolOrId, relPath, line, targetNodeId) {
+    let targetNode = (targetNodeId && this.nodes[targetNodeId]) || this.nodes[symbolOrId] || null;
 
     const isFileMatch = (nodeFile, targetPath) => {
       if (!targetPath) return true;
@@ -582,7 +586,7 @@ class BDGEngine {
     if (!targetNode && symbolOrId) {
       targetNode = Object.values(this.nodes).find(
         (n) =>
-          (n.symbol === symbolOrId || n.symbol.endsWith(`.${symbolOrId}`) || n.symbol.includes(symbolOrId)) &&
+          (n.symbol === symbolOrId || n.symbol.endsWith(`.${symbolOrId}`)) &&
           isFileMatch(n.file, relPath)
       );
       if (!targetNode) {
@@ -883,8 +887,11 @@ class BDGEngine {
   /**
    * Helper to run What-If simulation by symbol name, file, or line.
    */
-  simulateWhatIfBySymbol(symbol, relPath, line, operation, secondarySymbol) {
-    let targetNode = null;
+  simulateWhatIfBySymbol(symbol, relPath, line, operation, secondarySymbol, targetNodeId) {
+    let targetNode = (targetNodeId && this.nodes[targetNodeId]) || null;
+    if (!targetNode && symbol && this.nodes[symbol]) {
+      targetNode = this.nodes[symbol];
+    }
     const isFileMatch = (nodeFile, targetPath) => {
       if (!targetPath) return true;
       if (nodeFile === targetPath) return true;
@@ -893,10 +900,10 @@ class BDGEngine {
       return false;
     };
 
-    if (symbol) {
+    if (!targetNode && symbol) {
       targetNode = Object.values(this.nodes).find(
         (n) =>
-          (n.symbol === symbol || n.symbol.endsWith(`.${symbol}`) || n.symbol.includes(symbol)) &&
+          (n.symbol === symbol || n.symbol.endsWith(`.${symbol}`)) &&
           isFileMatch(n.file, relPath)
       );
       if (!targetNode) {
@@ -904,7 +911,7 @@ class BDGEngine {
           (n) => n.symbol === symbol || n.symbol.endsWith(`.${symbol}`) || n.id.endsWith(`::${symbol}`)
         );
       }
-    } else if (relPath && line) {
+    } else if (!targetNode && relPath && line) {
       targetNode = Object.values(this.nodes).find(
         (n) => isFileMatch(n.file, relPath) && n.location.line <= line && (n.location.endLine || n.location.line + 20) >= line
       );

@@ -231,7 +231,7 @@ class RuntimeExecutionIndex {
    * Correlates static BDG dependencies with runtime telemetry for a target symbol.
    * Returns a RuntimeEvidenceReport classifying each dependency as CONFIRMED, STATIC_ONLY, or RUNTIME_ONLY.
    */
-  correlateRuntimeEvidence(symbol, relPath, line) {
+  correlateRuntimeEvidence(symbol, relPath, line, targetNodeId = null) {
     const emptyReport = {
       targetSymbol: symbol || "unknown",
       targetFile: relPath || "unknown",
@@ -257,8 +257,14 @@ class RuntimeExecutionIndex {
     };
 
     // 1. Resolve target node via BDG
-    const queryResult = bdgEngine.querySymbolDependencies(symbol, relPath, line);
-    const targetNode = queryResult?.node;
+    let targetNode = (targetNodeId && bdgEngine.nodes[targetNodeId]) || null;
+    let queryResult = null;
+    if (targetNode) {
+      queryResult = bdgEngine.querySymbolDependencies(targetNode.symbol, targetNode.file, targetNode.location?.line, targetNode.id);
+    } else {
+      queryResult = bdgEngine.querySymbolDependencies(symbol, relPath, line);
+      targetNode = queryResult?.node;
+    }
     if (!targetNode) {
       return emptyReport;
     }

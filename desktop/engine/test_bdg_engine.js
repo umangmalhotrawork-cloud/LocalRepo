@@ -337,10 +337,218 @@ function runTests() {
   }
   console.log('[EVIDENCE SCENARIO 11 PASSED] Non-existent symbol returns empty evidence report.');
 
+  // --- CROSS-FEATURE TARGET CONSISTENCY REGRESSION TESTS (13A–13E) ---
+
+  // TEST 13A: Substring symbol disambiguation (checkout vs process_checkout in same file)
+  console.log('[CONSISTENCY 13A] Testing substring symbol disambiguation (checkout vs process_checkout in checkout.py)...');
+  bdgEngine.nodes = {
+    'fn_process_checkout': { id: 'fn_process_checkout', symbol: 'process_checkout', file: 'src/checkout.py', location: { line: 1 }, type: 'function', language: 'python' },
+    'fn_checkout': { id: 'fn_checkout', symbol: 'checkout', file: 'src/checkout.py', location: { line: 20 }, type: 'function', language: 'python' },
+  };
+
+  const qCheckout = bdgEngine.querySymbolDependencies('checkout', 'src/checkout.py', 20);
+  const bCheckout = bdgEngine.calculateBlastRadiusBySymbol('checkout', 'src/checkout.py', 20);
+  const iCheckout = bdgEngine.analyzeMultiFileImpact('checkout', 'src/checkout.py', 20);
+  const wCheckout = bdgEngine.simulateWhatIfBySymbol('checkout', 'src/checkout.py', 20, 'remove-node');
+
+  if (qCheckout.node?.id !== 'fn_checkout') {
+    console.error(`[CONSISTENCY 13A FAILED] querySymbolDependencies resolved to ${qCheckout.node?.id} instead of fn_checkout`);
+    process.exit(1);
+  }
+  if (bCheckout.targetNode?.id !== 'fn_checkout') {
+    console.error(`[CONSISTENCY 13A FAILED] calculateBlastRadiusBySymbol resolved to ${bCheckout.targetNode?.id} instead of fn_checkout`);
+    process.exit(1);
+  }
+  if (iCheckout.targetNode?.id !== 'fn_checkout') {
+    console.error(`[CONSISTENCY 13A FAILED] analyzeMultiFileImpact resolved to ${iCheckout.targetNode?.id} instead of fn_checkout`);
+    process.exit(1);
+  }
+  if (wCheckout.targetNode?.id !== 'fn_checkout') {
+    console.error(`[CONSISTENCY 13A FAILED] simulateWhatIfBySymbol resolved to ${wCheckout.targetNode?.id} instead of fn_checkout`);
+    process.exit(1);
+  }
+  if (qCheckout.node?.id === 'fn_process_checkout' || bCheckout.targetNode?.id === 'fn_process_checkout' ||
+      iCheckout.targetNode?.id === 'fn_process_checkout' || wCheckout.targetNode?.id === 'fn_process_checkout') {
+    console.error('[CONSISTENCY 13A FAILED] Substring query for checkout incorrectly resolved to process_checkout!');
+    process.exit(1);
+  }
+
+  const qProc = bdgEngine.querySymbolDependencies('process_checkout', 'src/checkout.py', 1);
+  const bProc = bdgEngine.calculateBlastRadiusBySymbol('process_checkout', 'src/checkout.py', 1);
+  if (qProc.node?.id !== 'fn_process_checkout' || bProc.targetNode?.id !== 'fn_process_checkout') {
+    console.error('[CONSISTENCY 13A FAILED] process_checkout failed to resolve to fn_process_checkout');
+    process.exit(1);
+  }
+  console.log('[CONSISTENCY 13A PASSED] Substring disambiguation verified across all 4 engine methods.');
+
+  // TEST 13B: AI reasoning non-existent target check
+  console.log('[CONSISTENCY 13B] Testing AI reasoning proposal generation for non-existent target...');
+  const firstNode = Object.values(bdgEngine.nodes)[0];
+  const aiErrProp = aiSystemReasoningEngine.generateProposal('xyz_nonexistent_999', 'src/checkout.py', 1);
+  if (aiErrProp.targetSymbol === firstNode.symbol && aiErrProp.status !== 'error') {
+    console.error('[CONSISTENCY 13B FAILED] generateProposal targeted Object.values(nodes)[0] instead of returning error proposal!');
+    process.exit(1);
+  }
+  if (aiErrProp.status !== 'error') {
+    console.error(`[CONSISTENCY 13B FAILED] generateProposal status was ${aiErrProp.status} instead of error!`);
+    process.exit(1);
+  }
+  if (!aiErrProp.problemSummary.includes('Target symbol not found')) {
+    console.error('[CONSISTENCY 13B FAILED] generateProposal problemSummary missing expected error text!');
+    process.exit(1);
+  }
+  console.log('[CONSISTENCY 13B PASSED] AI reasoning returns explicit error proposal without targeting arbitrary nodes.');
+
+  // TEST 13C: Cursor independence
+  console.log('[CONSISTENCY 13C] Testing cursor independence for explicit symbol queries...');
+  for (const testLine of [1, 8, 19, 35, 100]) {
+    const qCursor = bdgEngine.querySymbolDependencies('checkout', 'src/checkout.py', testLine);
+    if (qCursor.node?.id !== 'fn_checkout') {
+      console.error(`[CONSISTENCY 13C FAILED] Cursor line ${testLine} caused checkout to resolve to ${qCursor.node?.id}`);
+      process.exit(1);
+    }
+  }
+  console.log('[CONSISTENCY 13C PASSED] Explicit symbol resolution is 100% independent of cursor line.');
+
+  // TEST 13D: Existing valid symbols reconfirmation
+  console.log('[CONSISTENCY 13D] Reconfirming compute_order_total and process_checkout in ai_cart_project...');
+  bdgEngine.buildGraphForWorkspace(cartProjectDir);
+  const qValid1 = bdgEngine.querySymbolDependencies('compute_order_total', 'src/checkout_engine.py', 19);
+  const qValid2 = bdgEngine.querySymbolDependencies('process_checkout', 'src/checkout_engine.py', 1);
+  if (qValid1.node?.symbol !== 'compute_order_total' || qValid2.node?.symbol !== 'process_checkout') {
+    console.error('[CONSISTENCY 13D FAILED] Valid symbols failed reconfirmation!');
+    process.exit(1);
+  }
+  console.log('[CONSISTENCY 13D PASSED] compute_order_total and process_checkout resolve correctly.');
+
+  // TEST 13E: Existing non-existent symbol safety reconfirmation
+  console.log('[CONSISTENCY 13E] Reconfirming xyz_completely_nonexistent_987654 returns null target across all BDG systems...');
+  const qNon = bdgEngine.querySymbolDependencies('xyz_completely_nonexistent_987654', 'src/checkout_engine.py', 8);
+  const bNon = bdgEngine.calculateBlastRadiusBySymbol('xyz_completely_nonexistent_987654', 'src/checkout_engine.py', 8);
+  const iNon = bdgEngine.analyzeMultiFileImpact('xyz_completely_nonexistent_987654', 'src/checkout_engine.py', 8);
+  const wNon = bdgEngine.simulateWhatIfBySymbol('xyz_completely_nonexistent_987654', 'src/checkout_engine.py', 8, 'remove-node');
+  if (qNon.node !== null || bNon.targetNode !== null || iNon.targetNode !== null || wNon.targetNode !== null) {
+    console.error('[CONSISTENCY 13E FAILED] Nonexistent symbol returned a non-null target!');
+    process.exit(1);
+  }
+  console.log('[CONSISTENCY 13E PASSED] Nonexistent symbol cleanly returns null target across all systems.');
+
+  // --- CANONICAL TARGET IDENTITY & PASS-THROUGH TESTS (14A–14F) ---
+
+  // TEST 14A: Canonical Target Consistency for compute_order_total
+  console.log('[CANONICAL 14A] Testing canonical targetNodeId pass-through for compute_order_total...');
+  bdgEngine.buildGraphForWorkspace(cartProjectDir);
+  const res14A = bdgEngine.querySymbolDependencies('compute_order_total', 'src/checkout_engine.py', 19);
+  const targetId14A = res14A.node.id;
+  const blast14A = bdgEngine.calculateBlastRadiusBySymbol('compute_order_total', 'src/checkout_engine.py', 19, targetId14A);
+  const impact14A = bdgEngine.analyzeMultiFileImpact('compute_order_total', 'src/checkout_engine.py', 19, targetId14A);
+  const whatif14A = bdgEngine.simulateWhatIfBySymbol('compute_order_total', 'src/checkout_engine.py', 19, 'remove-node', undefined, targetId14A);
+  const evidence14A = runtimeExecutionIndex.correlateRuntimeEvidence('compute_order_total', 'src/checkout_engine.py', 19, targetId14A);
+  const prop14A = aiSystemReasoningEngine.generateProposal('compute_order_total', 'src/checkout_engine.py', 19, 'test', targetId14A);
+
+  if (blast14A.targetNode?.id !== targetId14A ||
+      impact14A.targetNode?.id !== targetId14A ||
+      whatif14A.targetNode?.id !== targetId14A ||
+      evidence14A.targetNode?.id !== targetId14A ||
+      prop14A.targetSymbol !== 'compute_order_total') {
+    console.error('[CANONICAL 14A FAILED] Downstream systems resolved different target IDs when passed canonical targetNodeId!');
+    process.exit(1);
+  }
+  console.log('[CANONICAL 14A PASSED] All 5 downstream systems resolved exact canonical targetNode.id for compute_order_total.');
+
+  // TEST 14B: Canonical Target Consistency for process_checkout
+  console.log('[CANONICAL 14B] Testing canonical targetNodeId pass-through for process_checkout...');
+  const res14B = bdgEngine.querySymbolDependencies('process_checkout', 'src/checkout_engine.py', 1);
+  const targetId14B = res14B.node.id;
+  const blast14B = bdgEngine.calculateBlastRadiusBySymbol('process_checkout', 'src/checkout_engine.py', 1, targetId14B);
+  const impact14B = bdgEngine.analyzeMultiFileImpact('process_checkout', 'src/checkout_engine.py', 1, targetId14B);
+  const whatif14B = bdgEngine.simulateWhatIfBySymbol('process_checkout', 'src/checkout_engine.py', 1, 'remove-node', undefined, targetId14B);
+  const evidence14B = runtimeExecutionIndex.correlateRuntimeEvidence('process_checkout', 'src/checkout_engine.py', 1, targetId14B);
+
+  if (blast14B.targetNode?.id !== targetId14B ||
+      impact14B.targetNode?.id !== targetId14B ||
+      whatif14B.targetNode?.id !== targetId14B ||
+      evidence14B.targetNode?.id !== targetId14B) {
+    console.error('[CANONICAL 14B FAILED] Downstream systems resolved different target IDs for process_checkout!');
+    process.exit(1);
+  }
+  console.log('[CANONICAL 14B PASSED] All downstream systems resolved exact canonical targetNode.id for process_checkout.');
+
+  // TEST 14C: Substring safety with canonical ID
+  console.log('[CANONICAL 14C] Testing canonical targetNodeId substring safety (checkout vs process_checkout)...');
+  bdgEngine.nodes = {
+    'fn_process_checkout': { id: 'fn_process_checkout', symbol: 'process_checkout', file: 'src/checkout.py', location: { line: 1 }, type: 'function', language: 'python' },
+    'fn_checkout': { id: 'fn_checkout', symbol: 'checkout', file: 'src/checkout.py', location: { line: 20 }, type: 'function', language: 'python' },
+  };
+  const blast14C = bdgEngine.calculateBlastRadiusBySymbol('checkout', 'src/checkout.py', 20, 'fn_checkout');
+  const impact14C = bdgEngine.analyzeMultiFileImpact('checkout', 'src/checkout.py', 20, 'fn_checkout');
+  const whatif14C = bdgEngine.simulateWhatIfBySymbol('checkout', 'src/checkout.py', 20, 'remove-node', undefined, 'fn_checkout');
+  const prop14C = aiSystemReasoningEngine.generateProposal('checkout', 'src/checkout.py', 20, 'test', 'fn_checkout');
+
+  if (blast14C.targetNode?.id !== 'fn_checkout' ||
+      impact14C.targetNode?.id !== 'fn_checkout' ||
+      whatif14C.targetNode?.id !== 'fn_checkout' ||
+      prop14C.targetSymbol !== 'checkout') {
+    console.error('[CANONICAL 14C FAILED] Canonical ID fn_checkout resolved to wrong node!');
+    process.exit(1);
+  }
+  if (blast14C.targetNode?.id === 'fn_process_checkout' || impact14C.targetNode?.id === 'fn_process_checkout') {
+    console.error('[CANONICAL 14C FAILED] Canonical ID fn_checkout incorrectly resolved to fn_process_checkout!');
+    process.exit(1);
+  }
+  console.log('[CANONICAL 14C PASSED] Canonical targetNodeId guarantees zero substring drift.');
+
+  // TEST 14D: Nonexistent target ID handling
+  console.log('[CANONICAL 14D] Testing nonexistent targetNodeId handling...');
+  const blast14D = bdgEngine.calculateBlastRadiusBySymbol('unknown', 'src/checkout.py', 1, 'nonexistent::node::id');
+  const impact14D = bdgEngine.analyzeMultiFileImpact('unknown', 'src/checkout.py', 1, 'nonexistent::node::id');
+  const whatif14D = bdgEngine.simulateWhatIfBySymbol('unknown', 'src/checkout.py', 1, 'remove-node', undefined, 'nonexistent::node::id');
+  const evidence14D = runtimeExecutionIndex.correlateRuntimeEvidence('unknown', 'src/checkout.py', 1, 'nonexistent::node::id');
+  const prop14D = aiSystemReasoningEngine.generateProposal('unknown', 'src/checkout.py', 1, 'test', 'nonexistent::node::id');
+
+  if (blast14D.targetNode !== null || impact14D.targetNode !== null || whatif14D.targetNode !== null || evidence14D.targetNode !== null) {
+    console.error('[CANONICAL 14D FAILED] Nonexistent targetNodeId produced a non-null target!');
+    process.exit(1);
+  }
+  if (prop14D.status !== 'error') {
+    console.error('[CANONICAL 14D FAILED] Nonexistent targetNodeId in generateProposal did not return error status!');
+    process.exit(1);
+  }
+  console.log('[CANONICAL 14D PASSED] Nonexistent targetNodeId produces clean null/error results across all systems.');
+
+  // TEST 14E: Workspace switch safety
+  console.log('[CANONICAL 14E] Testing workspace switch safety with targetNodeId...');
+  bdgEngine.buildGraphForWorkspace(cartProjectDir);
+  const nodeFromCart = Object.keys(bdgEngine.nodes)[0];
+  // Rebuild demoDir workspace
+  bdgEngine.buildGraphForWorkspace(demoDir);
+  // Verify using nodeFromCart in demoDir does not crash or cross-contaminate
+  const blast14E = bdgEngine.calculateBlastRadiusBySymbol('test', 'test.py', 1, nodeFromCart);
+  if (blast14E.targetNode && blast14E.targetNode.id !== nodeFromCart) {
+    console.error('[CANONICAL 14E FAILED] Stale targetNodeId resolved to an arbitrary different node!');
+    process.exit(1);
+  }
+  console.log('[CANONICAL 14E PASSED] Workspace switch with stale targetNodeId handled cleanly without cross-contamination.');
+
+  // TEST 14F: Backwards compatibility without targetNodeId
+  console.log('[CANONICAL 14F] Testing backwards compatibility calling methods without targetNodeId...');
+  bdgEngine.buildGraphForWorkspace(cartProjectDir);
+  const blast14F = bdgEngine.calculateBlastRadiusBySymbol('compute_order_total', 'src/checkout_engine.py', 19);
+  const impact14F = bdgEngine.analyzeMultiFileImpact('compute_order_total', 'src/checkout_engine.py', 19);
+  const whatif14F = bdgEngine.simulateWhatIfBySymbol('compute_order_total', 'src/checkout_engine.py', 19, 'remove-node');
+  const evidence14F = runtimeExecutionIndex.correlateRuntimeEvidence('compute_order_total', 'src/checkout_engine.py', 19);
+  const prop14F = aiSystemReasoningEngine.generateProposal('compute_order_total', 'src/checkout_engine.py', 19, 'test');
+
+  if (!blast14F.targetNode || !impact14F.targetNode || !whatif14F.targetNode || !evidence14F.targetNode || prop14F.status === 'error') {
+    console.error('[CANONICAL 14F FAILED] Legacy calls without targetNodeId failed to resolve target!');
+    process.exit(1);
+  }
+  console.log('[CANONICAL 14F PASSED] Backwards compatibility for callers without targetNodeId fully verified.');
+
   // Re-build demoDir graph to leave state clean for future extensions
   bdgEngine.buildGraphForWorkspace(demoDir);
 
-  console.log('\n[SUCCESS] ALL AI SYSTEM REASONING + MUTATION + EVIDENCE CORRELATION REGRESSION SCENARIOS PASSED CLEANLY.');
+  console.log('\n[SUCCESS] ALL AI SYSTEM REASONING + MUTATION + EVIDENCE CORRELATION + CROSS-FEATURE CONSISTENCY + CANONICAL PASS-THROUGH SCENARIOS PASSED CLEANLY.');
 }
 
 if (require.main === module) {
