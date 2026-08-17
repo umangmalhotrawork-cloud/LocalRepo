@@ -570,6 +570,188 @@ class BDGEngine {
   }
 
   /**
+   * Performs recursive multi-file impact analysis across the entire loaded BDG graph starting from a symbol.
+   */
+  analyzeMultiFileImpact(symbolOrId, relPath, line) {
+    let targetNode = this.nodes[symbolOrId] || null;
+
+    const isFileMatch = (nodeFile, targetPath) => {
+      if (!targetPath) return true;
+      if (nodeFile === targetPath) return true;
+      if (nodeFile.endsWith(targetPath) || targetPath.endsWith(nodeFile)) return true;
+      if (path.basename(nodeFile) === path.basename(targetPath)) return true;
+      return false;
+    };
+
+    if (!targetNode && symbolOrId) {
+      targetNode = Object.values(this.nodes).find(
+        (n) =>
+          (n.symbol === symbolOrId || n.symbol.endsWith(`.${symbolOrId}`) || n.symbol.includes(symbolOrId)) &&
+          isFileMatch(n.file, relPath)
+      );
+    }
+    if (!targetNode && relPath && line) {
+      targetNode = Object.values(this.nodes).find(
+        (n) =>
+          isFileMatch(n.file, relPath) &&
+          n.location.line <= line &&
+          (n.location.endLine || n.location.line + 20) >= line
+      );
+    }
+    if (!targetNode && symbolOrId) {
+      targetNode = Object.values(this.nodes).find(
+        (n) => n.symbol === symbolOrId || n.symbol.endsWith(`.${symbolOrId}`) || n.id.endsWith(`::${symbolOrId}`)
+      );
+    }
+
+    if (!targetNode) {
+      return {
+        targetSymbol: symbolOrId || "unknown",
+        targetFile: relPath || "unknown",
+        targetNode: null,
+        affectedFiles: relPath ? [relPath] : [],
+        affectedSymbols: [],
+        dependencyEdgeCount: 0,
+        callers: { direct: [], indirect: [] },
+        callees: { direct: [], indirect: [] },
+        externalEffects: [],
+        databaseEffects: [],
+        stateWriteEffects: [],
+        riskLevel: "LOW",
+        riskExplanation: "Symbol has 0 upstream callers, 0 downstream callees, and 0 external/database side effects."
+      };
+    }
+
+    // 1. Recursive Upstream Caller Traversal (BFS)
+    const directCallersMap = new Map();
+    const indirectCallersMap = new Map();
+    const visitedUpstream = new Set([targetNode.id]);
+    const upstreamQueue = [{ id: targetNode.id, depth: 0 }];
+
+    while (upstreamQueue.length > 0) {
+      const { id, depth } = upstreamQueue.shift();
+      const incomingEdges = this.edges.filter(
+        (e) => e.target === id && (e.relationship === "calls" || e.relationship === "invokes" || e.relationship === "imports")
+      );
+
+      for (const edge of incomingEdges) {
+        const callerNode = this.nodes[edge.source];
+        if (!callerNode || callerNode.type === "file" || callerNode.type === "module" || visitedUpstream.has(callerNode.id)) continue;
+
+        visitedUpstream.add(callerNode.id);
+        if (depth === 0) {
+          directCallersMap.set(callerNode.id, callerNode);
+        } else {
+          indirectCallersMap.set(callerNode.id, callerNode);
+        }
+        upstreamQueue.push({ id: callerNode.id, depth: depth + 1 });
+      }
+    }
+
+    // 2. Recursive Downstream Callee & Effect Traversal (BFS)
+    const directCalleesMap = new Map();
+    const indirectCalleesMap = new Map();
+    const externalEffectsMap = new Map();
+    const databaseEffectsMap = new Map();
+    const stateWriteEffectsMap = new Map();
+    const visitedDownstream = new Set([targetNode.id]);
+    const downstreamQueue = [{ id: targetNode.id, depth: 0 }];
+
+    while (downstreamQueue.length > 0) {
+      const { id, depth } = downstreamQueue.shift();
+      const outgoingEdges = this.edges.filter((e) => e.source === id);
+
+      for (const edge of outgoingEdges) {
+        const calleeNode = this.nodes[edge.target];
+        if (!calleeNode || calleeNode.type === "file" || calleeNode.type === "module") continue;
+
+        if (calleeNode.type === "external-api" || edge.relationship === "external-call") {
+          externalEffectsMap.set(calleeNode.id, calleeNode);
+        }
+        if (calleeNode.type === "database-op" || ["database-read", "database-write"].includes(edge.relationship)) {
+          databaseEffectsMap.set(calleeNode.id, calleeNode);
+        }
+        if (calleeNode.type === "variable" || ["writes", "mutates"].includes(edge.relationship)) {
+          stateWriteEffectsMap.set(calleeNode.id, calleeNode);
+        }
+
+        if (visitedDownstream.has(calleeNode.id)) continue;
+        visitedDownstream.add(calleeNode.id);
+
+        if (depth === 0) {
+          directCalleesMap.set(calleeNode.id, calleeNode);
+        } else {
+          indirectCalleesMap.set(calleeNode.id, calleeNode);
+        }
+        downstreamQueue.push({ id: calleeNode.id, depth: depth + 1 });
+      }
+    }
+
+    // Combine all affected symbols & files
+    const allAffectedSymbols = Array.from(
+      new Set([
+        ...directCallersMap.values(),
+        ...indirectCallersMap.values(),
+        ...directCalleesMap.values(),
+        ...indirectCalleesMap.values(),
+        ...externalEffectsMap.values(),
+        ...databaseEffectsMap.values(),
+        ...stateWriteEffectsMap.values(),
+      ])
+    );
+
+    const affectedFiles = Array.from(
+      new Set([targetNode.file, ...allAffectedSymbols.map((n) => n.file)])
+    ).filter(Boolean);
+
+    const affectedNodeIdSet = new Set([targetNode.id, ...allAffectedSymbols.map((n) => n.id)]);
+    const dependencyEdgeCount = this.edges.filter(
+      (e) => affectedNodeIdSet.has(e.source) || affectedNodeIdSet.has(e.target)
+    ).length;
+
+    const directCallers = Array.from(directCallersMap.values());
+    const indirectCallers = Array.from(indirectCallersMap.values());
+    const directCallees = Array.from(directCalleesMap.values());
+    const indirectCallees = Array.from(indirectCalleesMap.values());
+    const externalEffects = Array.from(externalEffectsMap.values());
+    const databaseEffects = Array.from(databaseEffectsMap.values());
+    const stateWriteEffects = Array.from(stateWriteEffectsMap.values());
+
+    let riskLevel = "LOW";
+    let riskExplanation = "Local function with low multi-file footprint.";
+
+    if ((externalEffects.length > 0 && databaseEffects.length > 0) || affectedFiles.length >= 4 || indirectCallers.length >= 5) {
+      riskLevel = "CRITICAL";
+      riskExplanation = `High blast radius across ${affectedFiles.length} files with ${externalEffects.length} external API and ${databaseEffects.length} database side effects.`;
+    } else if (externalEffects.length > 0 || databaseEffects.length > 0 || affectedFiles.length >= 2 || indirectCallers.length >= 2) {
+      riskLevel = "HIGH";
+      riskExplanation = `Multi-file impact spanning ${affectedFiles.length} files with ${indirectCallers.length} indirect callers and side effects.`;
+    } else if (directCallers.length >= 1 || directCallees.length >= 2) {
+      riskLevel = "MEDIUM";
+      riskExplanation = `Direct dependency impact with ${directCallers.length} callers and ${directCallees.length} callees in ${affectedFiles.length} file(s).`;
+    } else {
+      riskLevel = "LOW";
+      riskExplanation = `Isolated symbol with 0 indirect callers and 0 external/database side effects.`;
+    }
+
+    return {
+      targetSymbol: targetNode.symbol,
+      targetFile: targetNode.file,
+      targetNode,
+      affectedFiles,
+      affectedSymbols: allAffectedSymbols,
+      dependencyEdgeCount,
+      callers: { direct: directCallers, indirect: indirectCallers },
+      callees: { direct: directCallees, indirect: indirectCallees },
+      externalEffects,
+      databaseEffects,
+      stateWriteEffects,
+      riskLevel,
+      riskExplanation,
+    };
+  }
+
+  /**
    * Simulates a What-If hypothetical change on an immutable in-memory clone of the BDG graph.
    * Workspace source files on disk and real BDG graph are NEVER modified.
    */

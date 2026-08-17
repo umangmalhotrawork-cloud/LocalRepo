@@ -199,6 +199,22 @@ export interface BehavioralDiffReport {
 
 export type AIProposalStatus = "pending" | "approved" | "applied" | "rejected" | "rolled_back" | "error";
 
+export interface MultiFileImpactReport {
+  targetSymbol: string;
+  targetFile: string;
+  targetNode: BDGNode | null;
+  affectedFiles: string[];
+  affectedSymbols: BDGNode[];
+  dependencyEdgeCount: number;
+  callers: { direct: BDGNode[]; indirect: BDGNode[] };
+  callees: { direct: BDGNode[]; indirect: BDGNode[] };
+  externalEffects: BDGNode[];
+  databaseEffects: BDGNode[];
+  stateWriteEffects: BDGNode[];
+  riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  riskExplanation: string;
+}
+
 export interface AIReasoningProposal {
   id: string;
   targetSymbol: string;

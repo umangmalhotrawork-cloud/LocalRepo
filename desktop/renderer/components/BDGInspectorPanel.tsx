@@ -38,6 +38,7 @@ import {
   WhatIfOperationType,
   BehavioralDiffReport,
   AIReasoningProposal,
+  MultiFileImpactReport,
 } from "../../engine/bdg_schema";
 
 interface BDGInspectorPanelProps {
@@ -58,6 +59,7 @@ export default function BDGInspectorPanel({
   const [loading, setLoading] = useState<boolean>(false);
   const [queryResult, setQueryResult] = useState<BDGQueryResult | null>(null);
   const [blastResult, setBlastResult] = useState<BlastRadiusResult | null>(null);
+  const [impactReport, setImpactReport] = useState<MultiFileImpactReport | null>(null);
   const [runtimeTelemetry, setRuntimeTelemetry] = useState<BDGNodeRuntimeTelemetry | null>(null);
   const [callChainComparison, setCallChainComparison] = useState<RuntimeCallChainComparison | null>(null);
   const [sessions, setSessions] = useState<any[]>([]);
@@ -72,6 +74,7 @@ export default function BDGInspectorPanel({
 
   const fetchBDGDependencies = async (symbolToQuery?: string) => {
     setLoading(true);
+    setImpactReport(null);
     try {
       if (typeof window !== "undefined" && (window as any).electronAPI) {
         const relPath = activeFilePath
@@ -102,18 +105,21 @@ export default function BDGInspectorPanel({
         }
 
         if (targetNodeId) {
-          const [tel, comp, whatif] = await Promise.all([
+          const [tel, comp, whatif, impact] = await Promise.all([
             (window as any).electronAPI.getRuntimeTelemetry?.(targetNodeId),
             (window as any).electronAPI.getRuntimeCallChainComparison?.(targetNodeId),
             (window as any).electronAPI.simulateBDGWhatIf?.(targetSymbol, targetFile, targetLine, selectedWhatIfOp),
+            (window as any).electronAPI.analyzeMultiFileImpact?.(targetSymbol, targetFile, targetLine, workspacePath),
           ]);
           setRuntimeTelemetry(tel || null);
           setCallChainComparison(comp || null);
           setWhatIfResult(whatif || null);
+          setImpactReport(impact || null);
         } else {
           setRuntimeTelemetry(null);
           setCallChainComparison(null);
           setWhatIfResult(null);
+          setImpactReport(null);
         }
       }
     } catch (e) {
@@ -476,18 +482,48 @@ export default function BDGInspectorPanel({
               </div>
             )}
 
-            {/* BEHAVIORAL DIFF / IMPACT REVIEW TAB */}
+            {/* BEHAVIORAL DIFF / MULTI-FILE IMPACT REVIEW TAB */}
             {activeTab === "impact" && (
-              <div className="space-y-3">
-                <div className="p-3 bg-[#0d0d12] rounded-xl border border-[#1f1f24] space-y-2">
-                  <div className="flex items-center justify-between text-xs font-bold text-cyan-300">
-                    <div className="flex items-center gap-1.5">
-                      <GitCompare className="w-4 h-4 text-cyan-400" />
-                      <span>BEHAVIORAL IMPACT REVIEW</span>
+              <div className="space-y-3 font-mono">
+                {impactReport && (
+                  <div className="p-3 bg-[#0d0d12] rounded-xl border border-[#1f1f24] space-y-2.5">
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <span className="text-cyan-300 flex items-center gap-1.5 truncate">
+                        <GitCompare className="w-4 h-4 text-cyan-400 shrink-0" />
+                        <span className="truncate">MULTI-FILE IMPACT: <span className="text-white font-mono">{impactReport.targetSymbol}</span></span>
+                      </span>
+                      {renderRiskBadge(impactReport.riskLevel)}
                     </div>
-                    {diffReport && renderRiskBadge(diffReport.riskLevel)}
+                    <div className="text-[10px] text-zinc-400 border-t border-[#1f1f24] pt-2">
+                      <span className="text-zinc-500 font-bold block">RISK EXPLANATION:</span>
+                      <span className="text-cyan-200">{impactReport.riskExplanation}</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5 text-center text-[10px] pt-1">
+                      <div className="bg-[#050505] p-1.5 rounded border border-[#1a1a20]">
+                        <span className="text-zinc-500 block">Affected Files</span>
+                        <span className="text-cyan-400 font-bold">{impactReport.affectedFiles.length}</span>
+                      </div>
+                      <div className="bg-[#050505] p-1.5 rounded border border-[#1a1a20]">
+                        <span className="text-zinc-500 block">Affected Symbols</span>
+                        <span className="text-purple-400 font-bold">{impactReport.affectedSymbols.length}</span>
+                      </div>
+                      <div className="bg-[#050505] p-1.5 rounded border border-[#1a1a20]">
+                        <span className="text-zinc-500 block">Edges Traversed</span>
+                        <span className="text-amber-400 font-bold">{impactReport.dependencyEdgeCount}</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5 text-[10px] pt-1 border-t border-[#1f1f24]">
+                      <div className="bg-[#050505] p-1.5 rounded border border-[#1a1a20]">
+                        <span className="text-zinc-500 block">Callers (Direct/Indirect)</span>
+                        <span className="text-white font-bold">{impactReport.callers.direct.length} / {impactReport.callers.indirect.length}</span>
+                      </div>
+                      <div className="bg-[#050505] p-1.5 rounded border border-[#1a1a20]">
+                        <span className="text-zinc-500 block">Callees (Direct/Indirect)</span>
+                        <span className="text-white font-bold">{impactReport.callees.direct.length} / {impactReport.callees.indirect.length}</span>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {diffReport && diffReport.structuralChanges.length > 0 && (
                   <div className="space-y-1.5">

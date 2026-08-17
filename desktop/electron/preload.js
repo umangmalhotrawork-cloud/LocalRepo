@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   queryBDGSymbolDependencies: (symbol, relPath, line, workspacePath) => ipcRenderer.invoke('bdg:querySymbolDependencies', { symbol, relPath, line, workspacePath }),
   updateBDGFile: (fullPath, content) => ipcRenderer.invoke('bdg:updateFile', { fullPath, content }),
   calculateBDGBlastRadius: (symbol, relPath, line, workspacePath) => ipcRenderer.invoke('bdg:calculateBlastRadius', { symbol, relPath, line, workspacePath }),
+  analyzeMultiFileImpact: (symbol, relPath, line, workspacePath) => ipcRenderer.invoke('bdg:analyzeMultiFileImpact', { symbol, relPath, line, workspacePath }),
   getRuntimeTelemetry: (nodeId) => ipcRenderer.invoke('runtime:getTelemetry', nodeId),
   getRuntimeCallChainComparison: (nodeId) => ipcRenderer.invoke('runtime:getCallChainComparison', nodeId),
   getRuntimeSessions: () => ipcRenderer.invoke('runtime:getSessions'),

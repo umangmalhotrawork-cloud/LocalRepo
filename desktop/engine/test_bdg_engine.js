@@ -78,6 +78,42 @@ function runTests() {
       }
       console.log(`[BDG WHAT-IF PASSED] Operation '${op}' executed cleanly for compute_order_total (Risk: ${simRes.hypotheticalRiskLevel})`);
     }
+    // Test 5: Multi-File Impact Analysis (compute_order_total)
+    console.log('[MULTI-FILE IMPACT] Testing multi-file impact analysis for compute_order_total...');
+    const multiImpact = bdgEngine.analyzeMultiFileImpact('compute_order_total', 'src/checkout_engine.py', 19);
+    console.log(`[MULTI-FILE IMPACT RESULT] Target: ${multiImpact.targetSymbol}, Affected Files: ${multiImpact.affectedFiles.length}, Risk: ${multiImpact.riskLevel}`);
+    if (!multiImpact || !multiImpact.targetNode || multiImpact.affectedFiles.length === 0) {
+      console.error('[MULTI-FILE IMPACT FAILED] Failed multi-file impact analysis for compute_order_total');
+      process.exit(1);
+    }
+    // Verify direct vs indirect callers & callees
+    if (multiImpact.callers.direct.length === 0 && multiImpact.callees.direct.length === 0) {
+      console.error('[MULTI-FILE IMPACT FAILED] Target compute_order_total must have direct callers or callees');
+      process.exit(1);
+    }
+    // Test 6: Multi-File Impact Analysis for isolated symbol
+    const isolatedImpact = bdgEngine.analyzeMultiFileImpact('non_existent_isolated_symbol');
+    if (isolatedImpact.riskLevel !== 'LOW') {
+      console.error('[MULTI-FILE IMPACT FAILED] Non-existent symbol must be classified as LOW risk');
+      process.exit(1);
+    }
+    // Test 7: Sequential query symbol switches (compute_order_total -> process_checkout -> compute_order_total)
+    const switch1 = bdgEngine.analyzeMultiFileImpact('compute_order_total', 'src/checkout_engine.py', 19);
+    if (switch1.targetSymbol !== 'compute_order_total') {
+      console.error('[MULTI-FILE IMPACT FAILED] Target symbol must match compute_order_total');
+      process.exit(1);
+    }
+    const switch2 = bdgEngine.analyzeMultiFileImpact('process_checkout', 'src/checkout_engine.py', 10);
+    if (switch2.targetSymbol !== 'process_checkout') {
+      console.error('[MULTI-FILE IMPACT FAILED] Target symbol must match process_checkout');
+      process.exit(1);
+    }
+    const switch3 = bdgEngine.analyzeMultiFileImpact('compute_order_total', 'src/checkout_engine.py', 19);
+    if (switch3.targetSymbol !== 'compute_order_total') {
+      console.error('[MULTI-FILE IMPACT FAILED] Target symbol must switch back to compute_order_total');
+      process.exit(1);
+    }
+    console.log('[MULTI-FILE IMPACT PASSED] Sequential query symbol switches verified successfully.');
     // Re-build demoDir graph for remaining test scenarios
     bdgEngine.buildGraphForWorkspace(demoDir);
   }

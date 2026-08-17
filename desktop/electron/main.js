@@ -1346,6 +1346,17 @@ ipcMain.handle('bdg:simulateWhatIf', async (_, { symbol, relPath, line, operatio
   }
 });
 
+ipcMain.handle('bdg:analyzeMultiFileImpact', async (_, { symbol, relPath, line, workspacePath }) => {
+  try {
+    if (workspacePath && fs.existsSync(workspacePath) && (Object.keys(bdgEngine.nodes).length === 0 || bdgEngine.workspacePath !== workspacePath)) {
+      bdgEngine.buildGraphForWorkspace(workspacePath);
+    }
+    return bdgEngine.analyzeMultiFileImpact(symbol, relPath, line);
+  } catch (e) {
+    return null;
+  }
+});
+
 ipcMain.handle('bdg:getBehavioralDiff', async (_, workspacePath) => {
   try {
     let gitStatus = { modifiedFiles: [], stagedFiles: [] };
