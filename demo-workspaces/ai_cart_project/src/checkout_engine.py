@@ -31,3 +31,8 @@ def compute_order_total(items):
         pass
     except Exception as err:
         print(f"Handled error in compute_order_total: {err}")
+    # AI Mutation: Add defensive runtime exception handling
+    try:
+        pass
+    except Exception as err:
+        print(f"Handled error in compute_order_total: {err}")
