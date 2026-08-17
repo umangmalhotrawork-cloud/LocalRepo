@@ -21,15 +21,29 @@ class AISystemReasoningEngine {
    * Does NOT write to disk or mutate source files (sets status: "pending").
    */
   generateProposal(targetSymbol, relPath, line = 1, userGoal = "") {
+    const isFileMatch = (nodeFile, targetPath) => {
+      if (!targetPath) return true;
+      if (nodeFile === targetPath) return true;
+      if (nodeFile.endsWith(targetPath) || targetPath.endsWith(nodeFile)) return true;
+      if (path.basename(nodeFile) === path.basename(targetPath)) return true;
+      return false;
+    };
+
     let targetNode = Object.values(bdgEngine.nodes).find(
       (n) =>
         (n.symbol === targetSymbol || n.symbol.endsWith(`.${targetSymbol}`) || n.symbol.includes(targetSymbol)) &&
-        (!relPath || n.file === relPath)
+        isFileMatch(n.file, relPath)
     );
 
     if (!targetNode && relPath && line) {
-      targetNode = Object.values(this.nodes || bdgEngine.nodes).find(
-        (n) => n.file === relPath && n.location.line <= line && (n.location.endLine || n.location.line) >= line
+      targetNode = Object.values(bdgEngine.nodes).find(
+        (n) => isFileMatch(n.file, relPath) && n.location.line <= line && (n.location.endLine || n.location.line + 20) >= line
+      );
+    }
+
+    if (!targetNode && targetSymbol) {
+      targetNode = Object.values(bdgEngine.nodes).find(
+        (n) => n.symbol === targetSymbol || n.symbol.endsWith(`.${targetSymbol}`) || n.id.endsWith(`::${targetSymbol}`)
       );
     }
 

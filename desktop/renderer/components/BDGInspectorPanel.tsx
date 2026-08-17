@@ -91,12 +91,21 @@ export default function BDGInspectorPanel({
         setSessions(sessionList || []);
         setDiffReport(diff || null);
 
-        const targetNodeId = res?.node?.id || blast?.targetNode?.id;
+        const targetNode = res?.node;
+        const targetSymbol = targetNode?.symbol || sym;
+        const targetFile = targetNode?.file || relPath;
+        const targetLine = targetNode?.location?.line || cursorLine;
+        const targetNodeId = targetNode?.id || blast?.targetNode?.id;
+
+        if (targetSymbol) {
+          setUserGoal((prev) => (prev && !prev.includes(targetSymbol) ? `Optimize ${targetSymbol} execution & error safety` : prev));
+        }
+
         if (targetNodeId) {
           const [tel, comp, whatif] = await Promise.all([
             (window as any).electronAPI.getRuntimeTelemetry?.(targetNodeId),
             (window as any).electronAPI.getRuntimeCallChainComparison?.(targetNodeId),
-            (window as any).electronAPI.simulateBDGWhatIf?.(sym, relPath, cursorLine, selectedWhatIfOp),
+            (window as any).electronAPI.simulateBDGWhatIf?.(targetSymbol, targetFile, targetLine, selectedWhatIfOp),
           ]);
           setRuntimeTelemetry(tel || null);
           setCallChainComparison(comp || null);
@@ -116,10 +125,27 @@ export default function BDGInspectorPanel({
 
   const handleRunAIReasoningPipeline = async () => {
     if (typeof window !== "undefined" && (window as any).electronAPI) {
-      const relPath = activeFilePath ? activeFilePath.split("/").slice(-2).join("/") : undefined;
-      const sym = searchSymbol || selectedSymbol || "";
-      const proposal = await (window as any).electronAPI.generateAIReasoningProposal?.(sym, relPath, cursorLine, userGoal);
+      const targetNode = queryResult?.node;
+      const targetSymbol = targetNode?.symbol || searchSymbol || selectedSymbol || "";
+      const targetFile = targetNode?.file || (activeFilePath ? activeFilePath.split("/").slice(-2).join("/") : undefined);
+      const targetLine = targetNode?.location?.line || cursorLine;
+      const goal = userGoal || `Optimize ${targetSymbol} execution & error safety`;
+      const proposal = await (window as any).electronAPI.generateAIReasoningProposal?.(targetSymbol, targetFile, targetLine, goal);
       setAiProposal(proposal || null);
+    }
+  };
+
+  const handleWhatIfOpChange = async (op: WhatIfOperationType) => {
+    setSelectedWhatIfOp(op);
+    if (typeof window !== "undefined" && (window as any).electronAPI && queryResult?.node) {
+      const targetNode = queryResult.node;
+      const whatif = await (window as any).electronAPI.simulateBDGWhatIf?.(
+        targetNode.symbol,
+        targetNode.file,
+        targetNode.location.line,
+        op
+      );
+      setWhatIfResult(whatif || null);
     }
   };
 
@@ -498,7 +524,56 @@ export default function BDGInspectorPanel({
                       <Sparkles className="w-4 h-4 text-purple-400" /> WHAT-IF HYPOTHETICAL SIMULATION
                     </span>
                   </div>
+
+                  <div className="space-y-1.5 pt-1">
+                    <label className="text-[10px] text-zinc-400 block font-bold">Hypothetical Operation:</label>
+                    <select
+                      value={selectedWhatIfOp}
+                      onChange={(e) => handleWhatIfOpChange(e.target.value as WhatIfOperationType)}
+                      className="w-full bg-[#050505] border border-[#1f1f24] rounded-lg px-2.5 py-1.5 text-[11px] text-purple-200 focus:outline-none focus:border-purple-500/50"
+                    >
+                      <option value="remove-node">Remove Node / Function ({queryResult.node.symbol})</option>
+                      <option value="remove-call">Remove Call Relationship</option>
+                      <option value="remove-write">Remove Variable / State Mutate</option>
+                      <option value="disable-external-api">Disable External API Effect</option>
+                      <option value="disable-database-op">Disable Database Effect</option>
+                    </select>
+                  </div>
                 </div>
+
+                {whatIfResult && (
+                  <div className="p-3 bg-[#0d0d12] rounded-xl border border-[#1f1f24] space-y-2.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-zinc-400 font-bold">RISK PREDICTION:</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-500 text-[10px]">Baseline: {whatIfResult.originalRiskLevel}</span>
+                        <span className="text-purple-400 font-bold text-xs">→ Hypothetical: {whatIfResult.hypotheticalRiskLevel}</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1 pt-1 border-t border-[#1f1f24]">
+                      <span className="text-zinc-400 text-[10px] font-bold block">PREDICTED CONSEQUENCES:</span>
+                      {whatIfResult.predictedRisks.map((risk, idx) => (
+                        <div key={`risk-${idx}`} className="text-[11px] text-purple-200 flex items-center gap-1.5">
+                          <AlertTriangle className="w-3 h-3 text-purple-400 shrink-0" />
+                          <span>{risk}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {whatIfResult.newlyDisconnectedNodes.length > 0 && (
+                      <div className="pt-2 border-t border-[#1f1f24] space-y-1">
+                        <span className="text-zinc-400 text-[10px] font-bold block">NEWLY DISCONNECTED NODES:</span>
+                        {whatIfResult.newlyDisconnectedNodes.map((n) => (
+                          <div key={n.id} className="text-[10px] text-amber-300 flex items-center justify-between bg-[#050505] p-1.5 rounded border border-[#1a1a20]">
+                            <span>{n.symbol}</span>
+                            <span className="text-zinc-500">{n.file}:L{n.location.line}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -510,7 +585,44 @@ export default function BDGInspectorPanel({
                     <span className="text-zinc-400 font-bold flex items-center gap-1.5 text-xs">
                       <Activity className="w-4 h-4 text-emerald-400" /> RUNTIME EVIDENCE
                     </span>
+                    <span className={`px-2 py-0.5 rounded-full border text-[9px] font-bold ${
+                      runtimeTelemetry?.observed ? "bg-emerald-950 text-emerald-300 border-emerald-500/40" : "bg-zinc-800 text-zinc-400 border-zinc-700"
+                    }`}>
+                      {runtimeTelemetry?.observed ? "OBSERVED AT RUNTIME" : "NO RUNTIME EVIDENCE"}
+                    </span>
                   </div>
+
+                  {runtimeTelemetry?.observed ? (
+                    <div className="space-y-2 text-[11px]">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-[#050505] p-2 rounded-lg border border-[#1a1a20]">
+                          <span className="text-zinc-500 block text-[10px]">Executions</span>
+                          <span className="text-emerald-400 font-bold text-sm">{runtimeTelemetry.executionCount}</span>
+                        </div>
+                        <div className="bg-[#050505] p-2 rounded-lg border border-[#1a1a20]">
+                          <span className="text-zinc-500 block text-[10px]">Error Count</span>
+                          <span className="text-rose-400 font-bold text-sm">{runtimeTelemetry.errorCount}</span>
+                        </div>
+                      </div>
+
+                      {runtimeTelemetry.observedCallers.length > 0 && (
+                        <div className="pt-2 border-t border-[#1f1f24] space-y-1">
+                          <span className="text-zinc-400 text-[10px] font-bold block">OBSERVED RUNTIME CALLERS:</span>
+                          {runtimeTelemetry.observedCallers.map((caller, idx) => (
+                            <div key={`caller-${idx}`} className="text-[10px] text-emerald-300 bg-[#050505] p-1.5 rounded border border-[#1a1a20] flex items-center gap-1.5">
+                              <Play className="w-3 h-3 text-emerald-400 shrink-0" />
+                              <span>{caller}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="p-2.5 bg-[#050505] rounded-lg border border-[#1f1f24] text-zinc-400 text-[11px]">
+                      Symbol <span className="text-white font-bold">{queryResult.node.symbol}</span> has not been observed in active runtime execution sessions.
+                      <span className="block text-[10px] text-zinc-500 mt-1">(Not declared dead code merely because unobserved).</span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -526,24 +638,121 @@ export default function BDGInspectorPanel({
                     </div>
                     {renderRiskBadge(blastResult.riskSummary.riskLevel)}
                   </div>
+                  <div className="grid grid-cols-4 gap-1.5 pt-2 border-t border-[#1f1f24] text-center text-[10px]">
+                    <div className="bg-[#050505] p-1.5 rounded border border-[#1a1a20]">
+                      <span className="text-zinc-500 block">Files</span>
+                      <span className="text-rose-400 font-bold">{blastResult.riskSummary.filesAffectedCount}</span>
+                    </div>
+                    <div className="bg-[#050505] p-1.5 rounded border border-[#1a1a20]">
+                      <span className="text-zinc-500 block">Functions</span>
+                      <span className="text-rose-400 font-bold">{blastResult.riskSummary.functionsAffectedCount}</span>
+                    </div>
+                    <div className="bg-[#050505] p-1.5 rounded border border-[#1a1a20]">
+                      <span className="text-zinc-500 block">External</span>
+                      <span className="text-rose-400 font-bold">{blastResult.riskSummary.externalSystemsCount}</span>
+                    </div>
+                    <div className="bg-[#050505] p-1.5 rounded border border-[#1a1a20]">
+                      <span className="text-zinc-500 block">Tests</span>
+                      <span className="text-emerald-400 font-bold">{blastResult.riskSummary.testsCount}</span>
+                    </div>
+                  </div>
                 </div>
+
+                {blastResult.certainItems.length > 0 && (
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-rose-400 uppercase tracking-widest block">CERTAIN IMPACT ({blastResult.certainItems.length})</span>
+                    {blastResult.certainItems.map((item, idx) => (
+                      <div key={`certain-${item.node?.id || "item"}-${idx}`} onClick={() => onJumpToSymbol?.(item.node.file, item.node.location.line)} className="p-2 bg-[#08080c] hover:bg-[#121218] border border-rose-500/20 rounded-lg cursor-pointer flex items-center justify-between text-[11px]">
+                        <span className="text-white font-bold">{item.node.symbol}</span>
+                        <span className="text-zinc-500 text-[10px]">{item.node.file}:L{item.node.location.line}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {blastResult.probableItems && blastResult.probableItems.length > 0 && (
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-amber-400 uppercase tracking-widest block">PROBABLE IMPACT ({blastResult.probableItems.length})</span>
+                    {blastResult.probableItems.map((item, idx) => (
+                      <div key={`probable-${item.node?.id || "item"}-${idx}`} onClick={() => onJumpToSymbol?.(item.node.file, item.node.location.line)} className="p-2 bg-[#08080c] hover:bg-[#121218] border border-amber-500/20 rounded-lg cursor-pointer flex items-center justify-between text-[11px]">
+                        <span className="text-white font-bold">{item.node.symbol}</span>
+                        <span className="text-zinc-500 text-[10px]">{item.node.file}:L{item.node.location.line}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {blastResult.inferredItems && blastResult.inferredItems.length > 0 && (
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest block">INFERRED IMPACT ({blastResult.inferredItems.length})</span>
+                    {blastResult.inferredItems.map((item, idx) => (
+                      <div key={`inferred-${item.node?.id || "item"}-${idx}`} onClick={() => onJumpToSymbol?.(item.node.file, item.node.location.line)} className="p-2 bg-[#08080c] hover:bg-[#121218] border border-purple-500/20 rounded-lg cursor-pointer flex items-center justify-between text-[11px]">
+                        <span className="text-white font-bold">{item.node.symbol}</span>
+                        <span className="text-zinc-500 text-[10px]">{item.node.file}:L{item.node.location.line}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
             {activeTab === "callers" && (
-              queryResult.callers.map((node) => (
-                <div
-                  key={node.id}
-                  onClick={() => onJumpToSymbol?.(node.file, node.location.line)}
-                  className="p-2 bg-[#08080c] hover:bg-[#121218] border border-[#1a1a20] rounded-lg cursor-pointer transition-colors flex items-center justify-between font-mono text-[11px]"
-                >
-                  <div className="flex items-center gap-2">
-                    <Code2 className="w-3.5 h-3.5 text-cyan-400" />
-                    <span className="text-white font-bold">{node.symbol}</span>
+              queryResult.callers.length > 0 ? (
+                queryResult.callers.map((node, idx) => (
+                  <div
+                    key={`caller-${node.id}-${idx}`}
+                    onClick={() => onJumpToSymbol?.(node.file, node.location.line)}
+                    className="p-2 bg-[#08080c] hover:bg-[#121218] border border-[#1a1a20] rounded-lg cursor-pointer transition-colors flex items-center justify-between font-mono text-[11px]"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Code2 className="w-3.5 h-3.5 text-cyan-400" />
+                      <span className="text-white font-bold">{node.symbol}</span>
+                    </div>
+                    <span className="text-zinc-500 text-[10px]">{node.file}:L{node.location.line}</span>
                   </div>
-                  <span className="text-zinc-500 text-[10px]">{node.file}:L{node.location.line}</span>
+                ))
+              ) : (
+                <div className="p-3 bg-[#0d0d12] rounded-xl border border-[#1f1f24] text-center text-zinc-500 text-xs">No direct callers found for {queryResult.node.symbol}.</div>
+              )
+            )}
+
+            {activeTab === "callees" && (
+              queryResult.callees.length > 0 ? (
+                queryResult.callees.map((node, idx) => (
+                  <div
+                    key={`callee-${node.id}-${idx}`}
+                    onClick={() => onJumpToSymbol?.(node.file, node.location.line)}
+                    className="p-2 bg-[#08080c] hover:bg-[#121218] border border-[#1a1a20] rounded-lg cursor-pointer transition-colors flex items-center justify-between font-mono text-[11px]"
+                  >
+                    <div className="flex items-center gap-2">
+                      <ArrowRight className="w-3.5 h-3.5 text-purple-400" />
+                      <span className="text-white font-bold">{node.symbol}</span>
+                    </div>
+                    <span className="text-zinc-500 text-[10px]">{node.file}:L{node.location.line}</span>
+                  </div>
+                ))
+              ) : (
+                <div className="p-3 bg-[#0d0d12] rounded-xl border border-[#1f1f24] text-center text-zinc-500 text-xs">No direct callees found for {queryResult.node.symbol}.</div>
+              )
+            )}
+
+            {activeTab === "dataflow" && (
+              queryResult.reads.length > 0 || queryResult.writes.length > 0 ? (
+                <div className="space-y-2">
+                  {queryResult.reads.map((node, idx) => (
+                    <div key={`read-${node.id}-${idx}`} className="p-2 bg-[#08080c] border border-[#1a1a20] rounded-lg flex items-center justify-between text-[11px]">
+                      <span className="text-amber-300 font-bold">READ: {node.symbol}</span>
+                      <span className="text-zinc-500 text-[10px]">{node.file}</span>
+                    </div>
+                  ))}
+                  {queryResult.writes.map((node, idx) => (
+                    <div key={`write-${node.id}-${idx}`} className="p-2 bg-[#08080c] border border-[#1a1a20] rounded-lg flex items-center justify-between text-[11px]">
+                      <span className="text-rose-300 font-bold">WRITE: {node.symbol}</span>
+                      <span className="text-zinc-500 text-[10px]">{node.file}</span>
+                    </div>
+                  ))}
                 </div>
-              ))
+              ) : (
+                <div className="p-3 bg-[#0d0d12] rounded-xl border border-[#1f1f24] text-center text-zinc-500 text-xs">No state reads/writes found for {queryResult.node.symbol}.</div>
+              )
             )}
           </div>
         </>

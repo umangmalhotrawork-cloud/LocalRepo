@@ -72,7 +72,13 @@ class BDGEngine {
       this.analyzeFile(fullPath, relPath);
     }
 
-    return this.getGraphData();
+    const graphData = this.getGraphData();
+    try {
+      const behavioralDiffEngine = require("./behavioral_diff_engine");
+      behavioralDiffEngine.setBaselineGraph(graphData);
+    } catch (e) {}
+
+    return graphData;
   }
 
   /**
@@ -678,16 +684,29 @@ class BDGEngine {
    */
   simulateWhatIfBySymbol(symbol, relPath, line, operation, secondarySymbol) {
     let targetNode = null;
+    const isFileMatch = (nodeFile, targetPath) => {
+      if (!targetPath) return true;
+      if (nodeFile === targetPath) return true;
+      if (nodeFile.endsWith(targetPath) || targetPath.endsWith(nodeFile)) return true;
+      if (path.basename(nodeFile) === path.basename(targetPath)) return true;
+      return false;
+    };
+
     if (symbol) {
       targetNode = Object.values(this.nodes).find(
         (n) =>
           (n.symbol === symbol || n.symbol.endsWith(`.${symbol}`) || n.symbol.includes(symbol)) &&
-          (!relPath || n.file === relPath)
+          isFileMatch(n.file, relPath)
       );
     }
     if (!targetNode && relPath && line) {
       targetNode = Object.values(this.nodes).find(
-        (n) => n.file === relPath && n.location.line <= line && (n.location.endLine || n.location.line) >= line
+        (n) => isFileMatch(n.file, relPath) && n.location.line <= line && (n.location.endLine || n.location.line + 20) >= line
+      );
+    }
+    if (!targetNode && symbol) {
+      targetNode = Object.values(this.nodes).find(
+        (n) => n.symbol === symbol || n.symbol.endsWith(`.${symbol}`) || n.id.endsWith(`::${symbol}`)
       );
     }
 
