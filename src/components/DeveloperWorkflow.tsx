@@ -1,81 +1,103 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { ShieldCheck, Code, CheckCircle2 } from "lucide-react";
+import React from "react";
+import { Search, Compass, Play, ShieldCheck, History, ArrowRight, Activity } from "lucide-react";
 
 export default function DeveloperWorkflow() {
-  const columns = [
+  const steps = [
     {
-      title: "Local First",
-      subtitle: "Zero Cloud Dependencies",
-      desc: "Source code never leaves your developer machine. All Tree-sitter parsing, CFG construction, and differential verification execute locally in compiled Rust.",
+      stage: "01",
+      title: "UNDERSTAND",
+      icon: Search,
+      badge: "BDG Analysis",
+      desc: "Maps dependencies, call graphs, AST structures, and behavioral constraints across local codebase files.",
+    },
+    {
+      stage: "02",
+      title: "PLAN",
+      icon: Compass,
+      badge: "Milestones",
+      desc: "Formulates ordered engineering plans with clear milestones and Truth Boundary verification targets.",
+    },
+    {
+      stage: "03",
+      title: "EXECUTE",
+      icon: Play,
+      badge: "Controlled Edits",
+      desc: "Applies targeted AST code modifications via Monaco editor integration and native terminal tool invocation.",
+    },
+    {
+      stage: "04",
+      title: "VERIFY",
       icon: ShieldCheck,
-      badge: "100% Private",
+      badge: "Patch Firewall",
+      desc: "Evaluates patch safety against test suites, differential execution, and behavioral equivalence rules.",
     },
     {
-      title: "IDE Native",
-      subtitle: "VS Code Integration",
-      desc: "Renders smooth ghost-text opacity highlights, Causal Luminance color gradients, and side provenance replay panels directly inside your active editor window.",
-      icon: Code,
-      badge: "VS Code & CLI",
+      stage: "05",
+      title: "REMEMBER",
+      icon: History,
+      badge: "Continuum",
+      desc: "Snapshot engineering decisions, verification status, and pending tasks into portable Nexus Capsules.",
     },
     {
-      title: "Verified Changes",
-      subtitle: "Reversible Surgery",
-      desc: "Safe Remove executes your test suite inside an isolated mutation sandbox. If any behavioral shift is detected, the operation aborts and creates a instant rollback snapshot.",
-      icon: CheckCircle2,
-      badge: "<1s Rollback",
+      stage: "06",
+      title: "CONTINUE",
+      icon: ArrowRight,
+      badge: "Context Handoff",
+      desc: "Hand off curated project state to fresh AI sessions without context degradation or lost decisions.",
     },
   ];
 
   return (
-    <section className="py-20 bg-[#000000] relative">
+    <section className="py-16 bg-[#050508] border-b border-[#1f1f24] font-mono text-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
-        <div className="text-center space-y-4 max-w-3xl mx-auto mb-14">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 text-xs font-mono">
-            <span>DEVELOPER WORKFLOW</span>
+        {/* Header */}
+        <div className="space-y-3 mb-10 text-left">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[10px] font-bold uppercase tracking-wider">
+            <Activity className="w-3.5 h-3.5 text-cyan-400" />
+            <span>AUTONOMOUS ENGINEERING LIFECYCLE</span>
           </div>
-          <h2 className="text-3xl sm:text-4xl font-bold text-white tracking-tight">
-            Built for Real Engineering Teams
+
+          <h2 className="text-3xl sm:text-4xl font-heading font-extrabold text-zinc-100 tracking-tight">
+            How NEXUS Executes Engineering Tasks
           </h2>
-          <p className="text-zinc-400 text-sm sm:text-base">
-            Seamlessly integrating into daily developer environments without sacrificing privacy or stability.
+
+          <p className="text-zinc-400 text-xs sm:text-sm font-sans max-w-2xl leading-relaxed">
+            Rather than making unconstrained code edits, NEXUS follows a structured engineering workflow designed for control, safety, and continuity.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {columns.map((col, idx) => {
-            const Icon = col.icon;
+        {/* 6 Steps Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {steps.map((step, idx) => {
+            const Icon = step.icon;
             return (
-              <motion.div
-                key={col.title}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: idx * 0.15 }}
-                className="bg-[#0a0a0a] border border-[#1f1f1f] hover:border-cyan-500/40 rounded-24 p-8 flex flex-col justify-between transition-all duration-300 hover:-translate-y-1 shadow-xl"
+              <div
+                key={idx}
+                className="p-5 rounded-xl bg-[#0a0a0d] border border-[#1f1f24] hover:border-cyan-500/40 transition-all flex flex-col justify-between space-y-3"
               >
-                <div className="space-y-4">
+                <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-                      <Icon className="w-5 h-5" />
-                    </div>
-                    <span className="text-[10px] font-mono px-2.5 py-1 rounded-full bg-[#141414] border border-[#262626] text-cyan-300">
-                      {col.badge}
+                    <span className="text-xs font-bold text-cyan-400 font-mono">{step.stage}</span>
+                    <span className="px-2.5 py-0.5 rounded-full text-[9.5px] font-bold bg-[#151520] border border-[#262626] text-zinc-300">
+                      {step.badge}
                     </span>
                   </div>
 
-                  <div>
-                    <h3 className="text-lg font-bold text-white">{col.title}</h3>
-                    <p className="text-xs font-mono text-cyan-400">{col.subtitle}</p>
+                  <div className="flex items-center gap-2 pt-1">
+                    <div className="w-6 h-6 rounded-md bg-[#141418] border border-[#24242e] flex items-center justify-center text-cyan-400">
+                      <Icon className="w-3.5 h-3.5" />
+                    </div>
+                    <h3 className="font-bold text-zinc-100 text-sm">{step.title}</h3>
                   </div>
 
-                  <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed">
-                    {col.desc}
+                  <p className="text-[11.5px] text-zinc-400 font-sans leading-relaxed pt-1">
+                    {step.desc}
                   </p>
                 </div>
-              </motion.div>
+              </div>
             );
           })}
         </div>

@@ -30,9 +30,10 @@ export default function Navbar() {
   const navItems = [
     { name: "Overview", path: "/" },
     { name: "Desktop IDE", path: "/desktop" },
+    { name: "Continuum", path: "/#continuum" },
+    { name: "Intelligence", path: "/#intelligence" },
     { name: "Architecture", path: "/architecture" },
-    { name: "Documentation", path: "/docs" },
-    { name: "Interactive Demo", path: "/demo" },
+    { name: "Docs", path: "/docs" },
     { name: "Research", path: "/research" },
   ];
 
@@ -53,11 +54,11 @@ export default function Navbar() {
               <Activity className="w-4 h-4" />
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-zinc-100 uppercase tracking-wider text-xs group-hover:text-cyan-300 transition-colors">
-                Echo Nullity
+              <span className="font-bold text-zinc-100 uppercase tracking-widest text-xs group-hover:text-cyan-300 transition-colors">
+                NEXUS
               </span>
-              <span className="px-1.5 py-0.2 rounded-full bg-[#151520] border border-[#262626] text-zinc-400 text-[9.5px]">
-                v1.0.0-beta
+              <span className="hidden sm:inline-block px-1.5 py-0.2 rounded-full bg-[#151520] border border-[#262626] text-cyan-400 text-[9.5px]">
+                Autonomous SE
               </span>
             </div>
           </Link>
@@ -96,7 +97,7 @@ export default function Navbar() {
               </kbd>
             </button>
 
-            {/* GitHub Badge */}
+            {/* GitHub Badge (Clean link without fictional stars) */}
             <a
               href="https://github.com"
               target="_blank"
@@ -104,18 +105,18 @@ export default function Navbar() {
               className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-zinc-300 bg-[#0a0a0d] hover:bg-[#141418] border border-[#1f1f24] hover:border-zinc-700 transition-all"
             >
               <Github className="w-3.5 h-3.5 text-zinc-400" />
-              <span className="text-cyan-400 font-bold bg-cyan-950/60 px-1 py-0.2 rounded text-[9.5px] border border-cyan-500/20">
-                1.4k ★
+              <span className="text-zinc-300 font-medium text-[10.5px]">
+                GitHub
               </span>
             </a>
 
             {/* Primary Action Button */}
             <Link
-              href="#downloads"
+              href="/desktop"
               className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-cyan-950 text-cyan-300 border border-cyan-500/50 hover:bg-cyan-900 font-bold text-xs transition-all shadow-[0_0_12px_rgba(6,182,212,0.25)]"
             >
-              <Download className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Download Beta</span>
+              <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Explore IDE</span>
             </Link>
 
             {/* Mobile Menu Button */}

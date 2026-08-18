@@ -15,48 +15,48 @@ export default function Footer() {
               <div className="w-6 h-6 rounded-lg bg-cyan-950/80 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
                 <Activity className="w-3.5 h-3.5" />
               </div>
-              <span className="font-bold text-zinc-100 uppercase tracking-wider text-xs">
-                Echo Nullity
+              <span className="font-bold text-zinc-100 uppercase tracking-widest text-xs">
+                NEXUS
               </span>
             </div>
             <p className="text-[11px] text-zinc-400 leading-relaxed font-sans">
-              The local-first AI desktop IDE combining Monaco editing, autonomous AI agent execution, Time Travel Debugging, and verified AST surgery.
+              A local-first AI software engineering environment that understands your codebase, plans engineering work, performs controlled code changes, and preserves context across sessions.
             </p>
             <div className="flex items-center gap-1.5 text-[10.5px] text-cyan-400">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>100% Local-First • 0% Telemetry • MIT</span>
+              <span>100% Local-First • Authoritative Workspace • MIT</span>
             </div>
           </div>
 
-          {/* Col 2: IDE Capabilities */}
+          {/* Col 2: Capabilities */}
           <div>
             <h4 className="text-[10px] font-bold text-zinc-200 uppercase tracking-wider mb-3">
-              IDE Capabilities
+              Capabilities &amp; Features
             </h4>
             <ul className="space-y-2 text-[11px]">
               <li>
                 <Link href="/desktop" className="hover:text-cyan-300 transition-colors">
-                  Autonomous AI Agent Mode
+                  Autonomous Agent &amp; Planning
+                </Link>
+              </li>
+              <li>
+                <Link href="/#continuum" className="hover:text-cyan-300 transition-colors">
+                  Continuum Session Memory
+                </Link>
+              </li>
+              <li>
+                <Link href="/#intelligence" className="hover:text-cyan-300 transition-colors">
+                  Behavioral Dependency Graph
+                </Link>
+              </li>
+              <li>
+                <Link href="/#intelligence" className="hover:text-cyan-300 transition-colors">
+                  AI Patch Firewall &amp; Verification
                 </Link>
               </li>
               <li>
                 <Link href="/desktop" className="hover:text-cyan-300 transition-colors">
-                  Time Travel Debugger v2
-                </Link>
-              </li>
-              <li>
-                <Link href="/desktop" className="hover:text-cyan-300 transition-colors">
-                  Test Explorer &amp; Coverage
-                </Link>
-              </li>
-              <li>
-                <Link href="/desktop" className="hover:text-cyan-300 transition-colors">
-                  Performance Profiler
-                </Link>
-              </li>
-              <li>
-                <Link href="/desktop" className="hover:text-cyan-300 transition-colors">
-                  Security &amp; Vulnerability Audit
+                  Monaco IDE &amp; Native PTY Terminal
                 </Link>
               </li>
             </ul>
@@ -65,7 +65,7 @@ export default function Footer() {
           {/* Col 3: Navigation */}
           <div>
             <h4 className="text-[10px] font-bold text-zinc-200 uppercase tracking-wider mb-3">
-              Documentation &amp; Source
+              Documentation &amp; Specs
             </h4>
             <ul className="space-y-2 text-[11px]">
               <li>
@@ -80,12 +80,12 @@ export default function Footer() {
               </li>
               <li>
                 <Link href="/research" className="hover:text-cyan-300 transition-colors">
-                  Formal Research &amp; Papers
+                  Formal Research &amp; Specifications
                 </Link>
               </li>
               <li>
                 <Link href="/demo" className="hover:text-cyan-300 transition-colors">
-                  Interactive Web Demo
+                  Interactive Demo Playground
                 </Link>
               </li>
               <li>
@@ -115,14 +115,14 @@ export default function Footer() {
                 Node.js PTY
               </span>
               <span className="px-2 py-0.5 bg-[#0a0a0d] border border-[#1f1f24] rounded text-zinc-300">
-                Tree-sitter
+                Python AST
               </span>
               <span className="px-2 py-0.5 bg-[#0a0a0d] border border-[#1f1f24] rounded text-zinc-300">
-                petgraph
+                React 19
               </span>
             </div>
             <p className="text-[10px] text-zinc-500 mt-3 font-sans leading-relaxed">
-              Engineered natively for macOS, Windows, and Linux.
+              Native desktop environment for macOS, Windows, and Linux.
             </p>
           </div>
         </div>
@@ -130,12 +130,12 @@ export default function Footer() {
         {/* Bottom Bar */}
         <div className="pt-6 border-t border-[#181820] flex flex-col sm:flex-row items-center justify-between gap-3 text-[10.5px] text-zinc-500">
           <div>
-            &copy; {new Date().getFullYear()} Echo Nullity Project. Distributed under the MIT License.
+            &copy; {new Date().getFullYear()} NEXUS Project. Distributed under the MIT License.
           </div>
           <div className="flex items-center gap-4">
-            <span>47/47 Tests Passed</span>
-            <span>100k-File Scalability</span>
-            <span>Quiescent 0% CPU</span>
+            <span>Local-First Workspace</span>
+            <span>Continuum Memory</span>
+            <span>AI Patch Firewall</span>
           </div>
         </div>
       </div>

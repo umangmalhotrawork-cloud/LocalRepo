@@ -1,14 +1,13 @@
 import Hero from "@/components/Hero";
 import TrustBanner from "@/components/TrustBanner";
 import IDECoreSection from "@/components/IDECoreSection";
+import ContinuumSection from "@/components/ContinuumSection";
+import DeveloperWorkflow from "@/components/DeveloperWorkflow";
 import FeatureSection from "@/components/FeatureCard";
 import AgentSection from "@/components/AgentSection";
-import DebuggerSection from "@/components/DebuggerSection";
-import TestExplorerSection from "@/components/TestExplorerSection";
-import ProfilerSection from "@/components/ProfilerSection";
-import SecurityAuditSection from "@/components/SecurityAuditSection";
 import ReliabilitySection from "@/components/ReliabilitySection";
 import BenchmarksSection from "@/components/BenchmarksSection";
+import FutureRoadmapSection from "@/components/FutureRoadmapSection";
 import CodeDemo from "@/components/CodeDemo";
 import DownloadsSection from "@/components/DownloadsSection";
 import FAQAccordion from "@/components/FAQAccordion";
@@ -20,37 +19,34 @@ export default function HomePage() {
       {/* 1. Hero Section */}
       <Hero />
 
-      {/* 2. Trust & Privacy Guarantees */}
+      {/* 2. Trust & Product Signals */}
       <TrustBanner />
 
-      {/* 3. The Desktop IDE Core Workspace */}
+      {/* 3. Core Desktop IDE Workspace */}
       <IDECoreSection />
 
-      {/* 4. Causal Code Tomography & AST Surgery */}
+      {/* 4. Flagship Continuum Session Memory Section */}
+      <ContinuumSection />
+
+      {/* 5. 6-Stage Autonomous Engineering Lifecycle */}
+      <DeveloperWorkflow />
+
+      {/* 6. Core Engineering Intelligence (BDG, Patch Firewall, Verification, Safe Surgery, Truth Boundary) */}
       <FeatureSection />
 
-      {/* 5. Autonomous AI Agent Mode */}
+      {/* 7. Autonomous AI Agent Mode & Safety */}
       <AgentSection />
 
-      {/* 6. Time Travel Debugger v2 */}
-      <DebuggerSection />
-
-      {/* 7. Test Explorer & Coverage Dashboard */}
-      <TestExplorerSection />
-
-      {/* 8. Performance Profiler */}
-      <ProfilerSection />
-
-      {/* 9. Security & Dependency Audit */}
-      <SecurityAuditSection />
-
-      {/* 10. Reliability & Workspace Snapshots */}
+      {/* 8. Workspace Snapshots & Rollback */}
       <ReliabilitySection />
 
-      {/* 11. Empirical Benchmarks */}
+      {/* 9. Performance & Subsystem Metrics */}
       <BenchmarksSection />
 
-      {/* 12. Interactive In-Browser AST Surgery Playground */}
+      {/* 10. Future Multi-Model & Infrastructure Roadmap */}
+      <FutureRoadmapSection />
+
+      {/* 11. Interactive Code Mutation & Verification Simulation */}
       <div className="py-14 bg-[#050508] border-b border-[#1f1f24]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="space-y-2 mb-6">
@@ -58,20 +54,20 @@ export default function HomePage() {
               <span>INTERACTIVE PLAYGROUND</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-heading font-extrabold text-zinc-100 tracking-tight">
-              Live AST Mutation &amp; Surgery Simulation.
+              Live AST Mutation &amp; Verification Simulation
             </h2>
           </div>
           <CodeDemo />
         </div>
       </div>
 
-      {/* 13. Cross-Platform Downloads */}
+      {/* 12. Desktop Package Exploration */}
       <DownloadsSection />
 
-      {/* 14. Technical FAQ */}
+      {/* 13. Technical FAQ Accordion */}
       <FAQAccordion />
 
-      {/* 15. Final Conversion CTA */}
+      {/* 14. Final Conversion CTA */}
       <CTASection />
     </div>
   );

@@ -11,24 +11,24 @@ interface FAQItem {
 
 const faqs: FAQItem[] = [
   {
-    question: "Is Echo Nullity a VS Code extension or a standalone desktop IDE?",
-    answer: "Echo Nullity is a standalone, full-featured desktop IDE built on Electron, Next.js, and Monaco Editor. It includes its own file explorer, multi-tab buffer manager, native terminal subsystem, Git source control, Time Travel Debugger, performance profiler, and autonomous AI agent.",
+    question: "Is NEXUS a cloud IDE or a local-first desktop application?",
+    answer: "NEXUS is strictly a local-first desktop software engineering environment built on Electron, Next.js, and Monaco Editor. Your local workspace is authoritative. Code remains local on your machine, and cloud infrastructure connections are purely optional.",
   },
   {
-    question: "Does Echo Nullity transmit source code to external servers?",
-    answer: "No. Echo Nullity is strictly 100% local-first. All parsing, graph traversal, mutation sandboxing, test execution, and performance profiling run exclusively on your local CPU. Telemetry is local-only and opt-in.",
+    question: "What is Continuum session memory and how does context handoff work?",
+    answer: "Continuum preserves curated project state, important files, key engineering decisions, pending tasks, and verification evidence across long engineering sessions. Through portable Nexus Capsules (.capsule) validated with SHA-256 integrity checks, fresh AI sessions can resume work without context window degradation.",
   },
   {
-    question: "Which programming languages are supported?",
-    answer: "Full Causal Code Tomography, AST surgery, and Monaco syntax highlighting support Python, TypeScript, JavaScript, C++, and Rust. The test runner supports pytest, unittest, Jest, and Vitest.",
+    question: "Does NEXUS require cloud AI servers to operate?",
+    answer: "No. NEXUS includes a deterministic offline agent fallback that provides AI engineering assistance without mandatory cloud dependence. When external cloud models are enabled, the local workspace remains authoritative.",
   },
   {
-    question: "How is Causal Luminance different from dead-code elimination?",
-    answer: "Dead-code elimination only removes unreachable statements (such as code after a return). Causal Luminance identifies executable statements that actually run and pass tests, but exert zero causal necessity over the program's observable return state.",
+    question: "How does the AI Patch Firewall protect my codebase?",
+    answer: "The AI Patch Firewall evaluates proposed AST modifications against structural invariant rules and behavioral constraints before code is applied to disk. It ensures changes are verified against behavioral equivalence tests and prevents unconstrained side-effects.",
   },
   {
-    question: "How do Workspace Snapshots and Rollback work?",
-    answer: "Snapshots are atomic local JSON records capturing all workspace file buffers, tabs, and cursor positions. You can compare snapshots with side-by-side diffs and rollback single files or entire repositories in under 0.4 seconds, with automatic pre-restore safety backups.",
+    question: "What is the roadmap for multi-model AI, multi-chat, and database connections?",
+    answer: "Our future roadmap includes an expanding model layer for Gemini, GPT, Claude, Grok, and DeepSeek, persistent multi-chat session threads, optional database integrations (Supabase, MongoDB, PostgreSQL), and deployment connections (Vercel, Render, Netlify).",
   },
 ];
 
@@ -40,20 +40,20 @@ export default function FAQAccordion() {
   };
 
   return (
-    <section className="py-14 bg-[#050508] border-b border-[#1f1f24] font-mono text-xs">
+    <section className="py-16 bg-[#050508] border-b border-[#1f1f24] font-mono text-xs">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* Header */}
-        <div className="space-y-2 mb-8 text-center max-w-2xl mx-auto">
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[10px] font-bold uppercase tracking-wider">
-            <HelpCircle className="w-3 h-3 text-cyan-400" />
+        <div className="space-y-3 mb-10 text-center max-w-2xl mx-auto">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[10px] font-bold uppercase tracking-wider">
+            <HelpCircle className="w-3.5 h-3.5 text-cyan-400" />
             <span>FREQUENTLY ASKED QUESTIONS</span>
           </div>
-          <h2 className="text-2xl sm:text-3xl font-heading font-extrabold text-zinc-100 tracking-tight">
-            Technical &amp; Architectural FAQs.
+          <h2 className="text-3xl sm:text-4xl font-heading font-extrabold text-zinc-100 tracking-tight">
+            Product &amp; Technical Architecture FAQs
           </h2>
-          <p className="text-zinc-400 text-xs font-sans leading-relaxed">
-            Everything you need to know about the local-first desktop IDE, privacy guarantees, and causal tomography.
+          <p className="text-zinc-400 text-xs sm:text-sm font-sans leading-relaxed">
+            Everything you need to know about NEXUS, local-first execution, Continuum, and our roadmap.
           </p>
         </div>
 

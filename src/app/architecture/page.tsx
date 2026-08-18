@@ -75,7 +75,7 @@ export default function ArchitecturePage() {
             <Cpu className="w-3 h-3 text-cyan-400" />
             <span>TECHNICAL ARCHITECTURE SPECIFICATION</span>
           </div>
-          <h1 className="text-2xl font-bold text-zinc-100">Echo Nullity System Architecture</h1>
+          <h1 className="text-2xl font-bold text-zinc-100">NEXUS System Architecture</h1>
           <p className="text-zinc-400 text-xs font-sans">
             Detailed engineering breakdown of the standalone desktop application and analysis engines.
           </p>

@@ -10,12 +10,12 @@ import {
 
 export default function Hero() {
   const concepts = [
-    "Autonomous AI Agent Execution",
-    "Time Travel Debugger v2 Replay",
-    "Real-Time CPU & Memory Profiler",
-    "Zero-Trust Security & CVE Audit",
-    "Workspace Snapshots & Safe Rollback",
-    "Causal Code Tomography Engine",
+    "Autonomous Software Engineering",
+    "Behavioral Dependency Graph (BDG)",
+    "AI Patch Firewall & Verification",
+    "Continuum Session Memory & Capsules",
+    "Deterministic Offline Fallback",
+    "Truth Boundary Verification",
   ];
 
   const [conceptIndex, setConceptIndex] = useState(0);
@@ -54,26 +54,25 @@ export default function Hero() {
 
             {/* Headline */}
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-heading font-extrabold tracking-tight text-white leading-[1.15]">
-              The Local-First AI Desktop IDE Built to{" "}
+              NEXUS <br />
               <span className="bg-gradient-to-r from-cyan-400 via-teal-300 to-purple-400 bg-clip-text text-transparent underline decoration-cyan-500/40 decoration-2">
-                Purify, Debug, & Secure
-              </span>{" "}
-              Your Codebase.
+                Autonomous Software Engineering
+              </span>
             </h1>
 
             {/* Subheadline */}
             <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed font-sans max-w-xl">
-              Echo Nullity combines high-performance Monaco editing with autonomous AI agent execution, time-travel debugging, real-time CPU/memory profiling, security vulnerability auditing, and verified AST surgery — 100% private, offline, and native on macOS, Windows, and Linux.
+              A local-first AI software engineering environment that understands your codebase, plans engineering work, performs controlled code changes, verifies behavior, preserves context across sessions, and connects to external AI and deployment infrastructure as your project evolves.
             </p>
 
             {/* Action Buttons */}
             <div className="flex flex-wrap items-center gap-3 pt-1">
               <Link
-                href="#downloads"
+                href="/desktop"
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-950 text-cyan-300 border border-cyan-500/50 hover:bg-cyan-900 font-bold text-xs transition-all shadow-[0_0_15px_rgba(6,182,212,0.3)] cursor-pointer"
               >
                 <Download className="w-4 h-4 text-cyan-400" />
-                <span>Download Beta (Universal)</span>
+                <span>Explore the Desktop IDE</span>
               </Link>
 
               <Link
@@ -89,15 +88,15 @@ export default function Hero() {
             <div className="flex flex-wrap items-center gap-2.5 pt-3 border-t border-[#181820] max-w-xl text-[10.5px]">
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0a0a0d] border border-[#1f1f24] text-cyan-400 font-bold">
                 <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Local-First: 0% Telemetry</span>
+                <span>100% Local-First Workspace</span>
               </div>
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0a0a0d] border border-[#1f1f24] text-emerald-400 font-bold">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>47/47 Tests Passing</span>
+                <span>Behavior Verification</span>
               </div>
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0a0a0d] border border-[#1f1f24] text-purple-400 font-bold">
                 <History className="w-3.5 h-3.5" />
-                <span>Rollback: &lt;0.4s</span>
+                <span>Nexus Capsules</span>
               </div>
             </div>
 

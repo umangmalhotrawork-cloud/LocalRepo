@@ -29,7 +29,7 @@ export default function DocsPage() {
             <BookOpen className="w-3 h-3 text-cyan-400" />
             <span>DOCUMENTATION &amp; SPECIFICATIONS</span>
           </div>
-          <h1 className="text-2xl font-bold text-zinc-100">Echo Nullity Developer Guide</h1>
+          <h1 className="text-2xl font-bold text-zinc-100">NEXUS Developer Guide</h1>
           <p className="text-zinc-400 text-xs font-sans">
             Technical reference manual for the local-first AI Desktop IDE.
           </p>

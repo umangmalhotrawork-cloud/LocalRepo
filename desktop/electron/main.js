@@ -818,10 +818,10 @@ ipcMain.handle('dialog:open-folder', async () => {
 ipcMain.handle('dialog:open-capsule-file', async () => {
   if (!mainWindow) return null;
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Select Continuum Capsule JSON File',
+    title: 'Select Nexus Capsule JSON File',
     properties: ['openFile'],
     filters: [
-      { name: 'Continuum Capsule', extensions: ['json'] },
+      { name: 'Nexus Capsule', extensions: ['json'] },
       { name: 'All Files', extensions: ['*'] },
     ],
   });

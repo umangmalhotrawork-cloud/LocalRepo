@@ -3,34 +3,32 @@ import "./globals.css";
 import LayoutWrapper from "@/components/LayoutWrapper";
 
 export const metadata: Metadata = {
-  title: "Echo Nullity: Causal Code Tomography Engine",
+  title: "NEXUS: Autonomous Software Engineering",
   description:
-    "Detect semantically vacuous code in AI-generated software. Visualizes Ghost Code, computes Causal Luminance, maps Semantic Tension, and safely removes redundant behavior.",
+    "A local-first AI software engineering environment that understands your codebase, plans engineering work, performs controlled code changes, verifies behavior, and preserves context across sessions.",
   keywords: [
-    "Echo Nullity",
-    "Causal Luminance",
-    "Ghost Code",
-    "Semantic Tension Mapping",
-    "Safe Remove",
-    "Code Tomography",
-    "Tree-sitter",
-    "Rust static analysis",
-    "AI code bloat",
-    "PLDI 2026",
+    "NEXUS",
+    "Autonomous Software Engineering",
+    "Local-First AI IDE",
+    "Behavioral Dependency Graph",
+    "AI Patch Firewall",
+    "Behavior Verification",
+    "Continuum Session Memory",
+    "Safe Remove Surgery",
   ],
-  authors: [{ name: "Echo Nullity Research Group" }],
+  authors: [{ name: "NEXUS Core Team" }],
   openGraph: {
-    title: "Echo Nullity: Causal Code Tomography Engine",
+    title: "NEXUS: Autonomous Software Engineering",
     description:
-      "Find code that runs, passes tests, and still means nothing. A local-first causal measurement instrument for software.",
+      "Local-first AI software engineering environment. Understands codebases, plans changes, verifies behavior, and preserves session context.",
     type: "website",
-    siteName: "Echo Nullity",
+    siteName: "NEXUS",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Echo Nullity: Causal Code Tomography Engine",
+    title: "NEXUS: Autonomous Software Engineering",
     description:
-      "Detect semantically vacuous code in AI-generated software with verified Safe Remove surgery.",
+      "A local-first AI software engineering environment that understands your codebase, plans engineering work, performs controlled code changes, and verifies behavior.",
   },
 };
 
@@ -42,10 +40,10 @@ export default function RootLayout({
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
-    "name": "Echo Nullity",
-    "operatingSystem": "Linux, macOS, Windows",
+    "name": "NEXUS",
+    "operatingSystem": "macOS, Windows, Linux",
     "applicationCategory": "DeveloperApplication",
-    "description": "Local-first Causal Code Tomography Engine for AI-generated software.",
+    "description": "Local-first Autonomous AI Software Engineering Environment.",
     "license": "https://opensource.org/licenses/MIT",
   };
 
