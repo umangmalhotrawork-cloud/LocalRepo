@@ -3893,7 +3893,7 @@ return (
       {/* 2. Main Resizable Workspace Grid */}
       <div ref={contentRowRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", overflow: "hidden" }} className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
         
-        {/* Quiet 40px Vertical Activity Rail (Exactly 4 primary items) */}
+        {/* Quiet 40px Vertical Activity Rail */}
         <aside className="w-10 bg-[#08080a] border-r border-[#1f1f24] flex flex-col items-center py-3 gap-3 shrink-0 select-none z-20">
           {/* 1. Explorer Icon */}
           <button
@@ -3962,7 +3962,37 @@ return (
             )}
           </button>
 
-          {/* 4. Analysis Gateway Icon */}
+          {/* 4. Test Explorer Icon */}
+          <button
+            onClick={() => {
+              setMainView((prev) => (prev === "test_explorer" ? "editor" : "test_explorer"));
+            }}
+            className={`p-2 rounded-xl transition-all cursor-pointer relative ${
+              mainView === "test_explorer"
+                ? "bg-emerald-950 text-emerald-300 border border-emerald-500/40 shadow-sm"
+                : "text-zinc-400 hover:text-white hover:bg-[#141418]"
+            }`}
+            title="Test Explorer (⌘⇧T)"
+          >
+            <FlaskConical className="w-4 h-4 text-emerald-400" />
+          </button>
+
+          {/* 5. Debugger Icon */}
+          <button
+            onClick={() => {
+              handleRunPythonDebugger();
+            }}
+            className={`p-2 rounded-xl transition-all cursor-pointer relative ${
+              debugPanelOpen
+                ? "bg-amber-950 text-amber-300 border border-amber-500/40 shadow-sm"
+                : "text-zinc-400 hover:text-white hover:bg-[#141418]"
+            }`}
+            title="Debugger (F10)"
+          >
+            <Bug className="w-4 h-4 text-amber-400" />
+          </button>
+
+          {/* 6. Advanced Analysis Gateway (Moved out of primary top position) */}
           <button
             onClick={() => {
               setShowRightPanel((prev) => !prev);
@@ -3970,12 +4000,12 @@ return (
                 setRightPanelTab("file");
               }
             }}
-            className={`p-2 rounded-xl transition-all cursor-pointer relative ${
+            className={`p-2 rounded-xl transition-all cursor-pointer relative mt-auto ${
               showRightPanel || ["dashboard", "graph", "clones", "semantic_clones", "luminance", "behavior_fingerprint", "patch_firewall", "repository_patch_firewall", "semantic_intent_radar"].includes(mainView)
                 ? "bg-purple-950 text-purple-300 border border-purple-500/40 shadow-sm"
-                : "text-zinc-400 hover:text-white hover:bg-[#141418]"
+                : "text-zinc-500 hover:text-zinc-300 hover:bg-[#141418]"
             }`}
-            title="Causal Analysis & Tomography"
+            title="Advanced Code Analysis"
           >
             <Activity className="w-4 h-4 text-purple-400" />
             {findings.length > 0 && (
@@ -4496,10 +4526,10 @@ return (
               
               {/* Header */}
               <div className="pb-3 border-b border-[#1f1f1f] flex items-center justify-between">
-                <span className="font-heading font-bold text-sm text-white">Tomography Panel</span>
+                <span className="font-heading font-bold text-sm text-white">Code Analysis</span>
                 <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 rounded-full bg-cyan-950/80 border border-cyan-500/30 text-cyan-300 font-mono text-[10px]">
-                    Luminance: {luminance.toFixed(2)}
+                    Health: {luminance.toFixed(2)}
                   </span>
                   <button
                     onClick={() => setShowRightPanel(false)}
@@ -5136,7 +5166,9 @@ return (
           </button>
 
           <span>Ln {cursorPos.line}, Col {cursorPos.col}</span>
-          <span className="text-purple-400 font-bold">{findings.length} Ghost Lines</span>
+          <span className="text-purple-400 font-bold">
+            {findings.length > 0 ? `${findings.length} Redundant Lines` : "Clean Architecture"}
+          </span>
           {activeTab?.isDirty ? (
             <span className="text-amber-400 font-bold flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" /> Unsaved Changes ●
@@ -5444,6 +5476,12 @@ return (
             showToast(`Restored to ${snapshotHook.snapshots[0].name}`);
           }
         }}
+        onOpenDashboard={() => setMainView("dashboard")}
+        onOpenGraph={() => setMainView("graph")}
+        onOpenClones={() => setMainView("clones")}
+        onOpenFingerprint={() => setMainView("behavior_fingerprint")}
+        onOpenFirewall={() => setMainView("patch_firewall")}
+        onOpenIntentRadar={() => setMainView("semantic_intent_radar")}
         openTabs={openTabs.map((t) => ({ path: t.path, name: t.name }))}
         onSelectTab={(path) => {
           setActiveTabPath(path);

@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { 
   Command, Search, FolderOpen, Play, Sparkles, RotateCcw, 
-  Sidebar, Terminal, FileText, X, Zap, ShieldAlert, Camera, History 
+  Sidebar, Terminal, FileText, X, Zap, ShieldAlert, Camera, History,
+  Network, Copy, Compass
 } from "lucide-react";
 
 interface CommandItem {
@@ -42,6 +43,12 @@ interface CommandPaletteProps {
   onOpenSnapshots?: () => void;
   onCompareLatestSnapshot?: () => void;
   onRestoreLastSnapshot?: () => void;
+  onOpenDashboard?: () => void;
+  onOpenGraph?: () => void;
+  onOpenClones?: () => void;
+  onOpenFingerprint?: () => void;
+  onOpenFirewall?: () => void;
+  onOpenIntentRadar?: () => void;
   openTabs: { path: string; name: string }[];
   onSelectTab: (path: string) => void;
 }
@@ -73,6 +80,12 @@ export default function CommandPalette({
   onOpenSnapshots,
   onCompareLatestSnapshot,
   onRestoreLastSnapshot,
+  onOpenDashboard,
+  onOpenGraph,
+  onOpenClones,
+  onOpenFingerprint,
+  onOpenFirewall,
+  onOpenIntentRadar,
   openTabs,
   onSelectTab,
 }: CommandPaletteProps) {
@@ -226,9 +239,51 @@ export default function CommandPalette({
       action: () => { if (onDiscardRecoverySession) onDiscardRecoverySession(); onClose(); },
     },
     {
+      id: "open-code-analysis",
+      title: "Analyze Current File & Dependencies",
+      category: "Code Analysis",
+      icon: Sparkles,
+      action: () => { onRunTomography(); onClose(); },
+    },
+    {
+      id: "open-dependency-graph",
+      title: "Inspect Workspace Dependency Graph",
+      category: "Code Analysis",
+      icon: Network,
+      action: () => { if (onOpenGraph) onOpenGraph(); onClose(); },
+    },
+    {
+      id: "open-code-clones",
+      title: "Detect Structural Code Clones & Redundancy",
+      category: "Code Analysis",
+      icon: Copy,
+      action: () => { if (onOpenClones) onOpenClones(); onClose(); },
+    },
+    {
+      id: "open-behavior-fingerprint",
+      title: "Inspect Behavioral Execution Fingerprint",
+      category: "Code Analysis",
+      icon: Zap,
+      action: () => { if (onOpenFingerprint) onOpenFingerprint(); onClose(); },
+    },
+    {
+      id: "open-patch-firewall",
+      title: "Inspect AI Safety Firewall & Risk Rules",
+      category: "Code Analysis",
+      icon: ShieldAlert,
+      action: () => { if (onOpenFirewall) onOpenFirewall(); onClose(); },
+    },
+    {
+      id: "open-intent-radar",
+      title: "Analyze Semantic Intent Drift Radar",
+      category: "Code Analysis",
+      icon: Compass,
+      action: () => { if (onOpenIntentRadar) onOpenIntentRadar(); onClose(); },
+    },
+    {
       id: "run-tomography",
-      title: "Run Tomography Scan",
-      category: "Analysis Engine",
+      title: "Run Analysis Scan",
+      category: "Code Analysis",
       icon: Play,
       shortcut: "F5",
       action: () => { onRunTomography(); onClose(); },
@@ -236,7 +291,7 @@ export default function CommandPalette({
     {
       id: "safe-remove",
       title: "Apply Safe Remove Surgery",
-      category: "Analysis Engine",
+      category: "Code Analysis",
       icon: Sparkles,
       action: () => { onApplySafeRemove(); onClose(); },
     },
