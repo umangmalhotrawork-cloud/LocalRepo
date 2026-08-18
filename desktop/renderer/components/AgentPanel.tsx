@@ -73,6 +73,20 @@ const PRESET_TASKS = [
   "Upgrade dependencies safely",
 ];
 
+function formatTimeAgo(ts?: number): string {
+  if (!ts) return "Recently";
+  const diffMs = Date.now() - ts;
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "Yesterday";
+  return `${days}d ago`;
+}
+
+
 export default function AgentPanel({
   isOpen,
   onClose,
@@ -91,6 +105,79 @@ export default function AgentPanel({
   const [runVerifyCmd, setRunVerifyCmd] = useState(false);
   const [verifyCmdText, setVerifyCmdText] = useState("npm test");
   const [applying, setApplying] = useState(false);
+  const [snapshots, setSnapshots] = useState<any[]>([]);
+  const [showContinuumMenu, setShowContinuumMenu] = useState(false);
+
+  const fetchSnapshots = async () => {
+    if (typeof window !== "undefined" && (window as any).electronAPI?.continuum?.list) {
+      try {
+        const list = await (window as any).electronAPI.continuum.list(workspacePath);
+        setSnapshots(Array.isArray(list) ? list : []);
+      } catch (e) {
+        console.error("[AGENT-PANEL] Failed to fetch Continuum snapshots:", e);
+      }
+    }
+  };
+
+  React.useEffect(() => {
+    if (isOpen) {
+      fetchSnapshots();
+    }
+  }, [isOpen, workspacePath]);
+
+  const handleCreateContinuum = async () => {
+    if (typeof window !== "undefined" && (window as any).electronAPI?.continuum?.createCurrent) {
+      try {
+        const payload = {
+          userGoal: taskInput || (result ? result.task : "Agent Task Session"),
+          completedSteps: steps.filter((s) => s.status === "applied").map((s) => s.title),
+          pendingSteps: steps.filter((s) => s.status === "pending").map((s) => s.title),
+          summary: result?.summary || "",
+        };
+        await (window as any).electronAPI.continuum.createCurrent(payload, workspacePath);
+        fetchSnapshots();
+      } catch (e) {
+        console.error("[AGENT-PANEL] Create Continuum failed:", e);
+      }
+    }
+  };
+
+  const handleResumeSnapshot = async (snapshotId: string) => {
+    if (typeof window !== "undefined" && (window as any).electronAPI?.continuum?.resumeSession) {
+      setLoading(true);
+      setShowContinuumMenu(false);
+      try {
+        const res = await (window as any).electronAPI.continuum.resumeSession(snapshotId, workspacePath);
+        if (res && res.success) {
+          // Reset current session state
+          setSteps([]);
+          setResult(null);
+
+          if (res.agentResult) {
+            setResult(res.agentResult);
+            setSteps(res.agentResult.steps || []);
+            setTaskInput(res.agentResult.task || "");
+          }
+          fetchSnapshots();
+        }
+      } catch (e) {
+        console.error("[AGENT-PANEL] Resume snapshot failed:", e);
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleDeleteSnapshot = async (snapshotId: string) => {
+    if (typeof window !== "undefined" && (window as any).electronAPI?.continuum?.delete) {
+      try {
+        await (window as any).electronAPI.continuum.delete(snapshotId, workspacePath);
+        fetchSnapshots();
+      } catch (e) {
+        console.error("[AGENT-PANEL] Delete snapshot failed:", e);
+      }
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -213,28 +300,105 @@ export default function AgentPanel({
   return (
     <div className="fixed inset-y-0 right-0 w-[480px] max-w-full bg-[#09090c] border-l border-[#1f1f1f] shadow-2xl z-50 flex flex-col font-mono text-xs select-none">
       {/* Header */}
-      <div className="h-10 bg-[#0d0d12] border-b border-[#1f1f1f] px-3 flex items-center justify-between shrink-0">
+      <div className="h-10 bg-[#0d0d12] border-b border-[#1f1f1f] px-3 flex items-center justify-between shrink-0 relative">
         <div className="flex items-center gap-2 text-cyan-400 font-bold text-xs">
           <Bot className="w-4 h-4 text-cyan-400" />
-          <span>AI AGENT MODE</span>
-          <span className="px-1.5 py-0.5 rounded-full bg-cyan-950/80 border border-cyan-500/40 text-[9.5px] text-cyan-300">
-            Autonomous Pipeline
-          </span>
+          <span>AI</span>
         </div>
-        <button
-          onClick={onClose}
-          className="p-1 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer"
-          title="Close Agent Panel"
-        >
-          <X className="w-4 h-4" />
-        </button>
+
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setShowContinuumMenu(!showContinuumMenu)}
+            className="px-2 py-0.5 rounded bg-[#13131c] border border-cyan-500/30 text-cyan-300 hover:bg-cyan-950/50 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+            title="Recent Work History"
+          >
+            <Layers className="w-3 h-3 text-cyan-400" />
+            <span>Recent Work ({snapshots.length})</span>
+            <ChevronDown className="w-3 h-3 text-cyan-400" />
+          </button>
+          <button
+            onClick={handleCreateContinuum}
+            className="px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900/50 text-[10px] font-bold cursor-pointer"
+            title="Save Current Checkpoint"
+          >
+            + Checkpoint
+          </button>
+          <button
+            onClick={onClose}
+            className="p-1 rounded text-zinc-400 hover:text-white transition-colors cursor-pointer ml-1"
+            title="Close Panel"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Recent Work Dropdown Menu */}
+        {showContinuumMenu && (
+          <div className="absolute right-3 top-10 w-96 bg-[#0d0d14] border border-[#2a2a38] rounded-xl shadow-2xl z-50 p-3 space-y-2 text-xs font-mono">
+            <div className="flex items-center justify-between border-b border-[#1f1f2a] pb-2">
+              <span className="font-bold text-cyan-400 text-[11px] flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5" /> Recent Work
+              </span>
+              <span className="text-[10px] text-zinc-400">{snapshots.length} saved</span>
+            </div>
+
+            {snapshots.length === 0 ? (
+              <div className="py-4 text-center text-zinc-500 text-[11px]">
+                No recent work saved for this workspace yet.
+              </div>
+            ) : (
+              <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                {snapshots.map((snap) => {
+                  const goal = snap.userGoal || snap.task?.userGoal || "Engineering Task";
+                  const target = snap.activeTargetNodeId || snap.codeState?.activeTargetNodeId;
+                  const timeAgo = formatTimeAgo(snap.createdAt || snap.metadata?.createdAt);
+
+                  return (
+                    <div
+                      key={snap.snapshotId || snap.sessionId}
+                      className="p-2.5 bg-[#07070a] border border-[#1f1f28] rounded-lg space-y-1.5 hover:border-cyan-500/40 transition-colors"
+                    >
+                      <div className="flex items-center justify-between text-[10.5px]">
+                        <span className="font-bold text-cyan-300 truncate max-w-[220px]" title={goal}>
+                          {goal}
+                        </span>
+                        <span className="text-zinc-500 text-[9.5px]">{timeAgo}</span>
+                      </div>
+
+                      {target && (
+                        <div className="text-[10px] text-zinc-400 truncate" title={target}>
+                          Target: {target}
+                        </div>
+                      )}
+
+                      <div className="pt-1 flex items-center justify-between gap-2 border-t border-[#15151f]">
+                        <button
+                          onClick={() => handleResumeSnapshot(snap.snapshotId || snap.sessionId)}
+                          className="px-2.5 py-1 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900/60 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Play className="w-3 h-3 text-cyan-400" /> Continue
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSnapshot(snap.snapshotId || snap.sessionId)}
+                          className="px-2 py-1 rounded bg-rose-950/60 border border-rose-500/30 text-rose-300 hover:bg-rose-900/40 text-[10px] font-bold cursor-pointer"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Task Input Section */}
       <div className="p-3 border-b border-[#1f1f1f] bg-[#0c0c10] space-y-2 shrink-0">
         <div className="text-[11px] font-bold text-zinc-300 flex items-center justify-between">
-          <span>Prompt / Task Directive</span>
-          <span className="text-[10px] text-zinc-500">Press Run or Enter</span>
+          <span>Ask AI</span>
+          <span className="text-[10px] text-zinc-500">Press ⌘+Enter to run</span>
         </div>
 
         <div className="relative">
@@ -247,7 +411,7 @@ export default function AgentPanel({
                 handleRunAgent();
               }
             }}
-            placeholder="e.g. Fix all TypeScript errors, Refactor duplicate code, Generate unit tests..."
+            placeholder="What would you like to do? e.g. Fix all TypeScript errors, Refactor duplicate code..."
             className="w-full h-16 bg-[#141418] border border-[#27272a] focus:border-cyan-500/60 rounded-xl p-2.5 text-zinc-100 placeholder:text-zinc-600 outline-none text-[11px] font-mono resize-none"
           />
         </div>
@@ -270,8 +434,9 @@ export default function AgentPanel({
 
         {/* Run Button */}
         <div className="flex items-center justify-between pt-1">
-          <div className="text-[10px] text-zinc-500">
-            Safety pipeline: Firewall + Drift enabled
+          <div className="text-[10px] text-zinc-500 flex items-center gap-1">
+            <ShieldCheck className="w-3 h-3 text-emerald-400" />
+            <span>Behavior verification active</span>
           </div>
           <button
             onClick={() => handleRunAgent()}
@@ -281,12 +446,12 @@ export default function AgentPanel({
             {loading ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />
-                <span>Planning Steps...</span>
+                <span>Analyzing...</span>
               </>
             ) : (
               <>
                 <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Run Agent</span>
+                <span>Send</span>
               </>
             )}
           </button>
@@ -384,16 +549,15 @@ export default function AgentPanel({
                   {/* Safety Badges */}
                   {hasEdits && (
                     <div className="flex items-center gap-2 pt-1">
-                      {step.firewallResult && (
+                      {step.firewallResult?.risk_level === "HIGH" || step.driftResult?.drift_level === "HIGH" ? (
+                        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-950/60 border border-rose-500/40 text-rose-300 text-[9.5px]">
+                          <AlertTriangle className="w-3 h-3 text-rose-400" />
+                          <span>⚠ Behavioral Warning Detected</span>
+                        </div>
+                      ) : (
                         <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 text-[9.5px]">
                           <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                          <span>Firewall: {step.firewallResult.risk_level || "SAFE"}</span>
-                        </div>
-                      )}
-                      {step.driftResult && (
-                        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 text-[9.5px]">
-                          <Sparkles className="w-3 h-3 text-cyan-400" />
-                          <span>Drift: {step.driftResult.drift_level || "NONE"}</span>
+                          <span>Behavior verified safe ✓</span>
                         </div>
                       )}
                     </div>

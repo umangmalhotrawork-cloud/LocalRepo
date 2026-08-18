@@ -32,8 +32,9 @@ import { useGit } from "./hooks/useGit";
 import SearchPanel from "./components/SearchPanel";
 import { useSearch, SearchMatchItem } from "./hooks/useSearch";
 import InlineCodeActions from "./components/InlineCodeActions";
-import AIPanel, { AIResponsePayload } from "./components/AIPanel";
-import AgentPanel, { AgentStep, ProposedEdit } from "./components/AgentPanel";
+import UnifiedAIPanel from "./components/UnifiedAIPanel";
+import { AIResponsePayload } from "./components/AIPanel";
+import { AgentStep, ProposedEdit } from "./components/AgentPanel";
 import SurgeryDiffPreview, { SurgeryApplyRequest } from "./components/SurgeryDiffPreview";
 import WorkspaceSearchModal, { SearchMode, SearchResultItem } from "./components/WorkspaceSearchModal";
 import ClonePanel, { CloneReport, CloneInstance } from "./components/ClonePanel";
@@ -472,6 +473,7 @@ export default function IDEApp() {
 
   // AI Code Actions State & Handlers
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiPanelMode, setAiPanelMode] = useState<"code-action" | "agent">("agent");
   const [aiResponse, setAiResponse] = useState<AIResponsePayload | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [selectionInfo, setSelectionInfo] = useState<{
@@ -493,6 +495,7 @@ export default function IDEApp() {
       return;
     }
 
+    setAiPanelMode("code-action");
     setAiPanelOpen(true);
     setAiLoading(true);
     setAiResponse(null);
@@ -607,7 +610,6 @@ export default function IDEApp() {
   const debugIndexRef = useRef(debugIndex);
   debugIndexRef.current = debugIndex;
 
-  const [agentPanelOpen, setAgentPanelOpen] = useState<boolean>(false);
   const [agentRunningCommandOutput, setAgentRunningCommandOutput] = useState<string>("");
 
   const handleApplyAgentStep = async (step: AgentStep): Promise<boolean> => {
@@ -1701,7 +1703,8 @@ export default function IDEApp() {
         setCmdPaletteOpen(true);
       } else if (isCmd && e.shiftKey && key === "i") {
         e.preventDefault();
-        setAgentPanelOpen((prev) => !prev);
+        setAiPanelMode("agent");
+        setAiPanelOpen((prev) => !prev);
       } else if (isCmd && key === "i") {
         if (selectionInfoRef.current && selectionInfoRef.current.text) {
           e.preventDefault();
@@ -3779,9 +3782,16 @@ return (
         <div className="flex-none shrink-0 ml-auto flex items-center gap-1.5">
           {/* AI Action */}
           <button
-            onClick={() => setAgentPanelOpen((prev) => !prev)}
+            onClick={() => {
+              if (aiPanelOpen && aiPanelMode === "agent") {
+                setAiPanelOpen(false);
+              } else {
+                setAiPanelMode("agent");
+                setAiPanelOpen(true);
+              }
+            }}
             className={`min-h-[28px] px-2.5 py-1 rounded-lg border text-xs flex items-center gap-1.5 transition-all cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
-              agentPanelOpen
+              aiPanelOpen
                 ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold shadow-[0_0_12px_rgba(6,182,212,0.3)]"
                 : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-cyan-300"
             }`}
@@ -5527,22 +5537,17 @@ return (
         onAction={handleRunAiCodeAction}
       />
 
-      {/* AI Code Actions Panel */}
-      <AIPanel
+      {/* Unified AI Panel */}
+      <UnifiedAIPanel
         isOpen={aiPanelOpen}
+        mode={aiPanelMode}
         onClose={() => setAiPanelOpen(false)}
-        loading={aiLoading}
-        response={aiResponse}
+        aiLoading={aiLoading}
+        aiResponse={aiResponse}
         onApplyPatch={handleAiApplyPatch}
         onPreviewDiff={handleAiPreviewDiff}
-      />
-
-      {/* AI Agent Mode Panel */}
-      <AgentPanel
-        isOpen={agentPanelOpen}
-        onClose={() => setAgentPanelOpen(false)}
         workspacePath={folderPath || ""}
-        onPreviewDiff={(edit) => {
+        onAgentPreviewDiff={(edit) => {
           setDiffData({
             file: edit.filePath,
             original_source: edit.original,

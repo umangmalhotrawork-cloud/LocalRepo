@@ -11,6 +11,9 @@ const searchManager = require('./searchManager');
 const aiManager = require('./aiManager');
 const agentManager = require('./agentManager');
 const { recoveryStore } = require('./recoveryStore');
+const { continuumManager } = require('./continuumManager');
+const { continuumEngine } = require('../engine/continuum_engine');
+const { continuumContextBuilder } = require('../engine/continuum_context_builder');
 const testManager = require('./testManager');
 const { profilerManager } = require('./profilerManager');
 const { securityAuditManager } = require('./securityAuditManager');
@@ -2038,6 +2041,132 @@ ipcMain.handle('recovery:list', async () => {
 
 ipcMain.handle('recovery:check-crash', async () => {
   return recoveryStore.checkCrashState();
+});
+
+// Continuum Persistence IPC Handlers
+ipcMain.handle('continuum:save', async (_, { snapshot, workspacePath }) => {
+  return continuumManager.saveSnapshot(snapshot, workspacePath);
+});
+
+ipcMain.handle('continuum:list', async (_, workspacePath) => {
+  return continuumManager.listSnapshots(workspacePath);
+});
+
+ipcMain.handle('continuum:load', async (_, { snapshotId, workspacePath }) => {
+  return continuumManager.loadSnapshot(snapshotId, workspacePath);
+});
+
+ipcMain.handle('continuum:delete', async (_, { snapshotId, workspacePath }) => {
+  return continuumManager.deleteSnapshot(snapshotId, workspacePath);
+});
+
+ipcMain.handle('continuum:build-context', async (_, snapshot) => {
+  return continuumContextBuilder.buildContext(snapshot);
+});
+
+ipcMain.handle('continuum:create-current', async (_, { payload = {}, workspacePath }) => {
+  try {
+    const activeWorkspace = workspacePath || payload.workspacePath || process.cwd();
+    const now = Date.now();
+    const snapshotInput = {
+      sessionId: payload.sessionId || `session_${now}_${Math.random().toString(36).substring(2, 8)}`,
+      parentSessionId: payload.parentSessionId || null,
+      sequenceNumber: typeof payload.sequenceNumber === 'number' ? payload.sequenceNumber : 1,
+      project: {
+        workspaceName: path.basename(activeWorkspace),
+        workspacePath: activeWorkspace,
+        workspaceHash: continuumManager.getWorkspaceHash(activeWorkspace),
+        detectedStack: payload.detectedStack || { primaryLanguage: 'unknown', frameworks: [], testRunner: null },
+        bdgGraphSummary: payload.bdgGraphSummary || { totalNodes: 0, totalEdges: 0, entryPointFiles: [] },
+      },
+      task: {
+        userGoal: payload.userGoal || payload.task || '',
+        activeMilestone: payload.activeMilestone || '',
+        currentSubtask: payload.currentSubtask || '',
+        completedSteps: Array.isArray(payload.completedSteps) ? payload.completedSteps : [],
+        pendingSteps: Array.isArray(payload.pendingSteps) ? payload.pendingSteps : [],
+        blockers: Array.isArray(payload.blockers) ? payload.blockers : [],
+      },
+      codeState: {
+        activeTargetNodeId: payload.activeTargetNodeId || null,
+        activeFilePath: payload.activeFilePath || null,
+        cursorLine: typeof payload.cursorLine === 'number' ? payload.cursorLine : null,
+        dirtyFiles: Array.isArray(payload.dirtyFiles) ? payload.dirtyFiles : [],
+        modifiedSymbols: Array.isArray(payload.modifiedSymbols) ? payload.modifiedSymbols : [],
+      },
+      decisions: Array.isArray(payload.decisions) ? payload.decisions : [],
+      debugging: payload.debugging || { discoveredBugs: [], failedFixes: [], successfulFixes: [] },
+      verification: payload.verification || { lastTestStatus: 'NOT_RUN', failingTestNames: [], behavioralDiffSummary: null },
+      conversation: {
+        condensedSummary: payload.condensedSummary || payload.summary || '',
+        lastUserDirective: payload.lastUserDirective || payload.userGoal || payload.task || '',
+        lastAgentResponseSnippet: payload.lastAgentResponseSnippet || '',
+      },
+      aiState: payload.aiState || { provider: 'offline', modelName: 'deterministic-rule-engine', temperature: 0.1, maxTokens: 2048, activeRole: 'software-engineer' },
+      handoff: {
+        immediateNextAction: payload.immediateNextAction || (Array.isArray(payload.pendingSteps) && payload.pendingSteps.length > 0 ? payload.pendingSteps[0] : ''),
+        requiredFilesToLoad: Array.isArray(payload.requiredFilesToLoad) ? payload.requiredFilesToLoad : [],
+        unresolvedQuestions: Array.isArray(payload.unresolvedQuestions) ? payload.unresolvedQuestions : [],
+        systemInstructionOverride: payload.systemInstructionOverride || '',
+      },
+    };
+
+    const snapshot = continuumEngine.createSnapshot(snapshotInput);
+    const saveRes = continuumManager.saveSnapshot(snapshot, activeWorkspace);
+    return saveRes;
+  } catch (err) {
+    console.error('[MAIN] Error creating current Continuum snapshot:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('continuum:resume-session', async (_, { snapshotId, workspacePath }) => {
+  try {
+    const activeWorkspace = workspacePath || process.cwd();
+    const loadRes = continuumManager.loadSnapshot(snapshotId, activeWorkspace);
+    if (!loadRes.success || !loadRes.snapshot) {
+      return { success: false, error: loadRes.error || 'Failed to load target snapshot for resume' };
+    }
+
+    const loadedSnapshot = loadRes.snapshot;
+
+    // Create next chained snapshot (Session S2 inheriting parentSessionId S1)
+    const nextSnapshot = continuumEngine.createNextSnapshot(loadedSnapshot, {
+      task: {
+        ...loadedSnapshot.task,
+        activeMilestone: `Resumed (${loadedSnapshot.task.activeMilestone || 'Handoff'})`,
+      },
+    });
+
+    // Build provider-neutral context string
+    const contextRes = continuumContextBuilder.buildContext(nextSnapshot);
+
+    // Save the new chained snapshot
+    continuumManager.saveSnapshot(nextSnapshot, activeWorkspace);
+
+    // Run agent task with Continuum context injected
+    const agentTaskGoal = nextSnapshot.task.userGoal || nextSnapshot.handoff.immediateNextAction || 'Continue engineering task from Continuum snapshot';
+    const agentResult = await agentManager.runAgentTask({
+      task: agentTaskGoal,
+      workspacePath: activeWorkspace,
+      maxSteps: 5,
+      continuumSnapshot: nextSnapshot,
+      continuumContextText: contextRes.contextText,
+    });
+
+    return {
+      success: true,
+      nextSnapshotId: nextSnapshot.metadata.sessionId,
+      parentSessionId: loadedSnapshot.metadata.sessionId,
+      sequenceNumber: nextSnapshot.metadata.sequenceNumber,
+      contextText: contextRes.contextText,
+      nextSnapshot,
+      agentResult,
+    };
+  } catch (err) {
+    console.error('[MAIN] Error resuming Continuum session:', err);
+    return { success: false, error: err.message };
+  }
 });
 
 // Test Explorer & Coverage IPC Handlers

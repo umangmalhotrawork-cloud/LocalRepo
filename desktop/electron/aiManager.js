@@ -1,4 +1,5 @@
 const https = require('https');
+const { continuumContextBuilder } = require('../engine/continuum_context_builder');
 
 class AiManager {
   async runCodeAction(payload = {}) {
@@ -8,7 +9,17 @@ class AiManager {
       filePath = '',
       selection = '',
       fullFile = '',
+      continuumSnapshot,
+      continuumContextText: rawContextText,
     } = payload;
+
+    let continuumContextText = rawContextText || '';
+    if (!continuumContextText && continuumSnapshot) {
+      const built = continuumContextBuilder.buildContext(continuumSnapshot);
+      if (built.success) {
+        continuumContextText = built.contextText;
+      }
+    }
 
     if (!selection || !selection.trim()) {
       return {
@@ -23,7 +34,7 @@ class AiManager {
 
     if (apiKey && apiKey.trim()) {
       try {
-        return await this.callGemini(apiKey, action, language, filePath, selection, fullFile);
+        return await this.callGemini(apiKey, action, language, filePath, selection, fullFile, continuumContextText);
       } catch (err) {
         console.warn('[AI-MANAGER] Gemini API call failed, falling back to deterministic engine:', err.message);
       }
@@ -33,8 +44,9 @@ class AiManager {
     return this.generateDeterministicResponse(action, language, selection);
   }
 
-  async callGemini(apiKey, action, language, filePath, selection, fullFile) {
-    const systemPrompt = `You are an expert AI code assistant integrated into Echo Nullity IDE.
+  async callGemini(apiKey, action, language, filePath, selection, fullFile, continuumContextText = '') {
+    const contextPrefix = continuumContextText ? `${continuumContextText}\n\n---\n\n` : '';
+    const systemPrompt = `${contextPrefix}You are an expert AI code assistant integrated into Echo Nullity IDE.
 Your task is to perform the action "${action}" on the provided code selection.
 Language: ${language}
 File: ${filePath}

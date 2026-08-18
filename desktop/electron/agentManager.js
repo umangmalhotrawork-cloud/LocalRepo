@@ -4,6 +4,7 @@ const https = require('https');
 const { searchManager } = require('./searchManager');
 const { evaluateAIPatchFirewall } = require('../engine/ai_patch_firewall');
 const { analyzeSemanticIntentDrift } = require('../engine/semantic_intent_drift');
+const { continuumContextBuilder } = require('../engine/continuum_context_builder');
 
 const IGNORE_DIRS = new Set([
   'node_modules',
@@ -55,7 +56,17 @@ class AgentManager {
       task = '',
       workspacePath = process.cwd(),
       maxSteps = 5,
+      continuumSnapshot,
+      continuumContextText: rawContextText,
     } = payload;
+
+    let continuumContextText = rawContextText || '';
+    if (!continuumContextText && continuumSnapshot) {
+      const built = continuumContextBuilder.buildContext(continuumSnapshot);
+      if (built.success) {
+        continuumContextText = built.contextText;
+      }
+    }
 
     if (!task || !task.trim()) {
       return {
@@ -70,16 +81,16 @@ class AgentManager {
 
     if (apiKey && apiKey.trim()) {
       try {
-        return await this.runGeminiAgent(apiKey, task, workspacePath, maxSteps);
+        return await this.runGeminiAgent(apiKey, task, workspacePath, maxSteps, continuumContextText);
       } catch (err) {
         console.warn('[AGENT-MANAGER] Gemini Agent call failed, falling back to deterministic agent engine:', err.message);
       }
     }
 
-    return this.runDeterministicAgent(task, workspacePath, maxSteps);
+    return this.runDeterministicAgent(task, workspacePath, maxSteps, continuumContextText);
   }
 
-  async runGeminiAgent(apiKey, task, workspacePath, maxSteps) {
+  async runGeminiAgent(apiKey, task, workspacePath, maxSteps, continuumContextText = '') {
     const files = this.scanWorkspaceFiles(workspacePath, 20);
     const fileSummaries = files.slice(0, 10).map((f) => {
       try {
@@ -90,7 +101,8 @@ class AgentManager {
       }
     }).join('\n\n');
 
-    const systemPrompt = `You are Echo Nullity Autonomous AI Agent.
+    const contextPrefix = continuumContextText ? `${continuumContextText}\n\n---\n\n` : '';
+    const systemPrompt = `${contextPrefix}You are Echo Nullity Autonomous AI Agent.
 Analyze the workspace and task, then output a structured JSON plan with maximum ${maxSteps} steps.
 Task: "${task}"
 

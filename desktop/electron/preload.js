@@ -106,6 +106,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     list: () => ipcRenderer.invoke('recovery:list'),
     checkCrash: () => ipcRenderer.invoke('recovery:check-crash'),
   },
+  continuum: {
+    save: (snapshot, workspacePath) => ipcRenderer.invoke('continuum:save', { snapshot, workspacePath }),
+    list: (workspacePath) => ipcRenderer.invoke('continuum:list', workspacePath),
+    load: (snapshotId, workspacePath) => ipcRenderer.invoke('continuum:load', { snapshotId, workspacePath }),
+    delete: (snapshotId, workspacePath) => ipcRenderer.invoke('continuum:delete', { snapshotId, workspacePath }),
+    buildContext: (snapshot) => ipcRenderer.invoke('continuum:build-context', snapshot),
+    createCurrent: (payload, workspacePath) => ipcRenderer.invoke('continuum:create-current', { payload, workspacePath }),
+    resumeSession: (snapshotId, workspacePath) => ipcRenderer.invoke('continuum:resume-session', { snapshotId, workspacePath }),
+  },
   tests: {
     discover: (workspacePath) => ipcRenderer.invoke('test:discover', workspacePath),
     run: (payload) => ipcRenderer.invoke('test:run', payload),
