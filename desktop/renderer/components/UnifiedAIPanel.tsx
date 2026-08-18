@@ -16,6 +16,7 @@ interface UnifiedAIPanelProps {
   onPreviewDiff: (patch: { original: string; replacement: string }) => void;
   // AgentPanel props
   workspacePath: string;
+  activeFilePath?: string;
   onAgentPreviewDiff: (edit: ProposedEdit) => void;
   onApplyStep: (step: AgentStep) => Promise<boolean>;
   onApplyAllApproved: (steps: AgentStep[], createCommit: boolean, verifyCmd: string) => Promise<void>;
@@ -31,6 +32,7 @@ export default function UnifiedAIPanel({
   onApplyPatch,
   onPreviewDiff,
   workspacePath,
+  activeFilePath,
   onAgentPreviewDiff,
   onApplyStep,
   onApplyAllApproved,
@@ -69,6 +71,7 @@ export default function UnifiedAIPanel({
             isOpen={true}
             onClose={onClose}
             workspacePath={workspacePath}
+            activeFilePath={activeFilePath}
             onPreviewDiff={onAgentPreviewDiff}
             onApplyStep={onApplyStep}
             onApplyAllApproved={onApplyAllApproved}

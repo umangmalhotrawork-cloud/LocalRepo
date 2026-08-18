@@ -42,7 +42,18 @@ class ContinuumEngine {
       condensed = `${head}\n\n... [Deterministically reduced from ${condensed.length} to ${maxSummaryChars} characters] ...\n\n${tail}`;
     }
 
-    const totalText = `${condensed} ${lastUserDirective} ${lastAgentResponseSnippet}`;
+    const rawTurns = Array.isArray(input.recentTurns) ? input.recentTurns : (Array.isArray(input.recent_turns) ? input.recent_turns : []);
+    const validStatuses = new Set(["IMPLEMENTED", "VERIFIED", "PLANNED", "BLOCKED", "UNKNOWN"]);
+    const recentTurns = rawTurns.slice(-10).map((t, idx) => ({
+      turnId: String(t.turnId || t.turn_id || `turn_${Date.now()}_${idx}`),
+      timestamp: typeof t.timestamp === "number" ? t.timestamp : Date.now(),
+      userPrompt: secretFilter.sanitizeString(String(t.userPrompt || t.user_prompt || "")),
+      agentSummary: secretFilter.sanitizeString(String(t.agentSummary || t.agent_summary || "")),
+      status: validStatuses.has(t.status) ? t.status : "UNKNOWN",
+    }));
+
+    const turnsText = recentTurns.map((t) => `${t.userPrompt} ${t.agentSummary}`).join(" ");
+    const totalText = `${condensed} ${lastUserDirective} ${lastAgentResponseSnippet} ${turnsText}`;
     const tokenCountEstimate = this.estimateContextSize(totalText);
 
     return {
@@ -50,6 +61,7 @@ class ContinuumEngine {
       condensedSummary: secretFilter.sanitizeString(condensed),
       lastUserDirective: secretFilter.sanitizeString(lastUserDirective),
       lastAgentResponseSnippet: secretFilter.sanitizeString(lastAgentResponseSnippet),
+      recentTurns,
     };
   }
 
@@ -111,6 +123,8 @@ class ContinuumEngine {
         cursorLine: typeof sanitizedInput.codeState?.cursorLine === "number" ? sanitizedInput.codeState.cursorLine : null,
         dirtyFiles: Array.isArray(sanitizedInput.codeState?.dirtyFiles) ? sanitizedInput.codeState.dirtyFiles : [],
         modifiedSymbols: Array.isArray(sanitizedInput.codeState?.modifiedSymbols) ? sanitizedInput.codeState.modifiedSymbols : [],
+        workspaceSnapshotId: sanitizedInput.codeState?.workspaceSnapshotId || null,
+        surgerySessionIds: Array.isArray(sanitizedInput.codeState?.surgerySessionIds) ? sanitizedInput.codeState.surgerySessionIds : [],
       },
       decisions: Array.isArray(sanitizedInput.decisions) ? sanitizedInput.decisions : [],
       debugging: {
@@ -122,6 +136,9 @@ class ContinuumEngine {
         lastTestStatus: sanitizedInput.verification?.lastTestStatus || "NOT_RUN",
         failingTestNames: Array.isArray(sanitizedInput.verification?.failingTestNames) ? sanitizedInput.verification.failingTestNames : [],
         behavioralDiffSummary: sanitizedInput.verification?.behavioralDiffSummary || null,
+        patchFirewallDecisions: Array.isArray(sanitizedInput.verification?.patchFirewallDecisions)
+          ? sanitizedInput.verification.patchFirewallDecisions
+          : (Array.isArray(sanitizedInput.verification?.patch_firewall_decisions) ? sanitizedInput.verification.patch_firewall_decisions : []),
       },
       conversation: convState,
       aiState: {
@@ -295,10 +312,18 @@ class ContinuumEngine {
       verification: {
         ...previousSnapshot.verification,
         ...(updates.verification || {}),
+        patchFirewallDecisions: [
+          ...(previousSnapshot.verification?.patchFirewallDecisions || previousSnapshot.verification?.patch_firewall_decisions || []),
+          ...(updates.verification?.patchFirewallDecisions || updates.verification?.patch_firewall_decisions || []),
+        ],
       },
       conversation: {
         ...previousSnapshot.conversation,
         ...(updates.conversation || {}),
+        recentTurns: [
+          ...(previousSnapshot.conversation?.recentTurns || []),
+          ...(updates.conversation?.recentTurns || []),
+        ].slice(-10),
       },
       aiState: {
         ...previousSnapshot.aiState,

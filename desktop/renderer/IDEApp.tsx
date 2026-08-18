@@ -3,7 +3,6 @@
 console.log('[IDE-APP] module evaluated');
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import dynamic from "next/dynamic";
 import { 
   FolderOpen, FolderTree, FileText, ChevronRight, ChevronDown, Play, Sparkles, 
   Terminal as TerminalIcon, Zap, X, Check, Save, RotateCcw, ArrowRight, 
@@ -53,6 +52,9 @@ import { useTests, TestCase } from "./hooks/useTests";
 import ProfilerPanel from "./components/ProfilerPanel";
 import { useProfiler } from "./hooks/useProfiler";
 import SecurityAuditPanel from "./components/SecurityAuditPanel";
+import TaskHome from "./components/TaskHome";
+import AgentWorkspace from "./components/AgentWorkspace";
+import ContextualToolsDrawer, { ToolTab } from "./components/ContextualToolsDrawer";
 import { useSecurityAudit } from "./hooks/useSecurityAudit";
 import SnapshotPanel from "./components/SnapshotPanel";
 import { useSnapshots } from "./hooks/useSnapshots";
@@ -82,14 +84,7 @@ export interface SemanticCloneGroup {
   occurrences: StructuralCloneOccurrence[];
 }
 
-const MonacoEditor = dynamic(() => import("@monaco-editor/react"), {
-  ssr: false,
-  loading: () => (
-    <div className="w-full h-full bg-[#050505] text-cyan-400 flex items-center justify-center font-mono text-xs">
-      Initializing Monaco Code Editor...
-    </div>
-  ),
-});
+import MonacoEditor from "@monaco-editor/react";
 
 declare global {
   interface Window {
@@ -164,6 +159,18 @@ declare global {
           selection: string;
           fullFile: string;
         }) => Promise<AIResponsePayload>;
+      };
+      continuum?: {
+        save: (snapshot: any, workspacePath: string) => Promise<any>;
+        list: (workspacePath: string) => Promise<any[]>;
+        load: (snapshotId: string, workspacePath: string) => Promise<any>;
+        delete: (snapshotId: string, workspacePath: string) => Promise<any>;
+        buildContext: (snapshot: any) => Promise<any>;
+        createCurrent: (payload: any, workspacePath: string) => Promise<any>;
+        resumeSession: (snapshotId: string, workspacePath: string) => Promise<any>;
+        exportCapsule: (payload: { snapshotId?: string; snapshot?: any; workspacePath?: string; exportMode?: 'INLINE' | 'REFERENCE_ONLY'; options?: any }) => Promise<{ success: boolean; capsuleId?: string; path?: string; capsuleMeta?: any; capsule?: any; error?: string }>;
+        importCapsule: (payload: { capsulePath?: string; capsuleSerialized?: string; capsule?: any; workspacePath?: string }) => Promise<{ success: boolean; nextSnapshotId?: string; parentSessionId?: string; sequenceNumber?: number; contextText?: string; nextSnapshot?: any; capsuleMeta?: any; handoffContext?: any; error?: string }>;
+        openCapsuleDialog: () => Promise<string | null>;
       };
     };
   }
@@ -470,6 +477,12 @@ export default function IDEApp() {
   const [repositoryFirewallLoading, setRepositoryFirewallLoading] = useState(false);
   const [semanticIntentReport, setSemanticIntentReport] = useState<SemanticIntentDriftReport | null>(null);
   const [semanticIntentLoading, setSemanticIntentLoading] = useState(false);
+
+  // AI-Native Workspace & Contextual Tools State
+  const [workspaceMode, setWorkspaceMode] = useState<"home" | "agent" | "editor">("home");
+  const [activeTaskPrompt, setActiveTaskPrompt] = useState<string>("");
+  const [toolsDrawerOpen, setToolsDrawerOpen] = useState<boolean>(false);
+  const [toolsDrawerTab, setToolsDrawerTab] = useState<ToolTab>("explorer");
 
   // AI Code Actions State & Handlers
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
@@ -961,6 +974,7 @@ export default function IDEApp() {
 
   const handleAiPreviewDiff = async (patch: { original: string; replacement: string }) => {
     if (!activeTab) return;
+
     const newContent = activeTab.content.replace(patch.original, patch.replacement);
 
     // 1. Evaluate Semantic Intent Drift
@@ -3284,6 +3298,10 @@ export default function IDEApp() {
     }
   };
 
+  const handleAgentPreviewDiff = () => {
+    void handleOpenDiffPreview();
+  };
+
   const handleApplySurgery = async ({
     filePath,
     approvedLines,
@@ -3685,7 +3703,7 @@ return (
 
       {/* 1. Header Navigation Bar */}
       <header className="h-11 bg-[#0a0a0d] border-b border-[#1f1f24] flex items-center justify-between px-3 text-xs font-mono shrink-0 z-20 shadow-md min-w-0 w-full select-none gap-2">
-        {/* Left Zone: Branding + Primary File Operations */}
+        {/* Left Zone: Branding + Home Navigation */}
         <div className="flex-none shrink-0 flex items-center gap-2">
           <div className="flex items-center gap-1.5 pr-2 border-r border-[#1f1f24]">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping shrink-0" />
@@ -3695,107 +3713,74 @@ return (
           </div>
 
           <button
-            onClick={handleOpenFolder}
-            aria-label="Open Workspace Folder"
-            className="min-w-[28px] min-h-[28px] px-2 py-1 rounded-lg bg-[#121216] hover:bg-[#1c1c24] border border-[#24242e] text-zinc-200 transition-all flex items-center gap-1 cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400"
-            title="Open Folder"
+            onClick={() => setWorkspaceMode("home")}
+            className={`px-2.5 py-1 rounded-lg border text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+              workspaceMode === "home"
+                ? "bg-cyan-950 text-cyan-300 border-cyan-500/40 font-bold shadow-[0_0_10px_rgba(6,182,212,0.2)]"
+                : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-zinc-300"
+            }`}
+            title="Task Home"
           >
-            <FolderOpen className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span className="hidden md:inline">Open</span>
-          </button>
-
-          <button
-            onClick={handleSaveFile}
-            aria-label="Save current file (Command+S)"
-            className="min-w-[28px] min-h-[28px] px-2 py-1 rounded-lg bg-[#121216] hover:bg-[#1c1c24] border border-[#24242e] text-zinc-200 transition-all flex items-center gap-1 cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400"
-            title="Save File (⌘S)"
-          >
-            <Save className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span className="hidden md:inline">Save</span>
+            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Home</span>
           </button>
         </div>
 
-        {/* Center Zone: Quiet Contextual Execution Control */}
+        {/* Center Zone: Active Task Title / Status */}
         <div className="flex-1 min-w-0 flex items-center justify-center gap-2 py-1">
-          {/* Contextual Execution Control */}
-          {debugRunning || debugPanelOpen ? (
-            <div className="flex items-center gap-1 bg-cyan-950/80 p-0.5 rounded-lg border border-cyan-500/40 shrink-0">
-              <button
-                onClick={() => setDebugPanelOpen(false)}
-                className="px-2 py-0.5 rounded bg-red-950 hover:bg-red-900 text-red-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                title="Stop Debugging"
-              >
-                <Square className="w-3 h-3 text-red-400 fill-red-400" />
-                <span>Stop</span>
-              </button>
-              <button
-                onClick={() => handleRunPythonDebugger()}
-                className="px-2 py-0.5 rounded bg-cyan-900 hover:bg-cyan-800 text-cyan-200 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                title="Restart Debugging"
-              >
-                <RotateCcw className="w-3 h-3 text-cyan-300" />
-                <span>Restart</span>
-              </button>
-              <button
-                onClick={() => {
-                  if (debugSteps.length > 0) {
-                    setDebugIndex((idx) => Math.min(debugSteps.length - 1, idx + 1));
-                  }
-                }}
-                className="px-2 py-0.5 rounded bg-cyan-900 hover:bg-cyan-800 text-cyan-200 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                title="Step Over (F10)"
-              >
-                <StepForward className="w-3 h-3 text-cyan-300" />
-                <span>Step ({debugSteps.length > 0 ? `${debugIndex + 1}/${debugSteps.length}` : 0})</span>
-              </button>
+          {workspaceMode === "agent" ? (
+            <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-[#0d0d14] border border-cyan-500/30 text-xs truncate max-w-xl">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse shrink-0" />
+              <span className="text-zinc-400 font-bold uppercase text-[10px]">Agent Task:</span>
+              <span className="text-zinc-100 font-medium truncate">{activeTaskPrompt || "Active Agent Task"}</span>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={(e) => {
-                if (activeTab && activeTab.path.endsWith(".py")) {
-                  handleExecutePython(e);
-                } else {
-                  runAnalysis(activeTab || undefined);
-                }
-              }}
-              disabled={pythonRunning || analyzing}
-              aria-label="Run active file"
-              className="min-h-[28px] px-3.5 py-1 rounded-lg bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-300 font-bold text-xs flex items-center gap-1.5 transition-all shadow-emerald-glow cursor-pointer disabled:opacity-50 focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400 shrink-0"
-              title="Run Code (F5)"
-            >
-              <Play className="w-3.5 h-3.5 fill-emerald-300 text-emerald-300 shrink-0" />
-              <span>
-                {pythonRunning
-                  ? "Running..."
-                  : activeTab?.path.endsWith(".py")
-                  ? "Run Python"
-                  : activeTab?.path.match(/\.(js|ts|jsx|tsx)$/)
-                  ? "Run JavaScript"
-                  : "Run"}
-              </span>
-            </button>
+            <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-[#0d0d14] border border-[#1f1f24] text-xs text-zinc-400">
+              <Sparkles className="w-3 h-3 text-cyan-400" />
+              <span className="font-mono text-[11px]">AI-Native Autonomous Research Environment</span>
+            </div>
           )}
         </div>
 
-        {/* Right Zone: AI, Command Palette & More Menu */}
+        {/* Right Zone: AI Agent Toggle, Tools Drawer Toggle, Command Palette & More Menu */}
         <div className="flex-none shrink-0 ml-auto flex items-center gap-1.5">
-          {/* AI Action */}
+          {/* Tools Drawer Toggle */}
           <button
             onClick={() => {
-              if (aiPanelOpen && aiPanelMode === "agent") {
-                setAiPanelOpen(false);
+              setToolsDrawerOpen((prev) => {
+                const next = !prev;
+                if (next) setShowExplorer(false);
+                return next;
+              });
+            }}
+            className={`min-h-[28px] px-2.5 py-1 rounded-lg border text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+              toolsDrawerOpen
+                ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold"
+                : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-zinc-300"
+            }`}
+            title="Contextual Tools Drawer (⌘B)"
+          >
+            <FolderTree className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span>Tools</span>
+          </button>
+
+          {/* AI Agent Workspace Toggle */}
+          <button
+            onClick={() => {
+              if (workspaceMode === "agent") {
+                setWorkspaceMode("home");
               } else {
+                setWorkspaceMode("agent");
                 setAiPanelMode("agent");
-                setAiPanelOpen(true);
+                setAiPanelOpen(false);
               }
             }}
-            className={`min-h-[28px] px-2.5 py-1 rounded-lg border text-xs flex items-center gap-1.5 transition-all cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
-              aiPanelOpen
+            className={`min-h-[28px] px-2.5 py-1 rounded-lg border text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+              workspaceMode === "agent"
                 ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold shadow-[0_0_12px_rgba(6,182,212,0.3)]"
                 : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-cyan-300"
             }`}
-            title="AI Agent Mode (⌘⇧I)"
+            title="AI Agent Workspace (⌘⇧I)"
           >
             <Bot className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
             <span>AI</span>
@@ -3804,7 +3789,7 @@ return (
           {/* Command Palette (⌘K) */}
           <button
             onClick={() => setCmdPaletteOpen(true)}
-            className="min-w-[28px] min-h-[28px] px-2 py-1 rounded-lg bg-[#121216] hover:bg-[#1c1c24] border border-[#24242e] text-cyan-300 transition-all flex items-center gap-1 cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400"
+            className="min-w-[28px] min-h-[28px] px-2 py-1 rounded-lg bg-[#121216] hover:bg-[#1c1c24] border border-[#24242e] text-cyan-300 transition-all flex items-center gap-1 cursor-pointer"
             title="Command Palette (⌘K)"
           >
             <Command className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
@@ -3890,131 +3875,239 @@ return (
         </div>
       </header>
 
+      {/* Contextual Tools Drawer */}
+      <ContextualToolsDrawer
+        isOpen={toolsDrawerOpen}
+        activeTab={toolsDrawerTab}
+        onTabChange={setToolsDrawerTab}
+        onClose={() => setToolsDrawerOpen(false)}
+        explorerContent={
+          <div className="flex flex-col h-full">
+            <div className="p-3 border-b border-[#1f1f1f] flex items-center justify-between font-mono text-xs">
+              <span className="text-zinc-400 uppercase tracking-widest font-bold text-[10px]">Explorer</span>
+              <span className="text-cyan-400 text-[10px]">Tree-sitter</span>
+            </div>
+            <div className="flex-1 p-2 overflow-y-auto space-y-1 font-mono text-xs">
+              {fileTree && renderTree(fileTree)}
+            </div>
+          </div>
+        }
+        searchContent={
+          <SearchPanel
+            query={search.query}
+            setQuery={search.setQuery}
+            replaceText={search.replaceText}
+            setReplaceText={search.setReplaceText}
+            isRegex={search.isRegex}
+            setIsRegex={search.setIsRegex}
+            isCaseSensitive={search.isCaseSensitive}
+            setIsCaseSensitive={search.setIsCaseSensitive}
+            isWholeWord={search.isWholeWord}
+            setIsWholeWord={search.setIsWholeWord}
+            includeHidden={search.includeHidden}
+            setIncludeHidden={search.setIncludeHidden}
+            results={search.results}
+            groupedResults={search.groupedResults}
+            totalFiles={search.totalFiles}
+            totalMatches={search.totalMatches}
+            selectedResultIndex={search.selectedResultIndex}
+            loading={search.loading}
+            error={search.error}
+            durationMs={search.durationMs}
+            onSelectMatch={(m, idx) => {
+              handleSelectSearchMatch(m, idx || 0);
+              setToolsDrawerOpen(false);
+            }}
+            onReplaceSingle={(m) => search.replaceSingle(m)}
+            onReplaceAllInFile={(f) => search.replaceAllInFile(f)}
+            onReplaceAllInWorkspace={() => search.replaceAllInWorkspace()}
+            onNavigateResult={(dir) => search.navigateResult(dir)}
+          />
+        }
+        gitContent={
+          <SourceControlPanel
+            isRepo={git.isRepo}
+            currentBranch={git.currentBranch}
+            branches={git.branches}
+            staged={git.staged}
+            unstaged={git.unstaged}
+            untracked={git.untracked}
+            lastCommit={git.lastCommit}
+            loading={git.loading}
+            statusMessage={git.statusMessage}
+            errorMessage={git.errorMessage}
+            onRefresh={() => git.refreshStatus(folderPath || "")}
+            onStageFile={(f) => git.stageFile(f)}
+            onUnstageFile={(f) => git.unstageFile(f)}
+            onStageAll={() => git.stageAllFiles()}
+            onUnstageAll={() => git.unstageAllFiles()}
+            onCommit={(msg) => git.commitChanges(msg)}
+            onCheckoutBranch={(b) => git.checkoutBranch(b)}
+            onCreateBranch={(b) => git.createAndCheckoutBranch(b)}
+            onDiscardFile={(f) => git.discardFile(f)}
+            onOpenFileDiff={handleOpenGitDiff}
+          />
+        }
+        testsContent={
+          <TestExplorerPanel
+            workspacePath={folderPath || ""}
+            onOpenTestFile={(file) => {
+              handleOpenTestFile(file, undefined);
+              setToolsDrawerOpen(false);
+            }}
+            testsHook={testsHook}
+          />
+        }
+        debuggerContent={
+          <DebuggerPanel
+            isOpen={true}
+            onClose={() => setToolsDrawerOpen(false)}
+            steps={debugSteps}
+            currentIndex={debugIndex}
+            onStepChange={setDebugIndex}
+            onRestart={handleRunPythonDebugger}
+          />
+        }
+        terminalContent={
+          <TerminalPanel
+            tabs={terminalTabs}
+            activeTabId={activeTerminalTabId}
+            onSelectTab={(id) => setActiveTerminalTabId(id)}
+            onCreateTab={() => createTerminalTab(folderPath || "")}
+            onCloseTab={(id) => closeTerminalTab(id)}
+            onRestartTab={(id) => restartTerminalTab(id)}
+            onSendInput={(id, input) => sendTerminalInput(id, input)}
+            logs={logs}
+            onClearLogs={() => setLogs([])}
+            debugLogs={debugSteps.map((s) => `[Step ${s.step}] Line ${s.line} in ${s.functionName || "global"}`)}
+            pythonOutput={pythonOutput}
+            onClearDebugLogs={() => setPythonOutput("")}
+            activeMode={terminalPanelMode}
+            onModeChange={(mode) => setTerminalPanelMode(mode)}
+            onClosePanel={() => setToolsDrawerOpen(false)}
+          />
+        }
+      />
+
       {/* 2. Main Resizable Workspace Grid */}
       <div ref={contentRowRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", overflow: "hidden" }} className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
         
-        {/* Quiet 40px Vertical Activity Rail */}
-        <aside className="w-10 bg-[#08080a] border-r border-[#1f1f24] flex flex-col items-center py-3 gap-3 shrink-0 select-none z-20">
-          {/* 1. Explorer Icon */}
-          <button
-            onClick={() => {
-              if (showExplorer && mainView === "editor") {
-                setShowExplorer(false);
-                setActiveActivity(null);
-              } else {
-                setShowExplorer(true);
-                setActiveActivity("explorer");
-                if (mainView !== "editor") setMainView("editor");
+        {workspaceMode === "home" ? (
+          <TaskHome
+            workspacePath={folderPath || "demo-workspaces/ai_cart_project"}
+            onStartTask={(promptText) => {
+              setActiveTaskPrompt(promptText);
+              setWorkspaceMode("agent");
+              setAiPanelMode("agent");
+              setAiPanelOpen(false);
+              addLog(`[TASK] Started AI task: ${promptText}`);
+            }}
+            onContinueSession={async (sessionId, userGoal) => {
+              const restoredPrompt = userGoal || "Resumed Continuum Session Task";
+              setActiveTaskPrompt(restoredPrompt);
+              setWorkspaceMode("agent");
+              setAiPanelMode("agent");
+              setAiPanelOpen(false);
+              if (typeof window !== "undefined" && (window as any).electronAPI?.continuum?.resumeSession) {
+                try {
+                  await (window as any).electronAPI.continuum.resumeSession(sessionId, folderPath || "");
+                  addLog(`[CONTINUUM] Resumed session ${sessionId}`);
+                } catch (e) {
+                  console.error("[IDE] Resume session error:", e);
+                }
               }
             }}
-            className={`p-2 rounded-xl transition-all cursor-pointer ${
-              showExplorer && mainView === "editor"
-                ? "bg-cyan-950 text-cyan-300 border border-cyan-500/40 shadow-sm"
-                : "text-zinc-400 hover:text-white hover:bg-[#141418]"
-            }`}
-            title="File Explorer (⌘B)"
-          >
-            <FolderTree className="w-4 h-4 text-cyan-400" />
-          </button>
+            onOpenFolder={handleOpenFolder}
+            gitBranch={git.currentBranch || "main"}
+            fileCount={openTabs.length}
+          />
+        ) : workspaceMode === "agent" ? (
+          <AgentWorkspace
+            workspacePath={folderPath || "demo-workspaces/ai_cart_project"}
+            activeFilePath={activeTabPath}
+            activeTaskPrompt={activeTaskPrompt}
+            onBackToHome={() => setWorkspaceMode("home")}
+            onPreviewDiff={handleAgentPreviewDiff}
+            onApplyStep={handleApplyAgentStep}
+            onApplyAllApproved={handleApplyAllAgentApproved}
+            runningCommandOutput={agentRunningCommandOutput}
+            editorCanvas={
+              <div className="flex-1 flex flex-col h-full bg-[#050508] relative overflow-hidden">
+                {/* Multi-Tab Bar with Contextual Run Button */}
+                <div className="h-9 bg-[#0a0a0a] border-b border-[#1f1f1f] flex items-center px-2 gap-1 font-mono text-xs overflow-x-auto shrink-0">
+                  {openTabs.map((tab) => (
+                    <div
+                      key={tab.path}
+                      onClick={() => {
+                        setActiveTabPath(tab.path);
+                        restoreTabCursor(tab.path);
+                        runAnalysis(tab);
+                      }}
+                      className={`group px-3 py-1 rounded-t-lg flex items-center gap-2 cursor-pointer transition-all ${
+                        activeTabPath === tab.path
+                          ? "bg-[#050505] text-cyan-400 border-t border-x border-cyan-500/40 font-bold shadow-sm"
+                          : "text-zinc-400 hover:text-white hover:bg-zinc-900/40"
+                      }`}
+                    >
+                      <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>{tab.name}</span>
+                    </div>
+                  ))}
+                  <div className="ml-auto flex items-center gap-2 pr-2">
+                    <button
+                      onClick={(e) => {
+                        if (activeTab && activeTab.path.endsWith(".py")) {
+                          handleExecutePython(e);
+                        } else {
+                          runAnalysis(activeTab || undefined);
+                        }
+                      }}
+                      disabled={pythonRunning || analyzing}
+                      className="px-2.5 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                      title="Run Code (F5)"
+                    >
+                      <Play className="w-3 h-3 text-emerald-400 fill-emerald-400" />
+                      <span>{pythonRunning ? "Running..." : "Run Code"}</span>
+                    </button>
+                  </div>
+                </div>
 
-          {/* 2. Search Icon */}
-          <button
-            onClick={() => {
-              if (mainView === "search") {
-                setMainView("editor");
-                setActiveActivity(null);
-              } else {
-                setMainView("search");
-                setActiveActivity("search");
-              }
-            }}
-            className={`p-2 rounded-xl transition-all cursor-pointer ${
-              mainView === "search"
-                ? "bg-purple-950 text-purple-300 border border-purple-500/40 shadow-sm"
-                : "text-zinc-400 hover:text-white hover:bg-[#141418]"
-            }`}
-            title="Search & Replace (⌘⇧F)"
-          >
-            <Search className="w-4 h-4 text-purple-400" />
-          </button>
-
-          {/* 3. Source Control Icon */}
-          <button
-            onClick={() => {
-              if (mainView === "source_control") {
-                setMainView("editor");
-                setActiveActivity(null);
-              } else {
-                setMainView("source_control");
-                setActiveActivity("git");
-              }
-            }}
-            className={`p-2 rounded-xl transition-all cursor-pointer relative ${
-              mainView === "source_control"
-                ? "bg-cyan-950 text-cyan-300 border border-cyan-500/40 shadow-sm"
-                : "text-zinc-400 hover:text-white hover:bg-[#141418]"
-            }`}
-            title="Source Control (⌘⇧G)"
-          >
-            <GitBranch className="w-4 h-4 text-cyan-400" />
-            {git.isRepo && (git.staged.length + git.unstaged.length + git.untracked.length > 0) && (
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-            )}
-          </button>
-
-          {/* 4. Test Explorer Icon */}
-          <button
-            onClick={() => {
-              setMainView((prev) => (prev === "test_explorer" ? "editor" : "test_explorer"));
-            }}
-            className={`p-2 rounded-xl transition-all cursor-pointer relative ${
-              mainView === "test_explorer"
-                ? "bg-emerald-950 text-emerald-300 border border-emerald-500/40 shadow-sm"
-                : "text-zinc-400 hover:text-white hover:bg-[#141418]"
-            }`}
-            title="Test Explorer (⌘⇧T)"
-          >
-            <FlaskConical className="w-4 h-4 text-emerald-400" />
-          </button>
-
-          {/* 5. Debugger Icon */}
-          <button
-            onClick={() => {
-              handleRunPythonDebugger();
-            }}
-            className={`p-2 rounded-xl transition-all cursor-pointer relative ${
-              debugPanelOpen
-                ? "bg-amber-950 text-amber-300 border border-amber-500/40 shadow-sm"
-                : "text-zinc-400 hover:text-white hover:bg-[#141418]"
-            }`}
-            title="Debugger (F10)"
-          >
-            <Bug className="w-4 h-4 text-amber-400" />
-          </button>
-
-          {/* 6. Advanced Analysis Gateway (Moved out of primary top position) */}
-          <button
-            onClick={() => {
-              setShowRightPanel((prev) => !prev);
-              if (!showRightPanel) {
-                setRightPanelTab("file");
-              }
-            }}
-            className={`p-2 rounded-xl transition-all cursor-pointer relative mt-auto ${
-              showRightPanel || ["dashboard", "graph", "clones", "semantic_clones", "luminance", "behavior_fingerprint", "patch_firewall", "repository_patch_firewall", "semantic_intent_radar"].includes(mainView)
-                ? "bg-purple-950 text-purple-300 border border-purple-500/40 shadow-sm"
-                : "text-zinc-500 hover:text-zinc-300 hover:bg-[#141418]"
-            }`}
-            title="Advanced Code Analysis"
-          >
-            <Activity className="w-4 h-4 text-purple-400" />
-            {findings.length > 0 && (
-              <span className="absolute top-1 right-1 px-1 py-0.2 rounded-full bg-purple-900 text-purple-300 text-[8px] font-bold">
-                {findings.length}
-              </span>
-            )}
-          </button>
-        </aside>
+                {/* Monaco Code Editor Canvas */}
+                <div ref={monacoWrapperRef} className="flex-1 relative overflow-hidden">
+                  {activeTab ? (
+                    <MonacoEditor
+                      height="100%"
+                      language={getLanguageFromPath(activeTab.path)}
+                      theme="echo-dark"
+                      value={activeTab.content}
+                      onChange={handleEditorChange}
+                      onMount={handleEditorMount}
+                      options={{
+                        minimap: { enabled: true },
+                        fontSize: 13,
+                        fontFamily: "var(--font-mono)",
+                        scrollBeyondLastLine: false,
+                        automaticLayout: true,
+                        tabSize: 4,
+                        wordWrap: "on",
+                        renderLineHighlight: "all",
+                        lineNumbers: "on",
+                        glyphMargin: true,
+                        cursorBlinking: "smooth",
+                        smoothScrolling: true,
+                      }}
+                    />
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-zinc-600 font-mono text-xs">
+                      No active file in editor.
+                    </div>
+                  )}
+                </div>
+              </div>
+            }
+          />
+        ) : (
+          <>
 
         {/* Left Sidebar: File Explorer */}
         {showExplorer && (
@@ -5068,6 +5161,8 @@ return (
           )}
         </div>
       )}
+          </>
+        )}
 
       </div>
 
@@ -5282,10 +5377,16 @@ return (
             <span className="text-zinc-500 uppercase tracking-widest text-[10px]">Unified AST Diff Stream</span>
             
             <div className="space-y-1 border border-[#1f1f1f] rounded-xl p-3 bg-[#0d0d0d]">
-              {diffData.original_source.split("\n").map((origLine, idx) => {
+              {(() => {
+                const originalLines = diffData.original_source.split("\n");
+                const transformedLines = diffData.transformed_source.split("\n");
+                const removalOnly = transformedLines.join("\n") === originalLines
+                  .filter((_, idx) => !diffData.changed_lines.includes(idx + 1))
+                  .join("\n");
+
+                return originalLines.map((origLine, idx) => {
                 const lineNum = idx + 1;
                 const isChanged = diffData.changed_lines.includes(lineNum);
-                const transformedLines = diffData.transformed_source.split("\n");
                 const newContent = transformedLines[idx] || "";
 
                 if (isChanged) {
@@ -5295,10 +5396,12 @@ return (
                         <span>- {lineNum}: {origLine}</span>
                         <span className="text-[9px] text-red-400 uppercase">Ghost</span>
                       </div>
-                      <div className="px-2 py-1 bg-emerald-950/60 border-l-2 border-emerald-500 text-emerald-300 flex justify-between">
-                        <span>+ {lineNum}: {newContent}</span>
-                        <span className="text-[9px] text-emerald-400 uppercase">Optimal</span>
-                      </div>
+                      {!removalOnly && (
+                        <div className="px-2 py-1 bg-emerald-950/60 border-l-2 border-emerald-500 text-emerald-300 flex justify-between">
+                          <span>+ {lineNum}: {newContent}</span>
+                          <span className="text-[9px] text-emerald-400 uppercase">Optimal</span>
+                        </div>
+                      )}
                     </div>
                   );
                 }
@@ -5308,7 +5411,8 @@ return (
                     &nbsp;&nbsp;{lineNum}: {origLine}
                   </div>
                 );
-              })}
+                });
+              })()}
             </div>
           </div>
 
@@ -5585,18 +5689,8 @@ return (
         onApplyPatch={handleAiApplyPatch}
         onPreviewDiff={handleAiPreviewDiff}
         workspacePath={folderPath || ""}
-        onAgentPreviewDiff={(edit) => {
-          setDiffData({
-            file: edit.filePath,
-            original_source: edit.original,
-            transformed_source: edit.replacement,
-            changed_lines: [1],
-            ghost_count_before: 1,
-            ghost_count_after: 0,
-            causal_luminance_after: 0.0,
-          });
-          setShowSurgeryDiffModal(true);
-        }}
+        activeFilePath={activeTabPath}
+        onAgentPreviewDiff={handleAgentPreviewDiff}
         onApplyStep={handleApplyAgentStep}
         onApplyAllApproved={handleApplyAllAgentApproved}
         runningCommandOutput={agentRunningCommandOutput}

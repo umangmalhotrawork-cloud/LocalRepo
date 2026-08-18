@@ -14,6 +14,8 @@ const { recoveryStore } = require('./recoveryStore');
 const { continuumManager } = require('./continuumManager');
 const { continuumEngine } = require('../engine/continuum_engine');
 const { continuumContextBuilder } = require('../engine/continuum_context_builder');
+const { continuumCapsuleBuilder } = require('../engine/continuum_capsule_builder');
+const secretFilter = require('../security/secretFilter');
 const testManager = require('./testManager');
 const { profilerManager } = require('./profilerManager');
 const { securityAuditManager } = require('./securityAuditManager');
@@ -811,6 +813,24 @@ ipcMain.handle('dialog:open-folder', async () => {
   const folderPath = result.filePaths[0];
   const tree = buildFileTree(folderPath);
   return { folderPath, tree };
+});
+
+ipcMain.handle('dialog:open-capsule-file', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Continuum Capsule JSON File',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Continuum Capsule', extensions: ['json'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+
+  return result.filePaths[0];
 });
 
 ipcMain.handle('fs:read-file', async (_, filePath) => {
@@ -2165,6 +2185,132 @@ ipcMain.handle('continuum:resume-session', async (_, { snapshotId, workspacePath
     };
   } catch (err) {
     console.error('[MAIN] Error resuming Continuum session:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('continuum:export-capsule', async (_, payload = {}) => {
+  try {
+    const { snapshotId, snapshot, workspacePath, exportMode = 'INLINE', options = {} } = payload;
+    const activeWorkspace = workspacePath || snapshot?.project?.workspacePath || process.cwd();
+
+    let targetSnapshot = snapshot;
+    if (snapshotId) {
+      const loadRes = continuumManager.loadSnapshot(snapshotId, activeWorkspace);
+      if (!loadRes.success || !loadRes.snapshot) {
+        return { success: false, error: loadRes.error || `Failed to load snapshot ${snapshotId}` };
+      }
+      targetSnapshot = loadRes.snapshot;
+    }
+
+    if (!targetSnapshot) {
+      return { success: false, error: 'No valid snapshot provided or found for capsule export' };
+    }
+
+    const validation = continuumEngine.validateSnapshot(targetSnapshot);
+    if (!validation.valid) {
+      return { success: false, error: `Invalid snapshot: ${validation.errors.join('; ')}` };
+    }
+
+    const capsule = await continuumCapsuleBuilder.buildCapsule(targetSnapshot, activeWorkspace, {
+      exportMode,
+      ...options,
+    });
+
+    const capsulesDir = path.join(continuumManager.getUserDataPath(), 'capsules');
+    if (!fs.existsSync(capsulesDir)) {
+      fs.mkdirSync(capsulesDir, { recursive: true });
+    }
+
+    const safeId = continuumManager.sanitizeSnapshotId(capsule.capsule_meta?.capsule_id || `caps_${Date.now()}`);
+    const capsuleFileName = `${safeId}.json`;
+    const capsulePath = path.join(capsulesDir, capsuleFileName);
+
+    const serialized = JSON.stringify(capsule, null, 2);
+    const tmpPath = `${capsulePath}.tmp.${Date.now()}`;
+    fs.writeFileSync(tmpPath, serialized, 'utf-8');
+    fs.renameSync(tmpPath, capsulePath);
+
+    return {
+      success: true,
+      capsuleId: capsule.capsule_meta.capsule_id,
+      path: capsulePath,
+      capsuleMeta: capsule.capsule_meta,
+      capsule,
+    };
+  } catch (err) {
+    console.error('[MAIN] Error exporting Continuum capsule:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('continuum:import-capsule', async (_, payload = {}) => {
+  try {
+    const { capsulePath, capsuleSerialized, capsule, workspacePath } = payload;
+    let targetCapsule = capsule;
+
+    if (capsulePath) {
+      if (!fs.existsSync(capsulePath)) {
+        return { success: false, error: `Capsule file not found: ${capsulePath}` };
+      }
+      const raw = fs.readFileSync(capsulePath, 'utf-8');
+      targetCapsule = JSON.parse(raw);
+    } else if (capsuleSerialized) {
+      targetCapsule = typeof capsuleSerialized === 'string' ? JSON.parse(capsuleSerialized) : capsuleSerialized;
+    }
+
+    if (!targetCapsule || typeof targetCapsule !== 'object') {
+      return { success: false, error: 'Missing or invalid capsule object' };
+    }
+
+    // 1. Validate capsule structure & hash integrity
+    const validation = continuumCapsuleBuilder.validateCapsule(targetCapsule);
+    if (!validation.valid) {
+      return { success: false, error: `Capsule validation failed: ${validation.errors.join('; ')}` };
+    }
+
+    // 2. Secret Redaction Check
+    const sanitizedCapsule = secretFilter.sanitizeObject(targetCapsule);
+
+    // 3. Embedded snapshot validation
+    const embeddedSnapshot = sanitizedCapsule.continuum_snapshot;
+    const snapVal = continuumEngine.validateSnapshot(embeddedSnapshot);
+    if (!snapVal.valid) {
+      return { success: false, error: `Invalid embedded snapshot: ${snapVal.errors.join('; ')}` };
+    }
+
+    const activeWorkspace = workspacePath || embeddedSnapshot.project?.workspacePath || process.cwd();
+
+    // 4. Create next chained snapshot (inheriting parent session)
+    const nextSnapshot = continuumEngine.createNextSnapshot(embeddedSnapshot, {
+      task: {
+        ...embeddedSnapshot.task,
+        activeMilestone: `Resumed from Capsule (${sanitizedCapsule.capsule_meta?.capsule_id || 'Import'})`,
+      },
+      codeState: {
+        ...embeddedSnapshot.codeState,
+        workspaceSnapshotId: sanitizedCapsule.source_state?.workspace_snapshot_id || embeddedSnapshot.codeState?.workspaceSnapshotId || null,
+      },
+    });
+
+    // 5. Build provider-neutral context string
+    const contextRes = continuumContextBuilder.buildContext(nextSnapshot);
+
+    // 6. Save the new chained snapshot
+    continuumManager.saveSnapshot(nextSnapshot, activeWorkspace);
+
+    return {
+      success: true,
+      nextSnapshotId: nextSnapshot.metadata.sessionId,
+      parentSessionId: embeddedSnapshot.metadata.sessionId,
+      sequenceNumber: nextSnapshot.metadata.sequenceNumber,
+      contextText: contextRes.contextText,
+      nextSnapshot,
+      capsuleMeta: sanitizedCapsule.capsule_meta,
+      handoffContext: sanitizedCapsule.handoff_context,
+    };
+  } catch (err) {
+    console.error('[MAIN] Error importing Continuum capsule:', err);
     return { success: false, error: err.message };
   }
 });

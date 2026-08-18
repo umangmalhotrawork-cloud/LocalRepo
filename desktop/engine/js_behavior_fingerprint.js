@@ -211,12 +211,14 @@ try {
 
   const res = targetFn(...argsList);
   console.log('RESULT_JSON:' + JSON.stringify({ status: 'success', result: res }));
+  process.exit(0);
 } catch (err) {
   console.log('RESULT_JSON:' + JSON.stringify({
     status: 'exception',
     exception_type: err.name || 'Error',
     message: err.message || String(err)
   }));
+  process.exit(1);
 }
 `;
 
@@ -225,7 +227,10 @@ try {
 
   const startTime = Date.now();
   try {
-    const output = child_process.execFileSync(process.execPath, [tempFile], {
+    const nodeExecutable = process.versions.electron
+      ? (process.env.npm_node_execpath || process.env.NODE_BINARY || 'node')
+      : process.execPath;
+    const output = child_process.execFileSync(nodeExecutable, [tempFile], {
       timeout: timeoutMs,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],

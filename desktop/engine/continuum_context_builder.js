@@ -72,10 +72,15 @@ class ContinuumContextBuilder {
       `- Behavioral Risk: ${sanitized.verification?.behavioralDiffSummary?.riskLevel || "LOW"}`,
     ].join("\n");
 
+    const turnsFormatted = (sanitized.conversation?.recentTurns || [])
+      .map((t) => `- [${t.status || "UNKNOWN"}] User: "${t.userPrompt}" -> Agent: "${t.agentSummary}"`)
+      .join("\n");
+
     const conversationSection = [
       `## CONSTRUCTED CONVERSATION SUMMARY`,
       sanitized.conversation?.condensedSummary || "No prior conversation summary recorded.",
-    ].join("\n");
+      turnsFormatted ? `\nRecent Conversation Turns:\n${turnsFormatted}` : "",
+    ].filter(Boolean).join("\n");
 
     const handoffSection = [
       `## HANDOFF DIRECTIVE & NEXT ACTION`,

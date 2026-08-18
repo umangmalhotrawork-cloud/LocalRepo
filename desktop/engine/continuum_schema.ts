@@ -60,6 +60,8 @@ export interface ContinuumCodeState {
   cursorLine: number | null;
   dirtyFiles: ContinuumDirtyFile[];
   modifiedSymbols: ContinuumModifiedSymbol[];
+  workspaceSnapshotId?: string | null;
+  surgerySessionIds?: string[];
 }
 
 export interface ContinuumDecision {
@@ -91,10 +93,29 @@ export interface ContinuumBehavioralDiffSummary {
   affectedFilesCount: number;
 }
 
+export interface ContinuumPatchFirewallDecision {
+  file_path: string;
+  risk_level: string;
+  risk_score?: number;
+  safe_to_auto_apply: boolean;
+  decision_summary: string;
+  timestamp?: number;
+  operation_id?: string;
+}
+
 export interface ContinuumVerificationState {
   lastTestStatus: "PASSED" | "FAILED" | "NOT_RUN";
   failingTestNames: string[];
   behavioralDiffSummary: ContinuumBehavioralDiffSummary | null;
+  patchFirewallDecisions?: ContinuumPatchFirewallDecision[];
+}
+
+export interface ContinuumConversationTurn {
+  turnId: string;
+  timestamp: number;
+  userPrompt: string;
+  agentSummary: string;
+  status: "IMPLEMENTED" | "VERIFIED" | "PLANNED" | "BLOCKED" | "UNKNOWN";
 }
 
 export interface ContinuumConversationState {
@@ -102,6 +123,7 @@ export interface ContinuumConversationState {
   condensedSummary: string;
   lastUserDirective: string;
   lastAgentResponseSnippet: string;
+  recentTurns?: ContinuumConversationTurn[];
 }
 
 export interface ContinuumAIState {
