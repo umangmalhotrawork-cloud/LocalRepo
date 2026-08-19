@@ -9,7 +9,7 @@ const SECRET_PATTERNS = [
   // Gemini API Key
   {
     type: "GEMINI_API_KEY",
-    regex: /(?:GEMINI_API_KEY\s*[:=]\s*['"]?|AIzaSy)[A-Za-z0-9_-]{15,40}['"]?/gi,
+    regex: /(?:GEMINI_API_KEY\s*[:=]\s*['"]?|AIza)[A-Za-z0-9_-]{10,50}['"]?/gi,
   },
   // OpenAI API Key
   {

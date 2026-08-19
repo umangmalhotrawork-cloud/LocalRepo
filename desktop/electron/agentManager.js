@@ -8,6 +8,7 @@ const { continuumContextBuilder } = require('../engine/continuum_context_builder
 const { continuumEngine } = require('../engine/continuum_engine');
 const { continuumCapsuleBuilder } = require('../engine/continuum_capsule_builder');
 const { continuumManager } = require('./continuumManager');
+const { aiProviderRouter } = require('./ai/AIProviderRouter');
 
 const IGNORE_DIRS = new Set([
   'node_modules',
@@ -145,6 +146,8 @@ class AgentManager {
       activeFilePath,
       continuumSnapshot,
       continuumContextText: rawContextText,
+      providerId,
+      modelId,
     } = payload;
 
     let continuumContextText = rawContextText || '';
@@ -164,17 +167,40 @@ class AgentManager {
       };
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const files = this.scanWorkspaceFiles(workspacePath, 20);
+    const targetFile = this.resolveTargetFile(workspacePath, files, activeFilePath);
+    const intent = classifyTaskIntent(task);
 
-    if (apiKey && apiKey.trim()) {
-      try {
-        return await this.runGeminiAgent(apiKey, task, workspacePath, maxSteps, continuumContextText, activeFilePath);
-      } catch (err) {
-        console.warn('[AGENT-MANAGER] Gemini Agent call failed, falling back to deterministic agent engine:', err.message);
+    try {
+      const agentData = await aiProviderRouter.generateAgentPlan({
+        task,
+        workspacePath,
+        maxSteps,
+        activeFilePath,
+        continuumContextText,
+        files,
+        targetFile,
+        intent,
+        providerId,
+        modelId,
+      });
+
+      if (agentData) {
+        return this.enrichStepsWithFirewallAndDrift(agentData, workspacePath, task, maxSteps);
       }
+    } catch (err) {
+      console.warn('[AGENT-MANAGER] Provider call failed, falling back to deterministic agent engine:', err.message);
     }
 
-    return this.runDeterministicAgent(task, workspacePath, maxSteps, continuumContextText, activeFilePath);
+    const detResult = await this.runDeterministicAgent(task, workspacePath, maxSteps, continuumContextText, activeFilePath);
+    detResult.execution = {
+      providerId: 'offline',
+      modelId: 'deterministic-rule-engine',
+      requestedProviderId: providerId || 'offline',
+      requestedModelId: modelId || 'deterministic-rule-engine',
+      isFallback: true,
+    };
+    return detResult;
   }
 
   async runGeminiAgent(apiKey, task, workspacePath, maxSteps, continuumContextText = '', activeFilePath) {
@@ -447,6 +473,13 @@ Format strictly as JSON:
       taskIntent: agentData.taskIntent || 'MUTATION',
       steps: enrichedSteps,
       summary: agentData.summary || `Autonomous plan completed with ${enrichedSteps.length} steps.`,
+      execution: agentData.execution || {
+        providerId: aiProviderRouter.getActiveProvider().getId(),
+        modelId: aiProviderRouter.getActiveModel(),
+        requestedProviderId: aiProviderRouter.getActiveProvider().getId(),
+        requestedModelId: aiProviderRouter.getActiveModel(),
+        isFallback: false,
+      },
     };
   }
 
@@ -467,6 +500,8 @@ Format strictly as JSON:
 
     const activeWorkspace = workspacePath || process.cwd();
     const now = Date.now();
+    const actualProviderId = payload.execution?.providerId || aiProviderRouter.getActiveProvider().getId();
+    const actualModelId = payload.execution?.modelId || aiProviderRouter.getActiveModel();
 
     const turnsInput = Array.isArray(payload.recentTurns) ? payload.recentTurns : (Array.isArray(payload.turns) ? payload.turns : []);
     const hasCurrentTurn = turnsInput.some((t) => (t.userPrompt || t.user_prompt) === task);
@@ -482,6 +517,8 @@ Format strictly as JSON:
         userPrompt: task,
         agentSummary: summary || task,
         status: currentTurnStatus,
+        providerId: actualProviderId,
+        modelId: actualModelId,
       });
     }
     updatedTurns = updatedTurns.slice(-10);
@@ -521,7 +558,13 @@ Format strictly as JSON:
         lastAgentResponseSnippet: summary,
         recentTurns: updatedTurns,
       },
-      aiState: { provider: 'offline', modelName: 'deterministic-rule-engine', temperature: 0.1, maxTokens: 2048, activeRole: 'software-engineer' },
+      aiState: {
+        provider: actualProviderId,
+        modelName: actualModelId,
+        temperature: 0.1,
+        maxTokens: 3000,
+        activeRole: 'software-engineer',
+      },
       handoff: {
         immediateNextAction: steps.filter((s) => s.status === 'pending').map((s) => s.title || s.id)[0] || (task ? `Continue task: ${task}` : 'Continue task'),
         requiredFilesToLoad: activeFilePath ? [path.isAbsolute(activeFilePath) ? path.relative(activeWorkspace, activeFilePath) : activeFilePath] : [],

@@ -33,7 +33,7 @@ import { useSearch, SearchMatchItem } from "./hooks/useSearch";
 import InlineCodeActions from "./components/InlineCodeActions";
 import UnifiedAIPanel from "./components/UnifiedAIPanel";
 import { AIResponsePayload } from "./components/AIPanel";
-import { AgentStep, ProposedEdit } from "./components/AgentPanel";
+import AgentPanel, { AgentStep, ProposedEdit } from "./components/AgentPanel";
 import SurgeryDiffPreview, { SurgeryApplyRequest } from "./components/SurgeryDiffPreview";
 import WorkspaceSearchModal, { SearchMode, SearchResultItem } from "./components/WorkspaceSearchModal";
 import ClonePanel, { CloneReport, CloneInstance } from "./components/ClonePanel";
@@ -48,6 +48,7 @@ import SemanticIntentRadarPanel, { SemanticIntentDriftReport } from "./component
 import RecoveryDialog from "./components/RecoveryDialog";
 import BDGInspectorPanel from "./components/BDGInspectorPanel";
 import TestExplorerPanel from "./components/TestExplorerPanel";
+import EngineeringTimeline from "./components/EngineeringTimeline";
 import { useTests, TestCase } from "./hooks/useTests";
 import ProfilerPanel from "./components/ProfilerPanel";
 import { useProfiler } from "./hooks/useProfiler";
@@ -55,6 +56,9 @@ import SecurityAuditPanel from "./components/SecurityAuditPanel";
 import TaskHome from "./components/TaskHome";
 import AgentWorkspace from "./components/AgentWorkspace";
 import ContextualToolsDrawer, { ToolTab } from "./components/ContextualToolsDrawer";
+import ActivityRail, { ActivityRailItem } from "./components/ActivityRail";
+import StatusBar from "./components/StatusBar";
+import BottomPanel, { BottomPanelTab } from "./components/BottomPanel";
 import { useSecurityAudit } from "./hooks/useSecurityAudit";
 import SnapshotPanel from "./components/SnapshotPanel";
 import { useSnapshots } from "./hooks/useSnapshots";
@@ -159,6 +163,11 @@ declare global {
           selection: string;
           fullFile: string;
         }) => Promise<AIResponsePayload>;
+        getConfig?: () => Promise<any>;
+        setConfig?: (providerId: string, modelId?: string) => Promise<any>;
+        setApiKey?: (providerId: string, apiKey: string) => Promise<any>;
+        removeApiKey?: (providerId: string) => Promise<any>;
+        validateKey?: (providerId: string, apiKey: string) => Promise<any>;
       };
       continuum?: {
         save: (snapshot: any, workspacePath: string) => Promise<any>;
@@ -479,7 +488,7 @@ export default function IDEApp() {
   const [semanticIntentLoading, setSemanticIntentLoading] = useState(false);
 
   // AI-Native Workspace & Contextual Tools State
-  const [workspaceMode, setWorkspaceMode] = useState<"home" | "agent" | "editor">("home");
+  const [workspaceMode, setWorkspaceMode] = useState<"home" | "workbench" | "agent">("workbench");
   const [activeTaskPrompt, setActiveTaskPrompt] = useState<string>("");
   const [toolsDrawerOpen, setToolsDrawerOpen] = useState<boolean>(false);
   const [toolsDrawerTab, setToolsDrawerTab] = useState<ToolTab>("explorer");
@@ -596,10 +605,96 @@ export default function IDEApp() {
   const [showLivePreview, setShowLivePreview] = useState<boolean>(false);
   const [showTerminalPanel, setShowTerminalPanel] = useState<boolean>(false);
   const [analysisMenuOpen, setAnalysisMenuOpen] = useState<boolean>(false);
-  const [terminalPanelMode, setTerminalPanelMode] = useState<"terminal" | "output" | "debug">("terminal");
+  const [terminalPanelMode, setTerminalPanelMode] = useState<"terminal" | "output" | "debug" | "logs" | "python">("terminal");
   const [showRightPanel, setShowRightPanel] = useState<boolean>(false);
-  const [activeActivity, setActiveActivity] = useState<"explorer" | "search" | "git" | "debug" | "analysis" | null>(null);
   const [moreMenuOpen, setMoreMenuOpen] = useState<boolean>(false);
+  const [showBottomPanel, setShowBottomPanel] = useState<boolean>(false);
+  const [activeBottomTab, setActiveBottomTab] = useState<BottomPanelTab>("terminal");
+  const [bottomPanelHeight, setBottomPanelHeight] = useState<number>(200);
+  const [activeActivityItem, setActiveActivityItem] = useState<ActivityRailItem | null>("explorer");
+  const [showDockedAgentPanel, setShowDockedAgentPanel] = useState<boolean>(true);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeContinuumSnapshot, setActiveContinuumSnapshot] = useState<any>(null);
+
+  const handleResumeSession = async (sessionId: string) => {
+    if (typeof window !== "undefined" && (window as any).electronAPI?.continuum?.resumeSession) {
+      try {
+        const res = await (window as any).electronAPI.continuum.resumeSession(sessionId, folderPath || "");
+        if (res && res.success) {
+          const nextId = res.nextSnapshotId || sessionId;
+          const goal = res.nextSnapshot?.task?.userGoal || "Resumed Session Task";
+          setActiveSessionId(nextId);
+          setActiveTaskPrompt(goal);
+          setActiveContinuumSnapshot(res.nextSnapshot);
+          if (res.nextSnapshot?.aiState?.provider && (window as any).electronAPI?.ai?.setConfig) {
+            (window as any).electronAPI.ai.setConfig(res.nextSnapshot.aiState.provider, res.nextSnapshot.aiState.modelName);
+          }
+          addLog(`[CONTINUUM] Resumed session ${sessionId} -> ${nextId}`);
+        }
+      } catch (e) {
+        console.error("[IDE] Resume session error:", e);
+      }
+    }
+  };
+
+  const handleCreateNewSession = async (goal?: string) => {
+    const userGoal = goal || "New Continuum Session Task";
+    if (typeof window !== "undefined" && (window as any).electronAPI?.continuum?.createCurrent) {
+      try {
+        const res = await (window as any).electronAPI.continuum.createCurrent(
+          { userGoal, activeFilePath: activeTabPath },
+          folderPath || ""
+        );
+        if (res && res.success) {
+          setActiveSessionId(res.snapshotId);
+          setActiveTaskPrompt(userGoal);
+          addLog(`[CONTINUUM] Created new session ${res.snapshotId}`);
+        }
+      } catch (e) {
+        console.error("[IDE] Create session error:", e);
+      }
+    }
+  };
+
+  const handleSelectActivityRailItem = (item: ActivityRailItem) => {
+    if (item === "agent") {
+      setShowDockedAgentPanel((prev) => !prev);
+      return;
+    }
+
+    if (item === "terminal") {
+      setShowBottomPanel((prev) => !prev);
+      setActiveBottomTab("terminal");
+      return;
+    }
+
+    if (activeActivityItem === item && showExplorer) {
+      setShowExplorer(false);
+      setActiveActivityItem(null);
+    } else {
+      setActiveActivityItem(item);
+      setShowExplorer(true);
+    }
+  };
+
+  const startBottomPanelResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = bottomPanelHeight;
+
+    const onMouseMove = (moveEvt: MouseEvent) => {
+      const newH = Math.max(100, Math.min(500, startH - (moveEvt.clientY - startY)));
+      setBottomPanelHeight(newH);
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
 
   const {
     tabs: terminalTabs,
@@ -627,39 +722,58 @@ export default function IDEApp() {
 
   const handleApplyAgentStep = async (step: AgentStep): Promise<boolean> => {
     if (!step.proposedEdits || step.proposedEdits.length === 0) return true;
-    for (const edit of step.proposedEdits) {
-      const filePath = edit.filePath;
-      try {
-        let currentContent = "";
-        if (typeof window !== "undefined" && (window as any).electronAPI?.readFile) {
-          currentContent = await (window as any).electronAPI.readFile(filePath);
-        } else {
-          const tab = openTabs.find((t) => t.path === filePath);
-          currentContent = tab ? tab.content : "";
+
+    try {
+      if (typeof window !== "undefined" && (window as any).electronAPI?.patch?.applyTransaction) {
+        const txRes = await (window as any).electronAPI.patch.applyTransaction({
+          edits: step.proposedEdits,
+          options: {
+            workspacePath: folderPath || process.cwd(),
+            enforceFirewall: true,
+          },
+        });
+
+        if (!txRes || !txRes.success) {
+          addLog(`[AGENT ERROR] Transaction failed: ${txRes?.error || "Unknown error"}`);
+          showToast(`Apply failed: ${txRes?.error || "Transaction aborted"}`);
+          return false;
         }
 
-        let newContent = currentContent;
-        if (edit.original && currentContent.includes(edit.original)) {
-          newContent = currentContent.replace(edit.original, edit.replacement);
-        } else {
-          newContent = edit.replacement;
+        if (txRes.files) {
+          setOpenTabs((prev) =>
+            prev.map((t) => {
+              const updatedContent = txRes.files[t.path] || txRes.files[t.path.replace(/\\/g, "/")];
+              if (updatedContent !== undefined) {
+                return { ...t, content: updatedContent, isDirty: false };
+              }
+              return t;
+            })
+          );
         }
 
-        if (typeof window !== "undefined" && (window as any).electronAPI?.writeFile) {
-          await (window as any).electronAPI.writeFile(filePath, newContent);
+        addLog(`[AGENT] Transaction ${txRes.transactionId} applied (${txRes.appliedCount} files modified).`);
+        return true;
+      } else {
+        for (const edit of step.proposedEdits) {
+          const filePath = edit.filePath;
+          setOpenTabs((prev) =>
+            prev.map((t) => {
+              if (t.path === filePath) {
+                const newContent = edit.original && t.content.includes(edit.original)
+                  ? t.content.replace(edit.original, edit.replacement)
+                  : edit.replacement;
+                return { ...t, content: newContent, isDirty: false };
+              }
+              return t;
+            })
+          );
         }
-
-        // Update tab if open
-        setOpenTabs((prev) =>
-          prev.map((t) => (t.path === filePath ? { ...t, content: newContent, isDirty: false } : t))
-        );
-        addLog(`[AGENT] Applied edit to ${filePath}`);
-      } catch (err: any) {
-        addLog(`[AGENT ERROR] Failed to apply edit to ${filePath}: ${err.message}`);
-        return false;
+        return true;
       }
+    } catch (err: any) {
+      addLog(`[AGENT ERROR] Failed to apply edit: ${err.message}`);
+      return false;
     }
-    return true;
   };
 
   const handleApplyAllAgentApproved = async (
@@ -667,8 +781,40 @@ export default function IDEApp() {
     createCommit: boolean,
     verifyCmd: string
   ) => {
-    for (const step of approvedSteps) {
-      await handleApplyAgentStep(step);
+    const allEdits = approvedSteps.flatMap((s) => s.proposedEdits || []);
+    if (allEdits.length === 0) return;
+
+    if (typeof window !== "undefined" && (window as any).electronAPI?.patch?.applyTransaction) {
+      const txRes = await (window as any).electronAPI.patch.applyTransaction({
+        edits: allEdits,
+        options: {
+          workspacePath: folderPath || process.cwd(),
+          enforceFirewall: true,
+        },
+      });
+
+      if (!txRes || !txRes.success) {
+        addLog(`[AGENT ERROR] Batch transaction failed: ${txRes?.error || "Unknown error"}`);
+        showToast(`Batch apply failed: ${txRes?.error || "Transaction aborted"}`);
+        return;
+      }
+
+      if (txRes.files) {
+        setOpenTabs((prev) =>
+          prev.map((t) => {
+            const updatedContent = txRes.files[t.path] || txRes.files[t.path.replace(/\\/g, "/")];
+            if (updatedContent !== undefined) {
+              return { ...t, content: updatedContent, isDirty: false };
+            }
+            return t;
+          })
+        );
+      }
+      addLog(`[AGENT] Applied batch transaction (${txRes.appliedCount} files modified).`);
+    } else {
+      for (const step of approvedSteps) {
+        await handleApplyAgentStep(step);
+      }
     }
 
     if (
@@ -2190,6 +2336,25 @@ export default function IDEApp() {
     executeCloseTab(path);
   };
 
+  const handleOpenExplicitPatchFirewallTab = () => {
+    const firewallTabPath = "nexus://patch-firewall";
+    const existing = openTabs.find((t) => t.path === firewallTabPath);
+    if (!existing) {
+      setOpenTabs((prev) => [
+        ...prev,
+        {
+          path: firewallTabPath,
+          name: "Patch Firewall",
+          content: "",
+          savedContent: "",
+          isDirty: false,
+        },
+      ]);
+    }
+    setActiveTabPath(firewallTabPath);
+    setMainView("patch_firewall");
+  };
+
   const executeCloseTab = (path: string) => {
     const newTabs = openTabs.filter((t) => t.path !== path);
     setOpenTabs(newTabs);
@@ -2197,6 +2362,11 @@ export default function IDEApp() {
     if (activeTabPath === path && newTabs.length > 0) {
       const nextTab = newTabs[newTabs.length - 1];
       setActiveTabPath(nextTab.path);
+      if (nextTab.path === "nexus://patch-firewall") {
+        setMainView("patch_firewall");
+      } else {
+        setMainView("editor");
+      }
       runAnalysis(nextTab);
     }
   };
@@ -3702,98 +3872,73 @@ return (
       <div className="top-scanline" />
 
       {/* 1. Header Navigation Bar */}
-      <header className="h-11 bg-[#0a0a0d] border-b border-[#1f1f24] flex items-center justify-between px-3 text-xs font-mono shrink-0 z-20 shadow-md min-w-0 w-full select-none gap-2">
-        {/* Left Zone: Branding + Home Navigation */}
+      <header className="h-10 bg-[#08080c] border-b border-[#161620] flex items-center justify-between px-3 text-xs font-mono shrink-0 z-20 shadow-sm min-w-0 w-full select-none gap-2">
+        {/* Left Zone: Branding + Project Switcher + Home Launcher */}
         <div className="flex-none shrink-0 flex items-center gap-2">
-          <div className="flex items-center gap-1.5 pr-2 border-r border-[#1f1f24]">
-            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping shrink-0" />
+          <div className="flex items-center gap-2 pr-2 border-r border-[#1a1a24]">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 shrink-0" />
             <span className="font-heading font-bold text-xs text-white tracking-tight whitespace-nowrap">
-              Echo Nullity
+              NEXUS
+            </span>
+            <span className="px-2 py-0.5 rounded bg-[#12121c] border border-[#20202e] text-zinc-300 text-[10.5px] font-mono">
+              {folderPath ? folderPath.split('/').pop() : "ai_cart_project"}
             </span>
           </div>
 
           <button
-            onClick={() => setWorkspaceMode("home")}
-            className={`px-2.5 py-1 rounded-lg border text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+            onClick={() => setWorkspaceMode(workspaceMode === "home" ? "workbench" : "home")}
+            className={`px-2 py-0.5 rounded border text-[11px] flex items-center gap-1.5 transition-colors cursor-pointer ${
               workspaceMode === "home"
-                ? "bg-cyan-950 text-cyan-300 border-cyan-500/40 font-bold shadow-[0_0_10px_rgba(6,182,212,0.2)]"
-                : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-zinc-300"
+                ? "bg-cyan-950 text-cyan-300 border-cyan-500/40 font-bold"
+                : "bg-[#101016] hover:bg-[#181822] border-[#20202d] text-zinc-400 hover:text-zinc-200"
             }`}
-            title="Task Home"
+            title="Workspace Launcher / Home"
           >
-            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Home</span>
+            <Sparkles className="w-3 h-3 text-cyan-400" />
+            <span>{workspaceMode === "home" ? "Workbench" : "Launcher"}</span>
           </button>
         </div>
 
-        {/* Center Zone: Active Task Title / Status */}
-        <div className="flex-1 min-w-0 flex items-center justify-center gap-2 py-1">
-          {workspaceMode === "agent" ? (
-            <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-[#0d0d14] border border-cyan-500/30 text-xs truncate max-w-xl">
-              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse shrink-0" />
-              <span className="text-zinc-400 font-bold uppercase text-[10px]">Agent Task:</span>
-              <span className="text-zinc-100 font-medium truncate">{activeTaskPrompt || "Active Agent Task"}</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-[#0d0d14] border border-[#1f1f24] text-xs text-zinc-400">
-              <Sparkles className="w-3 h-3 text-cyan-400" />
-              <span className="font-mono text-[11px]">AI-Native Autonomous Research Environment</span>
-            </div>
-          )}
+        {/* Center Zone: Active File / Active Task Goal */}
+        <div className="flex-1 min-w-0 flex items-center justify-center gap-2 py-0.5">
+          <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-[#0c0c12] border border-[#1a1a24] text-xs max-w-xl truncate">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />
+            <span className="text-zinc-300 font-medium truncate">
+              {activeTab ? activeTab.name : "NEXUS Persistent Workbench"}
+            </span>
+            {activeTaskPrompt && (
+              <span className="text-zinc-500 text-[10.5px] truncate">
+                • {activeTaskPrompt}
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* Right Zone: AI Agent Toggle, Tools Drawer Toggle, Command Palette & More Menu */}
+        {/* Right Zone: Command Palette, AI Dock Toggle, More Options */}
         <div className="flex-none shrink-0 ml-auto flex items-center gap-1.5">
-          {/* Tools Drawer Toggle */}
-          <button
-            onClick={() => {
-              setToolsDrawerOpen((prev) => {
-                const next = !prev;
-                if (next) setShowExplorer(false);
-                return next;
-              });
-            }}
-            className={`min-h-[28px] px-2.5 py-1 rounded-lg border text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
-              toolsDrawerOpen
-                ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold"
-                : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-zinc-300"
-            }`}
-            title="Contextual Tools Drawer (⌘B)"
-          >
-            <FolderTree className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span>Tools</span>
-          </button>
-
-          {/* AI Agent Workspace Toggle */}
-          <button
-            onClick={() => {
-              if (workspaceMode === "agent") {
-                setWorkspaceMode("home");
-              } else {
-                setWorkspaceMode("agent");
-                setAiPanelMode("agent");
-                setAiPanelOpen(false);
-              }
-            }}
-            className={`min-h-[28px] px-2.5 py-1 rounded-lg border text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
-              workspaceMode === "agent"
-                ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold shadow-[0_0_12px_rgba(6,182,212,0.3)]"
-                : "bg-[#121216] hover:bg-[#1c1c24] border-[#24242e] text-cyan-300"
-            }`}
-            title="AI Agent Workspace (⌘⇧I)"
-          >
-            <Bot className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span>AI</span>
-          </button>
-
           {/* Command Palette (⌘K) */}
           <button
             onClick={() => setCmdPaletteOpen(true)}
-            className="min-w-[28px] min-h-[28px] px-2 py-1 rounded-lg bg-[#121216] hover:bg-[#1c1c24] border border-[#24242e] text-cyan-300 transition-all flex items-center gap-1 cursor-pointer"
+            className="px-2.5 py-1 rounded-lg bg-[#101016] hover:bg-[#181822] border border-[#20202d] text-cyan-300 transition-all flex items-center gap-1.5 cursor-pointer text-[11px] font-mono"
             title="Command Palette (⌘K)"
           >
             <Command className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span className="hidden lg:inline text-[11px]">⌘K</span>
+            <span>Command</span>
+            <kbd className="hidden lg:inline text-[9.5px] bg-[#161620] px-1 rounded text-zinc-400">⌘K</kbd>
+          </button>
+
+          {/* AI Agent Dock Toggle */}
+          <button
+            onClick={() => setShowDockedAgentPanel((prev) => !prev)}
+            className={`px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 transition-all cursor-pointer ${
+              showDockedAgentPanel
+                ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold shadow-[0_0_8px_rgba(6,182,212,0.2)]"
+                : "bg-[#101016] hover:bg-[#181822] border-[#20202d] text-cyan-300"
+            }`}
+            title="Toggle AI Agent Dock (⌘I)"
+          >
+            <Bot className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span>AI Dock</span>
           </button>
 
           {/* More Menu Dropdown (⋯) */}
@@ -3982,7 +4127,7 @@ return (
             debugLogs={debugSteps.map((s) => `[Step ${s.step}] Line ${s.line} in ${s.functionName || "global"}`)}
             pythonOutput={pythonOutput}
             onClearDebugLogs={() => setPythonOutput("")}
-            activeMode={terminalPanelMode}
+            activeMode={terminalPanelMode === "output" || terminalPanelMode === "debug" ? terminalPanelMode : "terminal"}
             onModeChange={(mode) => setTerminalPanelMode(mode)}
             onClosePanel={() => setToolsDrawerOpen(false)}
           />
@@ -3992,22 +4137,32 @@ return (
       {/* 2. Main Resizable Workspace Grid */}
       <div ref={contentRowRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", overflow: "hidden" }} className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
         
+        {/* Activity Rail */}
+        {workspaceMode !== "home" && (
+          <ActivityRail
+            activeItem={activeActivityItem}
+            onSelectItem={handleSelectActivityRailItem}
+            agentPanelOpen={showDockedAgentPanel}
+            onToggleAgentPanel={() => setShowDockedAgentPanel((prev) => !prev)}
+            bottomPanelOpen={showBottomPanel}
+            onToggleBottomPanel={() => setShowBottomPanel((prev) => !prev)}
+          />
+        )}
+
         {workspaceMode === "home" ? (
           <TaskHome
             workspacePath={folderPath || "demo-workspaces/ai_cart_project"}
             onStartTask={(promptText) => {
               setActiveTaskPrompt(promptText);
-              setWorkspaceMode("agent");
-              setAiPanelMode("agent");
-              setAiPanelOpen(false);
+              setWorkspaceMode("workbench");
+              setShowDockedAgentPanel(true);
               addLog(`[TASK] Started AI task: ${promptText}`);
             }}
             onContinueSession={async (sessionId, userGoal) => {
               const restoredPrompt = userGoal || "Resumed Continuum Session Task";
               setActiveTaskPrompt(restoredPrompt);
-              setWorkspaceMode("agent");
-              setAiPanelMode("agent");
-              setAiPanelOpen(false);
+              setWorkspaceMode("workbench");
+              setShowDockedAgentPanel(true);
               if (typeof window !== "undefined" && (window as any).electronAPI?.continuum?.resumeSession) {
                 try {
                   await (window as any).electronAPI.continuum.resumeSession(sessionId, folderPath || "");
@@ -4021,109 +4176,115 @@ return (
             gitBranch={git.currentBranch || "main"}
             fileCount={openTabs.length}
           />
-        ) : workspaceMode === "agent" ? (
-          <AgentWorkspace
-            workspacePath={folderPath || "demo-workspaces/ai_cart_project"}
-            activeFilePath={activeTabPath}
-            activeTaskPrompt={activeTaskPrompt}
-            onBackToHome={() => setWorkspaceMode("home")}
-            onPreviewDiff={handleAgentPreviewDiff}
-            onApplyStep={handleApplyAgentStep}
-            onApplyAllApproved={handleApplyAllAgentApproved}
-            runningCommandOutput={agentRunningCommandOutput}
-            editorCanvas={
-              <div className="flex-1 flex flex-col h-full bg-[#050508] relative overflow-hidden">
-                {/* Multi-Tab Bar with Contextual Run Button */}
-                <div className="h-9 bg-[#0a0a0a] border-b border-[#1f1f1f] flex items-center px-2 gap-1 font-mono text-xs overflow-x-auto shrink-0">
-                  {openTabs.map((tab) => (
-                    <div
-                      key={tab.path}
-                      onClick={() => {
-                        setActiveTabPath(tab.path);
-                        restoreTabCursor(tab.path);
-                        runAnalysis(tab);
-                      }}
-                      className={`group px-3 py-1 rounded-t-lg flex items-center gap-2 cursor-pointer transition-all ${
-                        activeTabPath === tab.path
-                          ? "bg-[#050505] text-cyan-400 border-t border-x border-cyan-500/40 font-bold shadow-sm"
-                          : "text-zinc-400 hover:text-white hover:bg-zinc-900/40"
-                      }`}
-                    >
-                      <FileText className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>{tab.name}</span>
-                    </div>
-                  ))}
-                  <div className="ml-auto flex items-center gap-2 pr-2">
-                    <button
-                      onClick={(e) => {
-                        if (activeTab && activeTab.path.endsWith(".py")) {
-                          handleExecutePython(e);
-                        } else {
-                          runAnalysis(activeTab || undefined);
-                        }
-                      }}
-                      disabled={pythonRunning || analyzing}
-                      className="px-2.5 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                      title="Run Code (F5)"
-                    >
-                      <Play className="w-3 h-3 text-emerald-400 fill-emerald-400" />
-                      <span>{pythonRunning ? "Running..." : "Run Code"}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Monaco Code Editor Canvas */}
-                <div ref={monacoWrapperRef} className="flex-1 relative overflow-hidden">
-                  {activeTab ? (
-                    <MonacoEditor
-                      height="100%"
-                      language={getLanguageFromPath(activeTab.path)}
-                      theme="echo-dark"
-                      value={activeTab.content}
-                      onChange={handleEditorChange}
-                      onMount={handleEditorMount}
-                      options={{
-                        minimap: { enabled: true },
-                        fontSize: 13,
-                        fontFamily: "var(--font-mono)",
-                        scrollBeyondLastLine: false,
-                        automaticLayout: true,
-                        tabSize: 4,
-                        wordWrap: "on",
-                        renderLineHighlight: "all",
-                        lineNumbers: "on",
-                        glyphMargin: true,
-                        cursorBlinking: "smooth",
-                        smoothScrolling: true,
-                      }}
-                    />
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-zinc-600 font-mono text-xs">
-                      No active file in editor.
-                    </div>
-                  )}
-                </div>
-              </div>
-            }
-          />
         ) : (
           <>
 
-        {/* Left Sidebar: File Explorer */}
+        {/* Left Sidebar: Persistent Workspace Tool Surface */}
         {showExplorer && (
-          <div ref={explorerPanelRef} style={{ width: `${explorerWidth}px`, flexShrink: 0 }} className="bg-[#0a0a0a] border-r border-[#1f1f1f] flex flex-col justify-between shrink-0 select-none">
-            <div className="p-3 border-b border-[#1f1f1f] flex items-center justify-between font-mono text-xs">
-              <span className="text-zinc-400 uppercase tracking-widest font-bold text-[10px]">Explorer</span>
-              <span className="text-cyan-400 text-[10px]">Tree-sitter</span>
+          <div ref={explorerPanelRef} style={{ width: `${explorerWidth}px`, flexShrink: 0 }} className="bg-[#09090d] border-r border-[#161620] flex flex-col justify-between shrink-0 select-none font-mono text-xs overflow-hidden">
+            {/* Sidebar Header */}
+            <div className="p-2.5 border-b border-[#161620] flex items-center justify-between font-mono text-xs bg-[#0c0c12]">
+              <span className="text-zinc-300 font-bold uppercase tracking-wider text-[10px]">
+                {activeActivityItem === "search"
+                  ? "Search Workspace"
+                  : activeActivityItem === "git"
+                  ? "Source Control"
+                  : activeActivityItem === "sessions"
+                  ? "Continuum Sessions"
+                  : activeActivityItem === "verification"
+                  ? "Patch Safety Firewall"
+                  : "Explorer"}
+              </span>
+              <span className="text-cyan-400 text-[9.5px]">NEXUS</span>
             </div>
 
+            {/* Sidebar Tool Body */}
             <div className="flex-1 p-2 overflow-y-auto space-y-1">
-              {fileTree && renderTree(fileTree)}
+              {activeActivityItem === "search" ? (
+                <SearchPanel
+                  query={search.query}
+                  setQuery={search.setQuery}
+                  replaceText={search.replaceText}
+                  setReplaceText={search.setReplaceText}
+                  isRegex={search.isRegex}
+                  setIsRegex={search.setIsRegex}
+                  isCaseSensitive={search.isCaseSensitive}
+                  setIsCaseSensitive={search.setIsCaseSensitive}
+                  isWholeWord={search.isWholeWord}
+                  setIsWholeWord={search.setIsWholeWord}
+                  includeHidden={search.includeHidden}
+                  setIncludeHidden={search.setIncludeHidden}
+                  results={search.results}
+                  groupedResults={search.groupedResults}
+                  totalFiles={search.totalFiles}
+                  totalMatches={search.totalMatches}
+                  selectedResultIndex={search.selectedResultIndex}
+                  loading={search.loading}
+                  error={search.error}
+                  durationMs={search.durationMs}
+                  onSelectMatch={(m, idx) => {
+                    handleSelectSearchMatch(m, idx || 0);
+                  }}
+                  onReplaceSingle={(m) => search.replaceSingle(m)}
+                  onReplaceAllInFile={(f) => search.replaceAllInFile(f)}
+                  onReplaceAllInWorkspace={() => search.replaceAllInWorkspace()}
+                  onNavigateResult={(dir) => search.navigateResult(dir)}
+                />
+              ) : activeActivityItem === "git" ? (
+                <SourceControlPanel
+                  isRepo={git.isRepo}
+                  currentBranch={git.currentBranch}
+                  branches={git.branches}
+                  staged={git.staged}
+                  unstaged={git.unstaged}
+                  untracked={git.untracked}
+                  lastCommit={git.lastCommit}
+                  loading={git.loading}
+                  statusMessage={git.statusMessage}
+                  errorMessage={git.errorMessage}
+                  onRefresh={() => git.refreshStatus(folderPath || "")}
+                  onStageFile={(f) => git.stageFile(f)}
+                  onUnstageFile={(f) => git.unstageFile(f)}
+                  onStageAll={() => git.stageAllFiles()}
+                  onUnstageAll={() => git.unstageAllFiles()}
+                  onCommit={(msg) => git.commitChanges(msg)}
+                  onCheckoutBranch={(b) => git.checkoutBranch(b)}
+                  onCreateBranch={(b) => git.createAndCheckoutBranch(b)}
+                  onDiscardFile={(f) => git.discardFile(f)}
+                  onOpenFileDiff={handleOpenGitDiff}
+                />
+              ) : activeActivityItem === "sessions" ? (
+                <SnapshotPanel
+                  snapshotHook={snapshotHook}
+                  onOpenFile={(filePath) => handleOpenFile({ name: filePath.split("/").pop() || "", path: filePath, isDirectory: false })}
+                  openTabs={openTabs}
+                  activeTabPath={activeTabPath}
+                  workspacePath={folderPath || ""}
+                  activeSessionId={activeSessionId}
+                  onResumeSession={handleResumeSession}
+                  onCreateSession={handleCreateNewSession}
+                />
+              ) : activeActivityItem === "verification" ? (
+                <EngineeringTimeline
+                  activeSessionId={activeSessionId}
+                  workspacePath={folderPath || ""}
+                  activeTask={activeTaskPrompt || undefined}
+                  onSelectAgentPanel={() => setShowDockedAgentPanel(true)}
+                  onSelectFile={(filePath) => {
+                    if (filePath) {
+                      const fileName = filePath.split("/").pop() || filePath;
+                      handleOpenFile({ name: fileName, path: filePath, isDirectory: false });
+                    }
+                  }}
+                />
+              ) : (
+                fileTree && renderTree(fileTree)
+              )}
             </div>
 
-            <div className="p-3 bg-[#0d0d0d] border-t border-[#1f1f1f] font-mono text-[10px] text-zinc-500 flex items-center justify-between">
-              <span>Python AST Rules Active</span>
-              <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+            <div className="p-2.5 bg-[#0c0c12] border-t border-[#161620] font-mono text-[9.5px] text-zinc-500 flex items-center justify-between">
+              <span>AST Engine Active</span>
+              <Cpu className="w-3 h-3 text-cyan-400" />
             </div>
           </div>
         )}
@@ -4509,7 +4670,11 @@ return (
                     key={tab.path}
                     onClick={() => {
                       setActiveTabPath(tab.path);
-                      setMainView("editor");
+                      if (tab.path === "nexus://patch-firewall") {
+                        setMainView("patch_firewall");
+                      } else {
+                        setMainView("editor");
+                      }
                       restoreTabCursor(tab.path);
                       runAnalysis(tab);
                     }}
@@ -5161,120 +5326,74 @@ return (
           )}
         </div>
       )}
+        {/* Persistent Dockable Agent Panel */}
+        {showDockedAgentPanel && (
+          <AgentPanel
+            isOpen={true}
+            isDocked={true}
+            onClose={() => setShowDockedAgentPanel(false)}
+            workspacePath={folderPath || "demo-workspaces/ai_cart_project"}
+            activeFilePath={activeTabPath}
+            activeSessionId={activeSessionId}
+            activeSessionTitle={activeTaskPrompt || "Agent Task Session"}
+            activeContinuumSnapshot={activeContinuumSnapshot}
+            selectionInfo={selectionInfo}
+            initialTask={activeTaskPrompt}
+            onPreviewDiff={handleAgentPreviewDiff}
+            onApplyStep={handleApplyAgentStep}
+            onApplyAllApproved={handleApplyAllAgentApproved}
+            runningCommandOutput={agentRunningCommandOutput}
+            onSelectVerificationTab={() => setActiveActivityItem("verification")}
+          />
+        )}
           </>
         )}
 
       </div>
 
-      {/* Resizer row for terminal/output panel */}
-      {showTerminalPanel && (
-        <div onMouseDown={startConsoleResize} className="resizer-row" />
-      )}
+      {/* Collapsible Bottom Panel */}
+      <BottomPanel
+        isOpen={showBottomPanel}
+        activeTab={activeBottomTab}
+        onSelectTab={(tab) => setActiveBottomTab(tab)}
+        onClose={() => setShowBottomPanel(false)}
+        height={bottomPanelHeight}
+        onResizeStart={startBottomPanelResize}
+        terminalProps={{
+          tabs: terminalTabs,
+          activeTabId: activeTerminalTabId,
+          onSelectTab: (id) => setActiveTerminalTabId(id),
+          onCreateTab: () => createTerminalTab(folderPath || ""),
+          onCloseTab: (id) => closeTerminalTab(id),
+          onRestartTab: (id) => restartTerminalTab(id),
+          onSendInput: (id, input) => sendTerminalInput(id, input),
+          logs,
+          onClearLogs: () => setLogs([]),
+          debugLogs: debugSteps.map((s) => `[Step ${s.step}] Line ${s.line} in ${s.functionName || "global"}`),
+          pythonOutput,
+          onClearDebugLogs: () => setPythonOutput(""),
+          activeMode: terminalPanelMode,
+          onModeChange: (mode) => setTerminalPanelMode(mode),
+        }}
+        gitSummary={{
+          branch: git.currentBranch || "main",
+          stagedCount: git.staged.length,
+          unstagedCount: git.unstaged.length,
+        }}
+      />
 
-      {/* Integrated Terminal Panel with Terminal, Output & Debug Console tabs */}
-      {showTerminalPanel && (
-        <div style={{ height: `${consoleHeight}px` }} className="shrink-0 z-20">
-          <TerminalPanel
-            tabs={terminalTabs}
-            activeTabId={activeTerminalTabId}
-            onSelectTab={(id) => setActiveTerminalTabId(id)}
-            onCreateTab={() => createTerminalTab(folderPath || "")}
-            onCloseTab={(id) => closeTerminalTab(id)}
-            onRestartTab={(id) => restartTerminalTab(id)}
-            onSendInput={(id, input) => sendTerminalInput(id, input)}
-            logs={logs}
-            onClearLogs={() => setLogs([])}
-            debugLogs={debugSteps.map((s) => `[Step ${s.step}] Line ${s.line} in ${s.functionName || "global"}`)}
-            pythonOutput={pythonOutput}
-            onClearDebugLogs={() => setPythonOutput("")}
-            activeMode={terminalPanelMode}
-            onModeChange={(mode) => setTerminalPanelMode(mode)}
-            onClosePanel={() => setShowTerminalPanel(false)}
-          />
-        </div>
-      )}
-
-      {/* Persistent Status Bar */}
-      <footer className="h-7 bg-[#070707] border-t border-[#1f1f1f] px-3 flex items-center justify-between font-mono text-[10px] text-zinc-400 shrink-0 z-20 select-none">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-zinc-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-            <span className="font-bold">ECHO STATUS</span>
-          </div>
-          <span>File: <strong className="text-cyan-300">{activeTab?.name || "No file"}</strong></span>
-          <span>Lang: <strong className="text-purple-300">{getLanguageFromPath(activeTab?.path || "")}</strong></span>
-          <span className="text-zinc-500 hidden sm:inline">Analyzer: <strong className="text-emerald-400">Rust/Python AST Ready</strong></span>
-          {git.isRepo && git.currentBranch && (
-            <button
-              onClick={() => setMainView("source_control")}
-              aria-label={`Git Branch ${git.currentBranch}, click to open Source Control`}
-              className="flex items-center gap-1 text-cyan-300 font-bold hover:text-cyan-200 cursor-pointer bg-cyan-950/40 px-2 py-0.5 rounded border border-cyan-500/20 focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400"
-              title={`Git Branch: ${git.currentBranch} (Click to open Source Control)`}
-            >
-              <GitBranch className="w-3 h-3 text-cyan-400" />
-              <span>{git.currentBranch}</span>
-              {(git.staged.length > 0 || git.unstaged.length > 0 || git.untracked.length > 0) && (
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-              )}
-            </button>
-          )}
-
-          {/* AI Status Indicator */}
-          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#121216] border border-[#27272a] select-none">
-            {aiLoading ? (
-              <span className="text-cyan-300 font-bold flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-cyan-400 animate-spin" />
-                <span>AI Busy</span>
-              </span>
-            ) : (
-              <span className="text-zinc-400 font-bold flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-cyan-400" />
-                <span>AI Ready</span>
-              </span>
-            )}
-          </div>
-
-          {/* Debugger Status Indicator */}
-          {debugPanelOpen && (
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 select-none">
-              <Bug className="w-3 h-3 text-cyan-400" />
-              <span>
-                Debugging (Step {debugSteps.length > 0 ? debugIndex + 1 : 0}/{debugSteps.length})
-              </span>
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowTerminalPanel((prev) => !prev)}
-            aria-label="Toggle Integrated Terminal Drawer"
-            className={`min-h-[20px] px-2 py-0.5 rounded font-mono text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
-              showTerminalPanel
-                ? "bg-cyan-950 text-cyan-300 border border-cyan-500/40"
-                : "bg-[#141414] text-zinc-400 hover:text-white border border-[#262626]"
-            }`}
-            title="Toggle Integrated Terminal (⌘`)"
-          >
-            <TerminalIcon className="w-3 h-3 text-cyan-400" />
-            <span>Terminal {terminalTabs.length > 0 ? `(${terminalTabs.length})` : ""}</span>
-          </button>
-
-          <span>Ln {cursorPos.line}, Col {cursorPos.col}</span>
-          <span className="text-purple-400 font-bold">
-            {findings.length > 0 ? `${findings.length} Redundant Lines` : "Clean Architecture"}
-          </span>
-          {activeTab?.isDirty ? (
-            <span className="text-amber-400 font-bold flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" /> Unsaved Changes ●
-            </span>
-          ) : (
-            <span className="text-emerald-400 font-bold flex items-center gap-1">
-              <Check className="w-3 h-3" /> Saved
-            </span>
-          )}
-        </div>
-      </footer>
+      {/* Professional Status Bar */}
+      <StatusBar
+        gitBranch={git.currentBranch || "main"}
+        activeLanguage={getLanguageFromPath(activeTab?.path || "")}
+        activeFilePath={activeTabPath}
+        sessionTitle={activeTaskPrompt || undefined}
+        activeTask={activeTaskPrompt || undefined}
+        errorCount={findings.length}
+        verificationActive={true}
+        onSelectVerificationTab={() => setActiveActivityItem("verification")}
+        onSelectAgentPanel={() => setShowDockedAgentPanel(true)}
+      />
 
       {/* 4. Right-Side Sliding Diff Drawer */}
       {diffDrawerOpen && diffData && (

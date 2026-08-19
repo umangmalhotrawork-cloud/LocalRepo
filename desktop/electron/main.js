@@ -10,6 +10,8 @@ const gitManager = require('./gitManager');
 const searchManager = require('./searchManager');
 const aiManager = require('./aiManager');
 const agentManager = require('./agentManager');
+const { aiProviderRouter } = require('./ai/AIProviderRouter');
+const { aiRoleRouter } = require('./ai/AIRoleRouter');
 const { recoveryStore } = require('./recoveryStore');
 const { continuumManager } = require('./continuumManager');
 const { continuumEngine } = require('../engine/continuum_engine');
@@ -23,8 +25,11 @@ const { snapshotManager } = require('./snapshotManager');
 const { logger } = require('./logger');
 const { crashReporter } = require('./crashReporter');
 const { healthChecker } = require('./healthCheck');
-const bdgEngine = require('../engine/bdg_engine');
-const runtimeExecutionIndex = require('../engine/runtime_execution_index');
+const { testRunnerDetector } = require('./testing/TestRunnerDetector');
+const { testExecutor } = require('./testing/TestExecutor');
+const { transactionalPatchApplier } = require('./transactionalPatchApplier');
+const { autonomousRepairEngine } = require('./autonomousRepairEngine');
+const { evidenceGraph } = require('./evidence/EvidenceGraph');
 const behavioralDiffEngine = require('../engine/behavioral_diff_engine');
 const aiSystemReasoningEngine = require('../engine/ai_system_reasoning_engine');
 
@@ -788,6 +793,12 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('before-quit', () => {
+  try {
+    autonomousRepairEngine.cancelAll();
+  } catch (e) {}
 });
 
 // IPC Handlers
@@ -2037,9 +2048,120 @@ ipcMain.handle('ai:code-action', async (_, payload) => {
   return aiManager.runCodeAction(payload);
 });
 
+// AI Multi-Model Configuration & Credentials IPC Handlers
+ipcMain.handle('ai:get-config', async () => {
+  return aiProviderRouter.getConfig();
+});
+
+ipcMain.handle('ai:set-config', async (_, { providerId, modelId }) => {
+  return aiProviderRouter.setConfig(providerId, modelId);
+});
+
+ipcMain.handle('ai:set-api-key', async (_, { providerId, apiKey }) => {
+  return aiProviderRouter.setApiKey(providerId, apiKey);
+});
+
+ipcMain.handle('ai:remove-api-key', async (_, providerId) => {
+  return aiProviderRouter.removeApiKey(providerId);
+});
+
+ipcMain.handle('ai:validate-key', async (_, { providerId, apiKey }) => {
+  return aiProviderRouter.validateKey(providerId, apiKey);
+});
+
+// Role-Based Multi-Model AI IPC Handlers
+ipcMain.handle('ai:roles:get-config', async () => {
+  return aiRoleRouter.getAllRoles();
+});
+
+ipcMain.handle('ai:roles:set-config', async (_, { roleId, providerId, modelId }) => {
+  return aiRoleRouter.setRoleConfig(roleId, providerId, modelId);
+});
+
+ipcMain.handle('ai:roles:resolve', async (_, { roleId, sessionConfig }) => {
+  return aiRoleRouter.resolveRole(roleId, sessionConfig);
+});
+
+ipcMain.handle('ai:roles:validate', async (_, roleId) => {
+  return aiRoleRouter.getRoleConfig(roleId);
+});
+
+// Evidence Graph & Verification Trail IPC Handlers
+ipcMain.handle('evidence:get-graph', async (_, sessionId) => {
+  const safeSession = typeof sessionId === 'string' && sessionId.trim() ? sessionId : 'default_session';
+  return evidenceGraph.getNodesBySession(safeSession);
+});
+
+ipcMain.handle('evidence:get-summary', async (_, sessionId) => {
+  const safeSession = typeof sessionId === 'string' && sessionId.trim() ? sessionId : 'default_session';
+  return evidenceGraph.getVerificationSummary(safeSession);
+});
+
+ipcMain.handle('evidence:traverse', async (_, payload = {}) => {
+  if (!payload || typeof payload !== 'object') return { nodes: [], edges: [] };
+  const { startId, sessionId, direction } = payload;
+  if (!startId || typeof startId !== 'string') return { nodes: [], edges: [] };
+  const safeSession = typeof sessionId === 'string' && sessionId.trim() ? sessionId : 'default_session';
+  return evidenceGraph.traverseFrom(startId, safeSession, direction);
+});
+
 // AI Agent Mode IPC Handler
-ipcMain.handle('agent:run', async (_, payload) => {
+ipcMain.handle('agent:run', async (_, payload = {}) => {
+  if (!payload || typeof payload !== 'object') {
+    return { success: false, task: '', summary: 'Malformed payload: object required', steps: [] };
+  }
   return agentManager.runAgentTask(payload);
+});
+
+// Transactional Multi-File Patch IPC Handler
+ipcMain.handle('patch:apply-transaction', async (_, payload = {}) => {
+  if (!payload || typeof payload !== 'object' || !Array.isArray(payload.edits)) {
+    return { success: false, error: 'Malformed patch payload: edits array required', rolledBack: true };
+  }
+  return transactionalPatchApplier.applyTransaction(payload.edits, payload.options);
+});
+
+// Autonomous Test Discovery & Execution IPC Handlers
+ipcMain.handle('testing:detect', async (_, workspacePath) => {
+  if (!workspacePath || typeof workspacePath !== 'string') {
+    return { primary: 'pytest', detected: [], confidence: 'LOW' };
+  }
+  return testRunnerDetector.detect(workspacePath);
+});
+
+ipcMain.handle('testing:run', async (_, payload = {}) => {
+  if (!payload || typeof payload !== 'object' || !payload.workspacePath) {
+    return { status: 'FAILED', exitCode: 1, error: 'Malformed test payload: workspacePath required' };
+  }
+  return testExecutor.runTests(payload);
+});
+
+ipcMain.handle('testing:cancel', async (_, runId) => {
+  if (!runId || typeof runId !== 'string') return false;
+  return testExecutor.cancel(runId);
+});
+
+// Autonomous Test-Driven Repair IPC Handlers
+ipcMain.handle('autonomous:start', async (event, payload = {}) => {
+  if (!payload || typeof payload !== 'object' || !payload.workspacePath) {
+    return { completed: false, status: 'FAILED', reason: 'INVALID_PAYLOAD', error: 'Malformed repair payload: workspacePath required' };
+  }
+  return autonomousRepairEngine.runAutonomousRepair(payload, (progress) => {
+    try {
+      if (event && event.sender && typeof event.sender.send === 'function') {
+        event.sender.send('autonomous:progress', progress);
+      }
+    } catch (e) {}
+  });
+});
+
+ipcMain.handle('autonomous:cancel', async (_, repairId) => {
+  if (!repairId || typeof repairId !== 'string') return false;
+  return autonomousRepairEngine.cancel(repairId);
+});
+
+ipcMain.handle('autonomous:get-status', async (_, repairId) => {
+  return autonomousRepairEngine.getStatus(repairId);
 });
 
 // Crash Recovery & Session Restore IPC Handlers

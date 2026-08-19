@@ -116,6 +116,8 @@ export interface ContinuumConversationTurn {
   userPrompt: string;
   agentSummary: string;
   status: "IMPLEMENTED" | "VERIFIED" | "PLANNED" | "BLOCKED" | "UNKNOWN";
+  providerId?: string;
+  modelId?: string;
 }
 
 export interface ContinuumConversationState {

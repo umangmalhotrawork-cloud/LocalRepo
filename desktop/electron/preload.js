@@ -95,9 +95,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   ai: {
     codeAction: (payload) => ipcRenderer.invoke('ai:code-action', payload),
+    getConfig: () => ipcRenderer.invoke('ai:get-config'),
+    setConfig: (providerId, modelId) => ipcRenderer.invoke('ai:set-config', { providerId, modelId }),
+    setApiKey: (providerId, apiKey) => ipcRenderer.invoke('ai:set-api-key', { providerId, apiKey }),
+    removeApiKey: (providerId) => ipcRenderer.invoke('ai:remove-api-key', providerId),
+    validateKey: (providerId, apiKey) => ipcRenderer.invoke('ai:validate-key', { providerId, apiKey }),
+    roles: {
+      getConfig: () => ipcRenderer.invoke('ai:roles:get-config'),
+      setConfig: (roleId, providerId, modelId) => ipcRenderer.invoke('ai:roles:set-config', { roleId, providerId, modelId }),
+      resolve: (roleId, sessionConfig) => ipcRenderer.invoke('ai:roles:resolve', { roleId, sessionConfig }),
+      validate: (roleId) => ipcRenderer.invoke('ai:roles:validate', roleId),
+    },
+  },
+  evidence: {
+    getGraph: (sessionId) => ipcRenderer.invoke('evidence:get-graph', sessionId),
+    getSummary: (sessionId) => ipcRenderer.invoke('evidence:get-summary', sessionId),
+    traverse: (startId, sessionId, direction) => ipcRenderer.invoke('evidence:traverse', { startId, sessionId, direction }),
   },
   agent: {
     run: (payload) => ipcRenderer.invoke('agent:run', payload),
+  },
+  patch: {
+    applyTransaction: (payload) => ipcRenderer.invoke('patch:apply-transaction', payload),
   },
   recovery: {
     save: (payload) => ipcRenderer.invoke('recovery:save', payload),
@@ -117,6 +136,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     exportCapsule: (payload) => ipcRenderer.invoke('continuum:export-capsule', payload),
     importCapsule: (payload) => ipcRenderer.invoke('continuum:import-capsule', payload),
     openCapsuleDialog: () => ipcRenderer.invoke('dialog:open-capsule-file'),
+  },
+  testing: {
+    detect: (workspacePath) => ipcRenderer.invoke('testing:detect', workspacePath),
+    run: (payload) => ipcRenderer.invoke('testing:run', payload),
+    cancel: (runId) => ipcRenderer.invoke('testing:cancel', runId),
+  },
+  autonomous: {
+    start: (payload) => ipcRenderer.invoke('autonomous:start', payload),
+    cancel: (repairId) => ipcRenderer.invoke('autonomous:cancel', repairId),
+    getStatus: (repairId) => ipcRenderer.invoke('autonomous:get-status', repairId),
+    onProgress: (callback) => {
+      const listener = (_, data) => callback(data);
+      ipcRenderer.on('autonomous:progress', listener);
+      return () => ipcRenderer.removeListener('autonomous:progress', listener);
+    },
   },
   tests: {
     discover: (workspacePath) => ipcRenderer.invoke('test:discover', workspacePath),

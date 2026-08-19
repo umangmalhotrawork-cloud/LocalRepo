@@ -50,6 +50,8 @@ class ContinuumEngine {
       userPrompt: secretFilter.sanitizeString(String(t.userPrompt || t.user_prompt || "")),
       agentSummary: secretFilter.sanitizeString(String(t.agentSummary || t.agent_summary || "")),
       status: validStatuses.has(t.status) ? t.status : "UNKNOWN",
+      ...(t.providerId || t.provider_id ? { providerId: String(t.providerId || t.provider_id) } : {}),
+      ...(t.modelId || t.model_id ? { modelId: String(t.modelId || t.model_id) } : {}),
     }));
 
     const turnsText = recentTurns.map((t) => `${t.userPrompt} ${t.agentSummary}`).join(" ");
@@ -320,10 +322,14 @@ class ContinuumEngine {
       conversation: {
         ...previousSnapshot.conversation,
         ...(updates.conversation || {}),
-        recentTurns: [
-          ...(previousSnapshot.conversation?.recentTurns || []),
-          ...(updates.conversation?.recentTurns || []),
-        ].slice(-10),
+        recentTurns: (() => {
+          const prevTurns = previousSnapshot.conversation?.recentTurns || [];
+          const newTurns = updates.conversation?.recentTurns || [];
+          const map = new Map();
+          prevTurns.forEach((t) => map.set(t.turnId || t.turn_id, t));
+          newTurns.forEach((t) => map.set(t.turnId || t.turn_id, t));
+          return Array.from(map.values()).slice(-10);
+        })(),
       },
       aiState: {
         ...previousSnapshot.aiState,

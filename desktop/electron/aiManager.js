@@ -1,5 +1,6 @@
 const https = require('https');
 const { continuumContextBuilder } = require('../engine/continuum_context_builder');
+const { aiProviderRouter } = require('./ai/AIProviderRouter');
 
 class AiManager {
   async runCodeAction(payload = {}) {
@@ -30,14 +31,21 @@ class AiManager {
       };
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    try {
+      const providerRes = await aiProviderRouter.generateCodeAction({
+        action,
+        language,
+        filePath,
+        selection,
+        fullFile,
+        continuumContextText,
+      });
 
-    if (apiKey && apiKey.trim()) {
-      try {
-        return await this.callGemini(apiKey, action, language, filePath, selection, fullFile, continuumContextText);
-      } catch (err) {
-        console.warn('[AI-MANAGER] Gemini API call failed, falling back to deterministic engine:', err.message);
+      if (providerRes) {
+        return providerRes;
       }
+    } catch (err) {
+      console.warn('[AI-MANAGER] Provider call failed, falling back to deterministic engine:', err.message);
     }
 
     // Deterministic offline fallback engine
