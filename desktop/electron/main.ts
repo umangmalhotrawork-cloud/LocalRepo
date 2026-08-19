@@ -157,9 +157,11 @@ function createWindow() {
         }
       })
       .catch((err) => {
-        console.error('[ELECTRON] Dev server unavailable:', err.message);
+        console.warn('[ELECTRON] Dev server initial ping timeout:', err.message);
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.close();
+          mainWindow.loadURL(startUrl).catch((loadErr) => {
+            console.error('[ELECTRON] Failed to load URL:', loadErr.message);
+          });
         }
       });
   } else {

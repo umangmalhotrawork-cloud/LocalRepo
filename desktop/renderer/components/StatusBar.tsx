@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { GitBranch, ShieldCheck, ChevronDown, Bot, Key, X, Loader2 } from "lucide-react";
+import { GitBranch, ShieldCheck, ChevronDown, Bot, Key, X, Loader2, Layers } from "lucide-react";
 
 interface StatusBarProps {
   gitBranch?: string;
@@ -110,6 +110,16 @@ export default function StatusBar({
           <GitBranch className="w-3 h-3 text-cyan-400" />
           <span>{gitBranch}</span>
         </div>
+
+        {/* CONTINUUM IMMEDIATELY TO THE RIGHT OF THE BRANCH */}
+        <button
+          onClick={onSelectVerificationTab}
+          className="flex items-center gap-1 text-cyan-300 hover:text-cyan-200 font-bold cursor-pointer transition-colors px-1.5 py-0.5 rounded bg-cyan-950/60 border border-cyan-500/30 text-[10px]"
+          title="Open Continuum Session Memory & Lineage"
+        >
+          <Layers className="w-3 h-3 text-cyan-400" />
+          <span>Continuum</span>
+        </button>
 
         <span className="text-[#1a1a24]">|</span>
 

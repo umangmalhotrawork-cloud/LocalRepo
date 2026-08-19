@@ -55,6 +55,9 @@ import { useProfiler } from "./hooks/useProfiler";
 import SecurityAuditPanel from "./components/SecurityAuditPanel";
 import TaskHome from "./components/TaskHome";
 import AgentWorkspace from "./components/AgentWorkspace";
+import CodexAIControlPopover from "./components/CodexAIControlPopover";
+import CodexSidebar from "./components/CodexSidebar";
+import CodexBottomComposer from "./components/CodexBottomComposer";
 import ContextualToolsDrawer, { ToolTab } from "./components/ContextualToolsDrawer";
 import ActivityRail, { ActivityRailItem } from "./components/ActivityRail";
 import StatusBar from "./components/StatusBar";
@@ -488,8 +491,9 @@ export default function IDEApp() {
   const [semanticIntentLoading, setSemanticIntentLoading] = useState(false);
 
   // AI-Native Workspace & Contextual Tools State
-  const [workspaceMode, setWorkspaceMode] = useState<"home" | "workbench" | "agent">("workbench");
+  const [workspaceMode, setWorkspaceMode] = useState<"home" | "workbench" | "agent">("home");
   const [activeTaskPrompt, setActiveTaskPrompt] = useState<string>("");
+  const [showCodexAiControl, setShowCodexAiControl] = useState<boolean>(false);
   const [toolsDrawerOpen, setToolsDrawerOpen] = useState<boolean>(false);
   const [toolsDrawerTab, setToolsDrawerTab] = useState<ToolTab>("explorer");
 
@@ -612,7 +616,7 @@ export default function IDEApp() {
   const [activeBottomTab, setActiveBottomTab] = useState<BottomPanelTab>("terminal");
   const [bottomPanelHeight, setBottomPanelHeight] = useState<number>(200);
   const [activeActivityItem, setActiveActivityItem] = useState<ActivityRailItem | null>("explorer");
-  const [showDockedAgentPanel, setShowDockedAgentPanel] = useState<boolean>(true);
+  const [showDockedAgentPanel, setShowDockedAgentPanel] = useState<boolean>(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeContinuumSnapshot, setActiveContinuumSnapshot] = useState<any>(null);
 
@@ -3878,10 +3882,10 @@ return (
           <div className="flex items-center gap-2 pr-2 border-r border-[#1a1a24]">
             <span className="w-2 h-2 rounded-full bg-cyan-400 shrink-0" />
             <span className="font-heading font-bold text-xs text-white tracking-tight whitespace-nowrap">
-              NEXUS
+              Echo Nullity
             </span>
             <span className="px-2 py-0.5 rounded bg-[#12121c] border border-[#20202e] text-zinc-300 text-[10.5px] font-mono">
-              {folderPath ? folderPath.split('/').pop() : "ai_cart_project"}
+              {folderPath ? folderPath.split('/').pop() : "Echo Nullity"}
             </span>
           </div>
 
@@ -3892,10 +3896,10 @@ return (
                 ? "bg-cyan-950 text-cyan-300 border-cyan-500/40 font-bold"
                 : "bg-[#101016] hover:bg-[#181822] border-[#20202d] text-zinc-400 hover:text-zinc-200"
             }`}
-            title="Workspace Launcher / Home"
+            title="Task Home / Workspace"
           >
             <Sparkles className="w-3 h-3 text-cyan-400" />
-            <span>{workspaceMode === "home" ? "Workbench" : "Launcher"}</span>
+            <span>{workspaceMode === "home" ? "Task Home" : "Workspace"}</span>
           </button>
         </div>
 
@@ -3904,7 +3908,7 @@ return (
           <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-[#0c0c12] border border-[#1a1a24] text-xs max-w-xl truncate">
             <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />
             <span className="text-zinc-300 font-medium truncate">
-              {activeTab ? activeTab.name : "NEXUS Persistent Workbench"}
+              {activeTab ? activeTab.name : "Echo Nullity Workbench"}
             </span>
             {activeTaskPrompt && (
               <span className="text-zinc-500 text-[10.5px] truncate">
@@ -3926,6 +3930,37 @@ return (
             <span>Command</span>
             <kbd className="hidden lg:inline text-[9.5px] bg-[#161620] px-1 rounded text-zinc-400">⌘K</kbd>
           </button>
+
+          {/* Codex-Style Upper-Right AI Control */}
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setShowCodexAiControl((prev) => !prev)}
+              className={`px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 transition-all cursor-pointer ${
+                showCodexAiControl
+                  ? "bg-purple-950 text-purple-300 border-purple-500/50 font-bold shadow-[0_0_8px_rgba(168,85,247,0.3)]"
+                  : "bg-[#101016] hover:bg-[#181822] border-[#20202d] text-purple-300"
+              }`}
+              title="AI & Agent Capabilities Control"
+            >
+              <Cpu className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+              <span>AI Control ▾</span>
+            </button>
+
+            <CodexAIControlPopover
+              isOpen={showCodexAiControl}
+              onClose={() => setShowCodexAiControl(false)}
+              activeProvider="gemini"
+              activeModel="gemini-1.5-flash"
+              onSelectModel={(pId, mId) => {
+                if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.setConfig) {
+                  (window as any).electronAPI.ai.setConfig(pId, mId);
+                }
+              }}
+              onOpenApiKeyModal={() => {
+                setShowCodexAiControl(false);
+              }}
+            />
+          </div>
 
           {/* AI Agent Dock Toggle */}
           <button
@@ -4137,17 +4172,29 @@ return (
       {/* 2. Main Resizable Workspace Grid */}
       <div ref={contentRowRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", overflow: "hidden" }} className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
         
-        {/* Activity Rail */}
-        {workspaceMode !== "home" && (
-          <ActivityRail
-            activeItem={activeActivityItem}
-            onSelectItem={handleSelectActivityRailItem}
-            agentPanelOpen={showDockedAgentPanel}
-            onToggleAgentPanel={() => setShowDockedAgentPanel((prev) => !prev)}
-            bottomPanelOpen={showBottomPanel}
-            onToggleBottomPanel={() => setShowBottomPanel((prev) => !prev)}
-          />
-        )}
+        {/* Persistent Codex Left Sidebar */}
+        <CodexSidebar
+          currentProjectName={folderPath ? folderPath.split("/").pop() || "Echo Nullity" : "Echo Nullity"}
+          recentSessions={snapshotHook.snapshots || []}
+          onNewTask={() => {
+            setWorkspaceMode("home");
+            setMainView("editor");
+            setActiveTaskPrompt("");
+          }}
+          onSelectSession={(sessId, userGoal) => {
+            handleResumeSession(sessId);
+            setWorkspaceMode("workbench");
+          }}
+          onOpenFolder={handleOpenFolder}
+          activeItem={activeActivityItem}
+          onSelectItem={(item) => {
+            handleSelectActivityRailItem(item);
+            if (item === "explorer") {
+              setMainView("editor");
+              setWorkspaceMode("workbench");
+            }
+          }}
+        />
 
         {workspaceMode === "home" ? (
           <TaskHome
@@ -4254,15 +4301,18 @@ return (
                   onOpenFileDiff={handleOpenGitDiff}
                 />
               ) : activeActivityItem === "sessions" ? (
-                <SnapshotPanel
-                  snapshotHook={snapshotHook}
-                  onOpenFile={(filePath) => handleOpenFile({ name: filePath.split("/").pop() || "", path: filePath, isDirectory: false })}
-                  openTabs={openTabs}
-                  activeTabPath={activeTabPath}
-                  workspacePath={folderPath || ""}
-                  activeSessionId={activeSessionId}
-                  onResumeSession={handleResumeSession}
-                  onCreateSession={handleCreateNewSession}
+                <CodexSidebar
+                  currentProjectName={folderPath ? folderPath.split("/").pop() || "Echo Nullity" : "Echo Nullity"}
+                  recentSessions={snapshotHook.snapshots || []}
+                  onNewTask={() => {
+                    setWorkspaceMode("home");
+                  }}
+                  onSelectSession={(sessId, userGoal) => {
+                    handleResumeSession(sessId);
+                  }}
+                  onOpenFolder={handleOpenFolder}
+                  activeItem={activeActivityItem}
+                  onSelectItem={handleSelectActivityRailItem}
                 />
               ) : activeActivityItem === "verification" ? (
                 <EngineeringTimeline

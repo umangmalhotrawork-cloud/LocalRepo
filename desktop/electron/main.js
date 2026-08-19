@@ -124,7 +124,7 @@ function waitForServer(targetUrl, maxRetries = 40, intervalMs = 500) {
           hostname: parsedUrl.hostname,
           port: parsedUrl.port || 3000,
           path: parsedUrl.pathname,
-          timeout: 1000,
+          timeout: 5000,
         },
         (res) => {
           if (isFinished) return;
@@ -220,10 +220,12 @@ function createWindow() {
         }
       })
       .catch((err) => {
-        console.error('[ELECTRON] Fatal: Next.js dev server unavailable:', err.message);
-        console.error('[ELECTRON] Please start Next.js dev server first using `npm run electron:dev` or `npm run dev`.');
+        console.warn('[ELECTRON] Dev server initial ping timeout:', err.message);
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.close();
+          console.log(`[ELECTRON] Loading dev URL directly: ${startUrl}`);
+          mainWindow.loadURL(startUrl).catch((loadErr) => {
+            console.error('[ELECTRON] Failed to load dev URL:', loadErr.message);
+          });
         }
       });
   } else {
@@ -770,7 +772,11 @@ function createWindow() {
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     console.error(`[ELECTRON] did-fail-load (${errorCode}): ${errorDescription}`);
     if (isMainFrame && !loadedSuccessfully && errorCode !== -3) {
-      setTimeout(() => loadWithRetry(startUrl), 1000);
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.loadURL(startUrl).catch(() => {});
+        }
+      }, 1000);
     }
   });
 
