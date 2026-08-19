@@ -33,7 +33,7 @@ export default function DemoPage() {
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
             <h1 className="text-xl font-heading font-bold text-white tracking-tight">
-              Echo Nullity Tomography Workbench V2
+              NEXUS Autonomous Workbench
             </h1>
           </div>
           <p className="text-xs text-zinc-400 font-mono">

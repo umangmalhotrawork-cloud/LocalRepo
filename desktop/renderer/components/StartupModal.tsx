@@ -2,6 +2,7 @@
 
 import React from "react";
 import { FolderOpen, Sparkles, Clock, ArrowRight, X, Layers, FileCode } from "lucide-react";
+import { useOutsideClick } from "../hooks/useOutsideClick";
 
 interface StartupModalProps {
   isOpen: boolean;
@@ -20,11 +21,26 @@ export default function StartupModal({
   onOpenFolder,
   onOpenDemo,
 }: StartupModalProps) {
+  const modalRef = useOutsideClick<HTMLDivElement>({
+    isOpen,
+    onClose,
+  });
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 font-mono select-none animate-fade-in">
-      <div className="w-full max-w-lg bg-[#0a0a0a] border border-cyan-500/40 rounded-24 shadow-cyan-glow/20 p-6 space-y-5 relative">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 font-mono select-none animate-fade-in"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div 
+        ref={modalRef}
+        className="w-full max-w-lg bg-[#0a0a0a] border border-cyan-500/40 rounded-24 shadow-cyan-glow/20 p-6 space-y-5 relative"
+      >
         
         {/* Close Button */}
         <button
@@ -39,7 +55,7 @@ export default function StartupModal({
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
             <h2 className="font-heading text-lg font-bold text-white tracking-tight">
-              Echo Nullity IDE
+              NEXUS Workbench
             </h2>
             <span className="px-2 py-0.5 rounded-full bg-cyan-950 border border-cyan-500/30 text-cyan-300 text-[10px] font-bold">
               v0.2.0

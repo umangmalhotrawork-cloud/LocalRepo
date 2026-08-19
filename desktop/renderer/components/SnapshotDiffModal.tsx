@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { X, Copy, Check, RotateCcw, FileCode, ArrowLeftRight } from "lucide-react";
 import { SnapshotDiffItem } from "../hooks/useSnapshots";
+import { useOutsideClick } from "../hooks/useOutsideClick";
 
 interface SnapshotDiffModalProps {
   isOpen: boolean;
@@ -20,6 +21,10 @@ export default function SnapshotDiffModal({
   onRestoreFile,
 }: SnapshotDiffModalProps) {
   const [copied, setCopied] = useState(false);
+  const modalRef = useOutsideClick<HTMLDivElement>({
+    isOpen: isOpen && !!diffItem,
+    onClose,
+  });
 
   if (!isOpen || !diffItem) return null;
 
@@ -34,8 +39,18 @@ export default function SnapshotDiffModal({
   const newLines = (diffItem.newContent || "").split("\n");
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 font-mono select-none">
-      <div className="w-full max-w-4xl max-h-[85vh] bg-[#09090e] border border-[#272732] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-xs">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 font-mono select-none"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div 
+        ref={modalRef}
+        className="w-full max-w-4xl max-h-[85vh] bg-[#09090e] border border-[#272732] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-xs"
+      >
         {/* Modal Header */}
         <div className="h-12 px-4 bg-[#0d0d14] border-b border-[#1f1f28] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2 truncate">

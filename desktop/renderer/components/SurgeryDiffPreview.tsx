@@ -6,6 +6,7 @@ import {
   CheckSquare, Square, FileCode, Cpu, Layers, Activity 
 } from "lucide-react";
 import { Finding } from "./ProvenanceReplayPanel";
+import { useOutsideClick } from "../hooks/useOutsideClick";
 
 export interface SurgeryHunk {
   line: number;
@@ -44,6 +45,11 @@ export default function SurgeryDiffPreview({
     return new Set(findings.map((f) => f.line));
   });
 
+  const modalRef = useOutsideClick<HTMLDivElement>({
+    isOpen: true,
+    onClose: onCancel,
+  });
+
   const fileName = filePath.split("/").pop() || "source_file.py";
   const sourceLines = useMemo(() => originalSource.split("\n"), [originalSource]);
 
@@ -77,8 +83,18 @@ export default function SurgeryDiffPreview({
   const approvedCount = approvedLines.size;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in font-mono">
-      <div className="bg-[#0a0a0a] border border-[#262626] rounded-2xl w-full max-w-5xl h-[88vh] flex flex-col shadow-2xl overflow-hidden">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in font-mono"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onCancel();
+        }
+      }}
+    >
+      <div 
+        ref={modalRef}
+        className="bg-[#0a0a0a] border border-[#262626] rounded-2xl w-full max-w-5xl h-[88vh] flex flex-col shadow-2xl overflow-hidden"
+      >
         
         {/* 1. Modal Header */}
         <div className="p-4 bg-[#0d0d0d] border-b border-[#1f1f1f] flex items-center justify-between shrink-0">

@@ -238,6 +238,235 @@ class GitManager {
 
     return this.getStatus(workspacePath);
   }
+
+  async push(workspacePath, remote = 'origin', branch) {
+    try {
+      const git = this.getGit(workspacePath);
+      const remotes = await git.getRemotes();
+      if (!remotes || remotes.length === 0) {
+        return {
+          success: false,
+          noRemote: true,
+          message: 'No remote repository configured',
+          status: await this.getStatus(workspacePath),
+        };
+      }
+
+      let targetBranch = branch;
+      if (!targetBranch) {
+        const st = await git.status();
+        targetBranch = st.current || 'main';
+      }
+
+      let pushResult;
+      try {
+        pushResult = await git.push(remote, targetBranch, ['--set-upstream']);
+      } catch (upstreamErr) {
+        pushResult = await git.push();
+      }
+
+      const status = await this.getStatus(workspacePath);
+      return {
+        success: true,
+        result: pushResult,
+        message: `Pushed to ${remote}/${targetBranch}`,
+        status,
+      };
+    } catch (err) {
+      console.error('[GIT-MANAGER] push error:', err);
+      return {
+        success: false,
+        error: err.message || String(err),
+        message: `Push failed: ${err.message || String(err)}`,
+        status: await this.getStatus(workspacePath),
+      };
+    }
+  }
+
+  async commitAndPush(workspacePath, message) {
+    if (!message || !message.trim()) {
+      throw new Error('Commit message cannot be empty');
+    }
+
+    const git = this.getGit(workspacePath);
+    // 1. Stage all working tree & untracked changes
+    await git.add('.');
+
+    // 2. Create commit
+    const commitResult = await git.commit(message.trim());
+
+    // 3. Attempt push if remotes exist
+    let pushSuccess = false;
+    let pushError = null;
+    let noRemote = false;
+
+    try {
+      const remotes = await git.getRemotes();
+      if (!remotes || remotes.length === 0) {
+        noRemote = true;
+      } else {
+        const st = await git.status();
+        const currentBranch = st.current || 'main';
+        try {
+          await git.push('origin', currentBranch, ['--set-upstream']);
+          pushSuccess = true;
+        } catch (pErr1) {
+          await git.push();
+          pushSuccess = true;
+        }
+      }
+    } catch (pushErr) {
+      pushError = pushErr.message || String(pushErr);
+      console.warn('[GIT-MANAGER] push warning during commitAndPush:', pushError);
+    }
+
+    const status = await this.getStatus(workspacePath);
+    let summaryMsg = 'Committed all changes.';
+    if (pushSuccess) {
+      summaryMsg = 'Committed & pushed to remote successfully!';
+    } else if (noRemote) {
+      summaryMsg = 'Committed locally (no remote repository configured).';
+    } else if (pushError) {
+      summaryMsg = `Committed locally. Push notice: ${pushError}`;
+    }
+
+    return {
+      success: true,
+      committed: true,
+      pushed: pushSuccess,
+      noRemote,
+      pushError,
+      message: summaryMsg,
+      commitResult,
+      status,
+    };
+  }
+
+  async suggestCommitMessage(workspacePath) {
+    try {
+      const status = await this.getStatus(workspacePath);
+      const changedFiles = [
+        ...status.staged.map((f) => ({ path: f.path, status: f.status, type: 'staged' })),
+        ...status.unstaged.map((f) => ({ path: f.path, status: f.status, type: 'unstaged' })),
+        ...status.untracked.map((f) => ({ path: f.path, status: '??', type: 'untracked' })),
+      ];
+
+      // De-duplicate by path
+      const uniqueFilesMap = new Map();
+      changedFiles.forEach((f) => {
+        if (!uniqueFilesMap.has(f.path)) {
+          uniqueFilesMap.set(f.path, f);
+        }
+      });
+      const files = Array.from(uniqueFilesMap.values());
+
+      if (files.length === 0) {
+        return {
+          success: true,
+          suggestedMessage: 'chore: update workspace',
+          isDefault: true,
+        };
+      }
+
+      // Try AI-powered suggestion if available
+      try {
+        let aiRouter = null;
+        try {
+          const routerMod = require('./ai/AIProviderRouter');
+          aiRouter = routerMod.aiRouter;
+        } catch (e) {}
+
+        if (aiRouter && aiRouter.getActiveProvider && aiRouter.getActiveProvider().isConfigured) {
+          const fileSummaryText = files.slice(0, 10).map((f) => `- [${f.status}] ${f.path}`).join('\n');
+          let diffSnippet = '';
+          try {
+            const git = this.getGit(workspacePath);
+            diffSnippet = (await git.diff(['--stat'])).slice(0, 500);
+          } catch (dErr) {}
+
+          const prompt = `Generate a single concise, conventional git commit message (under 60 chars) summarizing these changes. Do NOT include markdown blocks or extra explanation. Just the message, e.g. "feat(cart): update tax calculation" or "fix(auth): resolve token expiration".\nFiles:\n${fileSummaryText}\n${diffSnippet ? `Diff stat:\n${diffSnippet}` : ''}`;
+          const aiRes = await aiRouter.execute({
+            task: prompt,
+            model: 'fast',
+            systemPrompt: 'You are an expert software engineer generating conventional commit messages.',
+          });
+
+          if (aiRes && aiRes.response) {
+            let cleanMsg = aiRes.response.trim().replace(/^["'`]|["'`]$/g, '').split('\n')[0].trim();
+            if (cleanMsg.length > 5 && cleanMsg.length < 90) {
+              return {
+                success: true,
+                suggestedMessage: cleanMsg,
+                source: 'ai',
+              };
+            }
+          }
+        }
+      } catch (aiErr) {
+        console.warn('[GIT-MANAGER] AI commit suggestion fallback to heuristic:', aiErr.message);
+      }
+
+      // High-precision heuristic generator
+      const paths = files.map((f) => f.path);
+      const isAllTests = paths.every((p) => p.includes('test') || p.includes('spec') || p.startsWith('tests/'));
+      const isAllDocs = paths.every((p) => p.endsWith('.md') || p.includes('docs/') || p.endsWith('.txt'));
+      const isAllConfig = paths.every((p) => p.endsWith('.json') || p.endsWith('.toml') || p.endsWith('.yml') || p.endsWith('.yaml') || p.startsWith('.'));
+      const isAllStyles = paths.every((p) => p.endsWith('.css') || p.endsWith('.scss') || p.endsWith('.less'));
+
+      let type = 'feat';
+      if (isAllTests) {
+        type = 'test';
+      } else if (isAllDocs) {
+        type = 'docs';
+      } else if (isAllConfig) {
+        type = 'chore';
+      } else if (isAllStyles) {
+        type = 'style';
+      } else if (files.some((f) => f.status === 'D')) {
+        type = 'refactor';
+      } else if (files.every((f) => f.status === 'M')) {
+        type = 'fix';
+      }
+
+      // Determine scope
+      let scope = '';
+      const firstFile = paths[0] || '';
+      const pathParts = firstFile.split('/');
+      if (pathParts.length > 1) {
+        scope = pathParts[0] === 'src' && pathParts.length > 2 ? pathParts[1].replace(/\.[^/.]+$/, '') : pathParts[0];
+      } else if (firstFile) {
+        scope = firstFile.replace(/\.[^/.]+$/, '');
+      }
+
+      // Format description
+      let desc = '';
+      if (files.length === 1) {
+        const basename = path.basename(firstFile);
+        desc = `update ${basename}`;
+      } else if (files.length <= 3) {
+        const names = paths.map((p) => path.basename(p)).join(', ');
+        desc = `update ${names}`;
+      } else {
+        desc = `update ${files.length} files in ${scope || 'workspace'}`;
+      }
+
+      const scopeTag = scope && scope !== 'workspace' && scope.length < 15 ? `(${scope})` : '';
+      const heuristicMsg = `${type}${scopeTag}: ${desc}`;
+
+      return {
+        success: true,
+        suggestedMessage: heuristicMsg,
+        source: 'heuristic',
+      };
+    } catch (err) {
+      console.error('[GIT-MANAGER] suggestCommitMessage error:', err);
+      return {
+        success: false,
+        suggestedMessage: 'chore: update workspace changes',
+        error: err.message || String(err),
+      };
+    }
+  }
 }
 
 const gitManager = new GitManager();

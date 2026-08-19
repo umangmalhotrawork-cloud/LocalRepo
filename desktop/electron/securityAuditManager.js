@@ -339,7 +339,7 @@ class SecurityAuditManager {
   exportReport(report, format = 'json') {
     if (format === 'markdown') {
       const dateStr = new Date(report.generatedAt || Date.now()).toUTCString();
-      let md = `# Echo Nullity Security & Dependency Audit Report\n\n`;
+      let md = `# NEXUS Security & Dependency Audit Report\n\n`;
       md += `**Generated:** ${dateStr}\n\n`;
       md += `## Summary\n\n`;
       md += `- **Critical:** ${report.summary?.critical || 0}\n`;

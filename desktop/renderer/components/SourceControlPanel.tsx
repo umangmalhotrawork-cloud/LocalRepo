@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   GitBranch,
   GitCommit,
@@ -16,6 +16,9 @@ import {
   Clock,
   GitPullRequest,
   CheckCheck,
+  Sparkles,
+  UploadCloud,
+  Loader2,
 } from "lucide-react";
 import { GitFileItem, LastCommitInfo } from "../hooks/useGit";
 
@@ -36,6 +39,9 @@ interface SourceControlPanelProps {
   onStageAll: () => void;
   onUnstageAll: () => void;
   onCommit: (message: string) => Promise<boolean>;
+  onCommitAndPush?: (message: string) => Promise<boolean>;
+  onPush?: (remote?: string, branch?: string) => Promise<boolean>;
+  onSuggestMessage?: () => Promise<string | null>;
   onCheckoutBranch: (branch: string) => void;
   onCreateBranch: (branch: string) => void;
   onDiscardFile: (path: string) => void;
@@ -59,6 +65,9 @@ export default function SourceControlPanel({
   onStageAll,
   onUnstageAll,
   onCommit,
+  onCommitAndPush,
+  onPush,
+  onSuggestMessage,
   onCheckoutBranch,
   onCreateBranch,
   onDiscardFile,
@@ -71,13 +80,84 @@ export default function SourceControlPanel({
   const [showBranchModal, setShowBranchModal] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
   const [fileToDiscard, setFileToDiscard] = useState<string | null>(null);
+  const [isGeneratingSuggestion, setIsGeneratingSuggestion] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleCommitSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!commitMessage.trim() || staged.length === 0) return;
-    const success = await onCommit(commitMessage);
-    if (success) {
-      setCommitMessage("");
+  const totalChanges = staged.length + unstaged.length + untracked.length;
+  const lastChangesCountRef = useRef(0);
+
+  // Automatic suggestion when meaningful file changes are detected
+  const handleAutoSuggest = useCallback(async (force = false) => {
+    if (!onSuggestMessage) return;
+    if (!force && commitMessage.trim()) return; // Don't overwrite user's custom typed message
+    if (totalChanges === 0) return;
+
+    setIsGeneratingSuggestion(true);
+    try {
+      const suggested = await onSuggestMessage();
+      if (suggested) {
+        setCommitMessage(suggested);
+      }
+    } catch (e) {
+      console.warn("[SOURCE-CONTROL] Suggest message error:", e);
+    } finally {
+      setIsGeneratingSuggestion(false);
+    }
+  }, [onSuggestMessage, commitMessage, totalChanges]);
+
+  // Trigger initial auto-suggest when changes appear if message is blank
+  useEffect(() => {
+    if (totalChanges > 0 && lastChangesCountRef.current === 0 && !commitMessage.trim()) {
+      handleAutoSuggest(false);
+    }
+    lastChangesCountRef.current = totalChanges;
+  }, [totalChanges, handleAutoSuggest, commitMessage]);
+
+  const handleCommitSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!commitMessage.trim() || staged.length === 0 || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const success = await onCommit(commitMessage);
+      if (success) {
+        setCommitMessage("");
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCommitAndPushSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!commitMessage.trim() || totalChanges === 0 || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      if (onCommitAndPush) {
+        const success = await onCommitAndPush(commitMessage);
+        if (success) {
+          setCommitMessage("");
+        }
+      } else {
+        // Fallback: stage all, commit
+        await onStageAll();
+        const success = await onCommit(commitMessage);
+        if (success) {
+          setCommitMessage("");
+          if (onPush) await onPush();
+        }
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePushOnly = async () => {
+    if (!onPush || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await onPush();
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -119,9 +199,30 @@ export default function SourceControlPanel({
           <span className="font-bold text-zinc-100 uppercase tracking-wide text-[11px]">
             Source Control
           </span>
+          {totalChanges > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-cyan-950 text-cyan-300 text-[10px] font-bold border border-cyan-500/30">
+              {totalChanges}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5">
+          {onSuggestMessage && totalChanges > 0 && (
+            <button
+              onClick={() => handleAutoSuggest(true)}
+              disabled={isGeneratingSuggestion || loading}
+              className="px-2 py-0.5 rounded bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/30 text-cyan-300 hover:text-white text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-sm"
+              title="AI suggest concise commit message"
+            >
+              {isGeneratingSuggestion ? (
+                <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
+              ) : (
+                <Sparkles className="w-3 h-3 text-cyan-400" />
+              )}
+              <span>Suggest</span>
+            </button>
+          )}
+
           <button
             onClick={onRefresh}
             disabled={loading}
@@ -193,30 +294,84 @@ export default function SourceControlPanel({
         )}
       </div>
 
-      {/* Commit Input Area */}
+      {/* Commit Input Area & One-Click Commit & Push Controls */}
       <div className="p-3 bg-[#050507] border-b border-[#1f1f1f] shrink-0 space-y-2">
-        <form onSubmit={handleCommitSubmit} className="space-y-2">
+        <form onSubmit={handleCommitAndPushSubmit} className="space-y-2">
+          {/* Message Header with Suggest Chip */}
+          <div className="flex items-center justify-between text-[10.5px] text-zinc-400">
+            <span>Commit Message:</span>
+            {onSuggestMessage && totalChanges > 0 && !commitMessage.trim() && (
+              <button
+                type="button"
+                onClick={() => handleAutoSuggest(true)}
+                disabled={isGeneratingSuggestion}
+                className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer text-[10px]"
+              >
+                <Sparkles className="w-3 h-3" />
+                <span>{isGeneratingSuggestion ? "Generating..." : "Auto-fill with AI"}</span>
+              </button>
+            )}
+          </div>
+
           <textarea
             rows={2}
             value={commitMessage}
             onChange={(e) => setCommitMessage(e.target.value)}
-            placeholder="Message (Cmd+Enter to commit)..."
+            placeholder={totalChanges > 0 ? "Commit message (Enter to Commit & Push, Shift+Enter for newline)..." : "No changes to commit"}
             className="w-full bg-[#0a0a0d] border border-[#27272a] focus:border-cyan-500/50 rounded p-2 text-zinc-200 placeholder:text-zinc-600 outline-none text-xs resize-none font-mono"
             onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                handleCommitSubmit(e);
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                handleCommitAndPushSubmit(e);
               }
             }}
           />
 
+          {/* Primary One-Click [Commit & Push] */}
           <button
             type="submit"
-            disabled={!commitMessage.trim() || staged.length === 0 || loading}
-            className="w-full py-1.5 px-3 rounded bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs flex items-center justify-center gap-1.5 transition-all disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+            disabled={!commitMessage.trim() || totalChanges === 0 || loading || isSubmitting}
+            className="w-full py-2 px-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-md shadow-cyan-950/40 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+            title="Stage all changes, commit, and push to remote (Enter)"
           >
-            <GitCommit className="w-3.5 h-3.5 stroke-[2.5]" />
-            <span>Commit ({staged.length} staged)</span>
+            {isSubmitting ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <UploadCloud className="w-3.5 h-3.5 stroke-[2.5]" />
+            )}
+            <span>Commit & Push ({totalChanges} changed)</span>
           </button>
+
+          {/* Secondary Actions: Commit Staged only, Push only */}
+          {(staged.length > 0 || onPush) && (
+            <div className="flex items-center gap-1.5 pt-0.5">
+              {staged.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleCommitSubmit}
+                  disabled={!commitMessage.trim() || staged.length === 0 || loading || isSubmitting}
+                  className="flex-1 py-1.5 px-2 rounded-lg bg-[#14141c] hover:bg-[#1c1c28] border border-[#262638] text-zinc-300 text-[10.5px] font-medium flex items-center justify-center gap-1 transition-all disabled:opacity-30 cursor-pointer"
+                  title="Commit only staged files"
+                >
+                  <GitCommit className="w-3 h-3 text-cyan-400" />
+                  <span>Commit Staged ({staged.length})</span>
+                </button>
+              )}
+
+              {onPush && (
+                <button
+                  type="button"
+                  onClick={handlePushOnly}
+                  disabled={loading || isSubmitting}
+                  className="py-1.5 px-2.5 rounded-lg bg-[#14141c] hover:bg-[#1c1c28] border border-[#262638] text-zinc-300 text-[10.5px] font-medium flex items-center justify-center gap-1 transition-all disabled:opacity-30 cursor-pointer"
+                  title="Push local commits to remote"
+                >
+                  <UploadCloud className="w-3 h-3 text-emerald-400" />
+                  <span>Push</span>
+                </button>
+              )}
+            </div>
+          )}
         </form>
       </div>
 

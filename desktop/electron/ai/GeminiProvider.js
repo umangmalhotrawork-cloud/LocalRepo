@@ -91,7 +91,7 @@ class GeminiProvider extends AIProvider {
       ? '\nCRITICAL DIRECTIVE: This is a READ_ONLY analysis task. DO NOT generate code modifications or surgical patches. Return empty proposedEdits: [] for all steps.'
       : '';
 
-    const systemPrompt = `${contextPrefix}You are Echo Nullity Autonomous AI Agent powered by Gemini.
+    const systemPrompt = `${contextPrefix}You are NEXUS Autonomous AI Agent powered by Gemini.
 Analyze the workspace and task, then output a structured JSON plan with maximum ${maxSteps} steps.${readOnlyDirective}
 Task: "${task}"
 Active editor file: "${relativeTarget}". Treat it as the primary analysis target. All proposedEdits must target this file.
@@ -227,7 +227,7 @@ Format strictly as JSON:
 
     const selectedModel = model || this.defaultModel;
     const contextPrefix = continuumContextText ? `${continuumContextText}\n\n---\n\n` : '';
-    const systemPrompt = `${contextPrefix}You are an expert AI code assistant integrated into Echo Nullity IDE.
+    const systemPrompt = `${contextPrefix}You are an expert AI code assistant integrated into NEXUS Workbench.
 Your task is to perform the action "${action}" on the provided code selection.
 Language: ${language}
 File: ${filePath}

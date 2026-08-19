@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Search, FileText, X } from "lucide-react";
+import { useOutsideClick } from "../hooks/useOutsideClick";
 
 interface FileItem {
   name: string;
@@ -22,6 +23,10 @@ export default function QuickOpen({
   onSelectFile,
 }: QuickOpenProps) {
   const [query, setQuery] = useState("");
+  const quickOpenRef = useOutsideClick<HTMLDivElement>({
+    isOpen,
+    onClose,
+  });
 
   useEffect(() => {
     if (isOpen) setQuery("");
@@ -36,8 +41,18 @@ export default function QuickOpen({
   );
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-start justify-center pt-20 p-4">
-      <div className="w-full max-w-lg bg-[#0a0a0a] border border-purple-500/40 rounded-2xl shadow-2xl overflow-hidden font-sans">
+    <div 
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-start justify-center pt-20 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div 
+        ref={quickOpenRef}
+        className="w-full max-w-lg bg-[#0a0a0a] border border-purple-500/40 rounded-2xl shadow-2xl overflow-hidden font-sans"
+      >
         
         {/* Search Input */}
         <div className="p-4 border-b border-[#1f1f1f] flex items-center gap-3 bg-[#050505]">

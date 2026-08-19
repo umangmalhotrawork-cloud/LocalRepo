@@ -181,6 +181,68 @@ export function useGit(workspacePath: string = "") {
     }
   }, []);
 
+  const pushChanges = useCallback(async (remote = "origin", branch?: string) => {
+    const ws = workspaceRef.current;
+    if (!ws || !window.electronAPI?.git) return false;
+    setLoading(true);
+    try {
+      const res = await window.electronAPI.git.push(ws, remote, branch);
+      if (res && res.status) {
+        setGitState((prev) => ({ ...prev, ...res.status }));
+      }
+      if (res && res.success) {
+        showToast(res.message || "Pushed changes to remote!");
+        return true;
+      } else {
+        showToast(res?.message || "Push failed", true);
+        return false;
+      }
+    } catch (err: any) {
+      showToast(`Push failed: ${err.message || String(err)}`, true);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const commitAndPushChanges = useCallback(async (message: string) => {
+    const ws = workspaceRef.current;
+    if (!ws || !window.electronAPI?.git || !message.trim()) return false;
+    setLoading(true);
+    try {
+      const res = await window.electronAPI.git.commitAndPush(ws, message.trim());
+      if (res && res.status) {
+        setGitState((prev) => ({ ...prev, ...res.status }));
+      }
+      if (res && res.success) {
+        showToast(res.message || "Committed and pushed successfully!");
+        return true;
+      }
+      showToast(res?.message || "Commit and push failed", true);
+      return false;
+    } catch (err: any) {
+      showToast(`Commit & Push failed: ${err.message || String(err)}`, true);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const suggestCommitMessage = useCallback(async (): Promise<string | null> => {
+    const ws = workspaceRef.current;
+    if (!ws || !window.electronAPI?.git?.suggestCommitMessage) return null;
+    try {
+      const res = await window.electronAPI.git.suggestCommitMessage(ws);
+      if (res && res.suggestedMessage) {
+        return res.suggestedMessage;
+      }
+      return null;
+    } catch (err: any) {
+      console.error("[USE-GIT] suggestCommitMessage error:", err);
+      return null;
+    }
+  }, []);
+
   const checkoutBranch = useCallback(async (branchName: string) => {
     const ws = workspaceRef.current;
     if (!ws || !window.electronAPI?.git) return;
@@ -256,6 +318,9 @@ export function useGit(workspacePath: string = "") {
     stageAllFiles,
     unstageAllFiles,
     commitChanges,
+    pushChanges,
+    commitAndPushChanges,
+    suggestCommitMessage,
     checkoutBranch,
     createAndCheckoutBranch,
     discardFile,

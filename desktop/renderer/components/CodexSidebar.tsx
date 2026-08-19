@@ -31,7 +31,7 @@ interface CodexSidebarProps {
 }
 
 export default function CodexSidebar({
-  currentProjectName = "Echo Nullity",
+  currentProjectName = "NEXUS",
   recentSessions = [],
   onNewTask,
   onSelectSession,
@@ -47,7 +47,7 @@ export default function CodexSidebar({
 
   const projectList: CodexProjectItem[] = [
     {
-      name: currentProjectName || "Echo Nullity",
+      name: currentProjectName || "NEXUS",
       isCurrent: true,
       threads: recentSessions.map((s) => ({
         id: s.id || s.snapshotId || s.sessionId,
@@ -79,7 +79,7 @@ export default function CodexSidebar({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-cyan-400 shrink-0" />
-            <span className="font-bold text-sm text-white tracking-tight">Echo Nullity</span>
+            <span className="font-bold text-sm text-white tracking-tight">NEXUS</span>
           </div>
           <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-[#161622] text-cyan-300 border border-[#222234] font-mono">v1.0.0</span>
         </div>

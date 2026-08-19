@@ -178,7 +178,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: 'Echo Nullity — Desktop IDE',
+    title: 'NEXUS — Autonomous Software Engineering',
     backgroundColor: '#050505',
     titleBarStyle: 'hiddenInset',
     show: false,
@@ -2030,6 +2030,18 @@ ipcMain.handle('git:createBranch', async (_, { workspacePath, branch }) => {
 
 ipcMain.handle('git:discard', async (_, { workspacePath, file }) => {
   return gitManager.discard(workspacePath, file);
+});
+
+ipcMain.handle('git:push', async (_, { workspacePath, remote, branch }) => {
+  return gitManager.push(workspacePath, remote, branch);
+});
+
+ipcMain.handle('git:commitAndPush', async (_, { workspacePath, message }) => {
+  return gitManager.commitAndPush(workspacePath, message);
+});
+
+ipcMain.handle('git:suggestCommitMessage', async (_, workspacePath) => {
+  return gitManager.suggestCommitMessage(workspacePath);
 });
 
 // Workspace Search & Replace IPC Handlers

@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { 
   FolderOpen, GitBranch, Layers, Plus, ShieldCheck, Cpu, 
   Send, ArrowRight, Zap, ChevronDown, Check, Key
 } from "lucide-react";
+import { useOutsideClick } from "../hooks/useOutsideClick";
 
 interface CodexBottomComposerProps {
   workspaceName?: string;
@@ -19,7 +20,7 @@ interface CodexBottomComposerProps {
 }
 
 export default function CodexBottomComposer({
-  workspaceName = "Echo Nullity",
+  workspaceName = "NEXUS",
   gitBranch = "main",
   activeProvider = "gemini",
   activeModel = "gemini-1.5-flash",
@@ -33,6 +34,20 @@ export default function CodexBottomComposer({
   const [approvalMode, setApprovalMode] = useState<"auto" | "strict">("auto");
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showApprovalDropdown, setShowApprovalDropdown] = useState(false);
+
+  const approvalTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const approvalDropdownRef = useOutsideClick<HTMLDivElement>({
+    isOpen: showApprovalDropdown,
+    onClose: () => setShowApprovalDropdown(false),
+    triggerRef: approvalTriggerRef,
+  });
+
+  const modelTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const modelDropdownRef = useOutsideClick<HTMLDivElement>({
+    isOpen: showModelDropdown,
+    onClose: () => setShowModelDropdown(false),
+    triggerRef: modelTriggerRef,
+  });
 
   const handleSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -85,11 +100,12 @@ export default function CodexBottomComposer({
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
                 handleSubmit();
               }
             }}
-            placeholder="Ask Echo Nullity to investigate or change code... (⌘Enter to send)"
+            placeholder="Ask NEXUS to investigate or change code... (⌘Enter to send)"
             disabled={disabled}
             className="w-full h-20 bg-transparent text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none resize-none font-mono"
           />
@@ -109,6 +125,7 @@ export default function CodexBottomComposer({
               {/* Approval Mode Control */}
               <div className="relative">
                 <button
+                  ref={approvalTriggerRef}
                   type="button"
                   onClick={() => setShowApprovalDropdown((prev) => !prev)}
                   className="px-2.5 py-1 rounded-lg bg-[#141420] hover:bg-[#1a1a2a] border border-[#242436] text-zinc-300 text-[11px] font-mono flex items-center gap-1.5 cursor-pointer"
@@ -119,7 +136,10 @@ export default function CodexBottomComposer({
                 </button>
 
                 {showApprovalDropdown && (
-                  <div className="absolute left-0 bottom-9 w-48 bg-[#0c0c14] border border-[#242436] rounded-xl shadow-2xl z-50 p-1 space-y-1 text-xs">
+                  <div 
+                    ref={approvalDropdownRef}
+                    className="absolute left-0 bottom-9 w-48 bg-[#0c0c14] border border-[#242436] rounded-xl shadow-2xl z-50 p-1 space-y-1 text-xs"
+                  >
                     <button
                       type="button"
                       onClick={() => {
@@ -149,6 +169,7 @@ export default function CodexBottomComposer({
               {/* Model Selector Button & Dropdown */}
               <div className="relative">
                 <button
+                  ref={modelTriggerRef}
                   type="button"
                   onClick={() => setShowModelDropdown((prev) => !prev)}
                   className="px-2.5 py-1 rounded-lg bg-[#141420] hover:bg-[#1a1a2a] border border-[#242436] text-cyan-300 text-[11px] font-mono flex items-center gap-1.5 cursor-pointer"
@@ -159,7 +180,10 @@ export default function CodexBottomComposer({
                 </button>
 
                 {showModelDropdown && (
-                  <div className="absolute left-0 bottom-9 w-52 bg-[#0c0c14] border border-[#242436] rounded-xl shadow-2xl z-50 p-1 space-y-1 text-xs">
+                  <div 
+                    ref={modelDropdownRef}
+                    className="absolute left-0 bottom-9 w-52 bg-[#0c0c14] border border-[#242436] rounded-xl shadow-2xl z-50 p-1 space-y-1 text-xs"
+                  >
                     <button
                       type="button"
                       onClick={() => {

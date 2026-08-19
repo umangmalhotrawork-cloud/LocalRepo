@@ -3,6 +3,7 @@
 import React from "react";
 import { RotateCcw, X, AlertTriangle, FileText, CheckCircle2 } from "lucide-react";
 import { HistoryEntry } from "../IDEApp";
+import { useOutsideClick } from "../hooks/useOutsideClick";
 
 interface RestoreConfirmModalProps {
   isOpen: boolean;
@@ -19,6 +20,11 @@ export default function RestoreConfirmModal({
   onConfirmRestore,
   isRestoring = false,
 }: RestoreConfirmModalProps) {
+  const modalRef = useOutsideClick<HTMLDivElement>({
+    isOpen: isOpen && !!entry,
+    onClose,
+  });
+
   if (!isOpen || !entry) return null;
 
   const fileName = entry.file_path ? entry.file_path.split("/").pop() : "unknown.py";
@@ -26,8 +32,18 @@ export default function RestoreConfirmModal({
   const afterLines = (entry.after_source || "").split("\n");
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-      <div className="bg-[#0a0a0a] border border-amber-500/50 rounded-2xl p-6 max-w-2xl w-full space-y-4 shadow-2xl font-mono text-xs animate-fade-in">
+    <div 
+      className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div 
+        ref={modalRef}
+        className="bg-[#0a0a0a] border border-amber-500/50 rounded-2xl p-6 max-w-2xl w-full space-y-4 shadow-2xl font-mono text-xs animate-fade-in"
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[#1f1f1f] pb-3">
           <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">

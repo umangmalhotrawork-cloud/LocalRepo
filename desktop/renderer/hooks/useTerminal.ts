@@ -73,7 +73,7 @@ export function useTerminal(initialCwd: string = "") {
         name: `Terminal ${tabsRef.current.length + 1}`,
         cwd: cwdOverride || initialCwd || "~/workspace",
         status: "running",
-        output: ["Echo Nullity Mock Terminal v1.0", "Type commands to simulate execution..."],
+        output: ["NEXUS Mock Terminal v1.0", "Type commands to simulate execution..."],
       };
       setTabs((prev) => [...prev, newTab]);
       setActiveTabId(fallbackId);

@@ -115,7 +115,7 @@ export default function LiveWebPreviewPanel({
           srcDoc={previewHtml}
           sandbox="allow-scripts allow-modals allow-forms allow-same-origin"
           className="w-full h-full border-0 bg-white"
-          title="Echo Nullity Live Preview"
+          title="NEXUS Live Preview"
         />
       </div>
     </div>

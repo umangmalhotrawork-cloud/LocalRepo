@@ -54,7 +54,7 @@ class AiManager {
 
   async callGemini(apiKey, action, language, filePath, selection, fullFile, continuumContextText = '') {
     const contextPrefix = continuumContextText ? `${continuumContextText}\n\n---\n\n` : '';
-    const systemPrompt = `${contextPrefix}You are an expert AI code assistant integrated into Echo Nullity IDE.
+    const systemPrompt = `${contextPrefix}You are an expert AI code assistant integrated into NEXUS Workbench.
 Your task is to perform the action "${action}" on the provided code selection.
 Language: ${language}
 File: ${filePath}

@@ -12,6 +12,7 @@ import {
   Check,
 } from "lucide-react";
 import { RecoverySnapshot } from "../hooks/useWorkspaceState";
+import { useOutsideClick } from "../hooks/useOutsideClick";
 
 interface RecoveryDialogProps {
   isOpen: boolean;
@@ -30,6 +31,11 @@ export default function RecoveryDialog({
   onDiscard,
   onLater,
 }: RecoveryDialogProps) {
+  const modalRef = useOutsideClick<HTMLDivElement>({
+    isOpen: isOpen && !!snapshot,
+    onClose: onLater,
+  });
+
   if (!isOpen || !snapshot) return null;
 
   const dirtyTabs = (snapshot.openTabs || []).filter((t) => t.isDirty);
@@ -44,8 +50,18 @@ export default function RecoveryDialog({
     : "Recent snapshot";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 font-mono select-none">
-      <div className="w-full max-w-md bg-[#0d0d12] border border-[#27272a] rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 font-mono select-none"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onLater();
+        }
+      }}
+    >
+      <div 
+        ref={modalRef}
+        className="w-full max-w-md bg-[#0d0d12] border border-[#27272a] rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+      >
         {/* Header */}
         <div className="p-4 border-b border-[#1f1f24] bg-[#09090c] flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -60,7 +76,7 @@ export default function RecoveryDialog({
             )}
             <div>
               <h2 className="text-xs font-bold text-zinc-100">
-                {wasCrash ? "Echo Nullity may have closed unexpectedly." : "Restore Previous Session"}
+                {wasCrash ? "NEXUS may have closed unexpectedly." : "Restore Previous Session"}
               </h2>
               <p className="text-[10.5px] text-zinc-500 flex items-center gap-1 mt-0.5">
                 <Clock className="w-3 h-3" />

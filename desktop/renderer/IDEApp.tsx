@@ -58,6 +58,7 @@ import AgentWorkspace from "./components/AgentWorkspace";
 import CodexAIControlPopover from "./components/CodexAIControlPopover";
 import CodexSidebar from "./components/CodexSidebar";
 import CodexBottomComposer from "./components/CodexBottomComposer";
+import ApiKeyRequiredModal from "./components/ApiKeyRequiredModal";
 import ContextualToolsDrawer, { ToolTab } from "./components/ContextualToolsDrawer";
 import ActivityRail, { ActivityRailItem } from "./components/ActivityRail";
 import StatusBar from "./components/StatusBar";
@@ -66,6 +67,7 @@ import { useSecurityAudit } from "./hooks/useSecurityAudit";
 import SnapshotPanel from "./components/SnapshotPanel";
 import { useSnapshots } from "./hooks/useSnapshots";
 import { useWorkspaceState, EditorViewState, WorkspacePersistedState, RecoverySnapshot, safeParse } from "./hooks/useWorkspaceState";
+import { useOutsideClick } from "./hooks/useOutsideClick";
 import { buildWorkspaceReport, ReportExportPayload } from "./utils/reportBuilder";
 import { exportGraphSvg } from "./utils/exportGraphSvg";
 
@@ -147,6 +149,9 @@ declare global {
         stageAll: (workspacePath: string) => Promise<any>;
         unstageAll: (workspacePath: string) => Promise<any>;
         commit: (workspacePath: string, message: string) => Promise<{ success: boolean; commitResult?: any; status?: any; error?: string }>;
+        push: (workspacePath: string, remote?: string, branch?: string) => Promise<any>;
+        commitAndPush: (workspacePath: string, message: string) => Promise<any>;
+        suggestCommitMessage: (workspacePath: string) => Promise<{ success: boolean; suggestedMessage?: string; isDefault?: boolean; source?: string; error?: string }>;
         branches: (workspacePath: string) => Promise<{ all: string[]; current: string }>;
         checkout: (workspacePath: string, branch: string) => Promise<any>;
         createBranch: (workspacePath: string, branch: string) => Promise<any>;
@@ -497,6 +502,51 @@ export default function IDEApp() {
   const [toolsDrawerOpen, setToolsDrawerOpen] = useState<boolean>(false);
   const [toolsDrawerTab, setToolsDrawerTab] = useState<ToolTab>("explorer");
 
+  // Lazy API Key Prompt State
+  const [showApiKeyRequiredModal, setShowApiKeyRequiredModal] = useState<boolean>(false);
+  const pendingAiActionRef = useRef<(() => void) | null>(null);
+  const pendingAiTaskPromptRef = useRef<string | null>(null);
+
+  const ensureApiKeyConfigured = async (onConfigured: () => void, taskPrompt?: string): Promise<boolean> => {
+    if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getConfig) {
+      try {
+        const config = await (window as any).electronAPI.ai.getConfig();
+        const activeProvider = config?.activeProvider || "gemini";
+        const providerConfig = config?.providers?.find((p: any) => p.id === activeProvider);
+        const isConfigured = Boolean(providerConfig?.isConfigured && providerConfig?.status === "CONNECTED");
+
+        if (isConfigured) {
+          onConfigured();
+          return true;
+        }
+      } catch (e) {
+        console.error("[IDE] Failed to check AI config:", e);
+      }
+    }
+
+    // Key is missing/unconfigured -> save pending action in memory & show modal
+    pendingAiActionRef.current = onConfigured;
+    pendingAiTaskPromptRef.current = taskPrompt || null;
+    setShowApiKeyRequiredModal(true);
+    return false;
+  };
+
+  const handleApiKeyModalSuccess = () => {
+    setShowApiKeyRequiredModal(false);
+    const pending = pendingAiActionRef.current;
+    pendingAiActionRef.current = null;
+    pendingAiTaskPromptRef.current = null;
+    if (pending) {
+      pending();
+    }
+  };
+
+  const handleApiKeyModalClose = () => {
+    setShowApiKeyRequiredModal(false);
+    pendingAiActionRef.current = null;
+    pendingAiTaskPromptRef.current = null;
+  };
+
   // AI Code Actions State & Handlers
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiPanelMode, setAiPanelMode] = useState<"code-action" | "agent">("agent");
@@ -521,40 +571,42 @@ export default function IDEApp() {
       return;
     }
 
-    setAiPanelMode("code-action");
-    setAiPanelOpen(true);
-    setAiLoading(true);
-    setAiResponse(null);
-    addLog(`[AI] Running ${action.toUpperCase()} action on ${sel.endLineNumber - sel.startLineNumber + 1} lines...`);
+    ensureApiKeyConfigured(async () => {
+      setAiPanelMode("code-action");
+      setAiPanelOpen(true);
+      setAiLoading(true);
+      setAiResponse(null);
+      addLog(`[AI] Running ${action.toUpperCase()} action on ${sel.endLineNumber - sel.startLineNumber + 1} lines...`);
 
-    try {
-      if (typeof window !== "undefined" && window.electronAPI?.ai) {
-        const lang = getLanguageFromPath(activeTabPath || "");
-        const res = await window.electronAPI.ai.codeAction({
-          action,
-          language: lang,
-          filePath: activeTabPath || "",
-          selection: sel.text,
-          fullFile: activeTab?.content || "",
-        });
-        setAiResponse(res);
-        if (res.success) {
-          addLog(`[AI] Action ${action} completed successfully.`);
-        } else {
-          addLog(`[AI] Action error: ${res.error || "failed"}`);
+      try {
+        if (typeof window !== "undefined" && window.electronAPI?.ai) {
+          const lang = getLanguageFromPath(activeTabPath || "");
+          const res = await window.electronAPI.ai.codeAction({
+            action,
+            language: lang,
+            filePath: activeTabPath || "",
+            selection: sel.text,
+            fullFile: activeTab?.content || "",
+          });
+          setAiResponse(res);
+          if (res.success) {
+            addLog(`[AI] Action ${action} completed successfully.`);
+          } else {
+            addLog(`[AI] Action error: ${res.error || "failed"}`);
+          }
         }
+      } catch (err: any) {
+        setAiResponse({
+          success: false,
+          action,
+          error: err.message || String(err),
+          response: "Failed to communicate with AI subsystem.",
+        });
+        addLog(`[AI] Communication error: ${err.message || String(err)}`);
+      } finally {
+        setAiLoading(false);
       }
-    } catch (err: any) {
-      setAiResponse({
-        success: false,
-        action,
-        error: err.message || String(err),
-        response: "Failed to communicate with AI subsystem.",
-      });
-      addLog(`[AI] Communication error: ${err.message || String(err)}`);
-    } finally {
-      setAiLoading(false);
-    }
+    });
   };
 
   const handleAnalyzeSemanticIntentDrift = async (origCode: string, editCode: string) => {
@@ -612,6 +664,13 @@ export default function IDEApp() {
   const [terminalPanelMode, setTerminalPanelMode] = useState<"terminal" | "output" | "debug" | "logs" | "python">("terminal");
   const [showRightPanel, setShowRightPanel] = useState<boolean>(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState<boolean>(false);
+  const aiControlTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const moreMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const moreMenuRef = useOutsideClick<HTMLDivElement>({
+    isOpen: moreMenuOpen,
+    onClose: () => setMoreMenuOpen(false),
+    triggerRef: moreMenuTriggerRef,
+  });
   const [showBottomPanel, setShowBottomPanel] = useState<boolean>(false);
   const [activeBottomTab, setActiveBottomTab] = useState<BottomPanelTab>("terminal");
   const [bottomPanelHeight, setBottomPanelHeight] = useState<number>(200);
@@ -672,12 +731,42 @@ export default function IDEApp() {
       return;
     }
 
-    if (activeActivityItem === item && showExplorer) {
+    if (activeActivityItem === item && showExplorer && workspaceMode === "workbench") {
       setShowExplorer(false);
       setActiveActivityItem(null);
     } else {
       setActiveActivityItem(item);
       setShowExplorer(true);
+      setWorkspaceMode("workbench");
+      setMainView("editor");
+      if (item === "git") {
+        setExplorerWidth((w) => Math.max(w, 320));
+        if (folderPath) {
+          git.refreshStatus(folderPath);
+        }
+      }
+    }
+  };
+
+  const handleOpenActivityItem = (item: ActivityRailItem) => {
+    if (item === "agent") {
+      setShowDockedAgentPanel(true);
+      return;
+    }
+    if (item === "terminal") {
+      setShowBottomPanel(true);
+      setActiveBottomTab("terminal");
+      return;
+    }
+    setActiveActivityItem(item);
+    setShowExplorer(true);
+    setWorkspaceMode("workbench");
+    setMainView("editor");
+    if (item === "git") {
+      setExplorerWidth((w) => Math.max(w, 320));
+      if (folderPath) {
+        git.refreshStatus(folderPath);
+      }
     }
   };
 
@@ -1285,7 +1374,7 @@ export default function IDEApp() {
   const [consoleHeight, setConsoleHeight] = useState(120);
 
   const [logs, setLogs] = useState<string[]>([
-    "[SYSTEM] Echo Nullity Desktop IDE Engine Initialized.",
+    "[SYSTEM] NEXUS Workbench Initialized.",
     "[ELECTRON] Context Bridge Connected.",
     "[DEMO] Auto-loaded workspace: demo-workspaces/ai_cart_project",
     "[ENGINE] Python analyze.py loaded. 4 Ghost lines detected in cart_calculator.py.",
@@ -2112,11 +2201,7 @@ export default function IDEApp() {
 
   // Open File Handler
   const handleOpenFile = async (file: FileNode | any) => {
-    console.log("[OPEN-FILE] received:", file);
-    console.log("[OPEN-FILE] typeof:", typeof file);
-
     if (!file) {
-      console.log("[OPEN-FILE] Invalid file payload");
       return;
     }
 
@@ -2130,10 +2215,8 @@ export default function IDEApp() {
     }
 
     const filePath = typeof targetPath === "string" ? targetPath.trim() : "";
-    console.log("[OPEN-FILE] path:", filePath);
-
     if (!filePath) {
-      console.error("[OPEN-FILE] Missing file path:", file);
+      console.warn("[OPEN-FILE] Missing or empty file path, ignoring payload:", file);
       return;
     }
 
@@ -3831,25 +3914,31 @@ export default function IDEApp() {
   };
 
   const renderTree = (node: FileNode, level = 0) => {
-    const isExp = expandedFolders[node.path];
+    if (!node || typeof node !== "object") return null;
+    const nodePath = node.path || node.name || `node-${level}`;
+    const isExp = expandedFolders[nodePath];
     return (
-      <div key={node.path} style={{ paddingLeft: `${level * 10}px` }}>
+      <div key={nodePath} style={{ paddingLeft: `${level * 10}px` }}>
         {node.isDirectory ? (
           <div>
             <button
-              onClick={() => toggleFolder(node.path)}
+              onClick={() => toggleFolder(nodePath)}
               className="w-full py-1 px-2 flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white hover:bg-zinc-900/60 rounded font-mono text-left"
             >
               {isExp ? <ChevronDown className="w-3.5 h-3.5 text-cyan-400" /> : <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />}
-              <span className="font-semibold text-zinc-300">{node.name}</span>
+              <span className="font-semibold text-zinc-300">{node.name || "Folder"}</span>
             </button>
-            {isExp && node.children && (
-              <div>{node.children.map((child) => renderTree(child, level + 1))}</div>
+            {isExp && Array.isArray(node.children) && (
+              <div>{node.children.filter(Boolean).map((child) => renderTree(child, level + 1))}</div>
             )}
           </div>
         ) : (
           <button
-            onClick={() => handleOpenFile(node)}
+            onClick={() => {
+              if (node && (node.path || node.name)) {
+                handleOpenFile(node);
+              }
+            }}
             className={`w-full py-1 px-2 flex items-center gap-1.5 text-xs font-mono text-left rounded transition-colors ${
               activeTabPath === node.path
                 ? "bg-cyan-950/60 text-cyan-300 border border-cyan-500/40 font-bold"
@@ -3857,7 +3946,7 @@ export default function IDEApp() {
             }`}
           >
             <FileText className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="truncate">{node.name}</span>
+            <span className="truncate">{node.name || "file"}</span>
           </button>
         )}
       </div>
@@ -3882,10 +3971,10 @@ return (
           <div className="flex items-center gap-2 pr-2 border-r border-[#1a1a24]">
             <span className="w-2 h-2 rounded-full bg-cyan-400 shrink-0" />
             <span className="font-heading font-bold text-xs text-white tracking-tight whitespace-nowrap">
-              Echo Nullity
+              NEXUS
             </span>
             <span className="px-2 py-0.5 rounded bg-[#12121c] border border-[#20202e] text-zinc-300 text-[10.5px] font-mono">
-              {folderPath ? folderPath.split('/').pop() : "Echo Nullity"}
+              {folderPath ? folderPath.split('/').pop() : "NEXUS"}
             </span>
           </div>
 
@@ -3908,7 +3997,7 @@ return (
           <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-[#0c0c12] border border-[#1a1a24] text-xs max-w-xl truncate">
             <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />
             <span className="text-zinc-300 font-medium truncate">
-              {activeTab ? activeTab.name : "Echo Nullity Workbench"}
+              {activeTab ? activeTab.name : "NEXUS Workbench"}
             </span>
             {activeTaskPrompt && (
               <span className="text-zinc-500 text-[10.5px] truncate">
@@ -3934,6 +4023,7 @@ return (
           {/* Codex-Style Upper-Right AI Control */}
           <div className="relative shrink-0">
             <button
+              ref={aiControlTriggerRef}
               onClick={() => setShowCodexAiControl((prev) => !prev)}
               className={`px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 transition-all cursor-pointer ${
                 showCodexAiControl
@@ -3949,6 +4039,7 @@ return (
             <CodexAIControlPopover
               isOpen={showCodexAiControl}
               onClose={() => setShowCodexAiControl(false)}
+              triggerRef={aiControlTriggerRef}
               activeProvider="gemini"
               activeModel="gemini-1.5-flash"
               onSelectModel={(pId, mId) => {
@@ -3979,6 +4070,7 @@ return (
           {/* More Menu Dropdown (⋯) */}
           <div className="relative shrink-0">
             <button
+              ref={moreMenuTriggerRef}
               onClick={() => setMoreMenuOpen((prev) => !prev)}
               className="min-h-[28px] px-2 py-1 rounded-lg bg-[#121216] hover:bg-[#1c1c24] border border-[#24242e] text-zinc-300 text-xs font-mono flex items-center gap-1 cursor-pointer"
               title="More Options"
@@ -3987,7 +4079,10 @@ return (
             </button>
 
             {moreMenuOpen && (
-              <div className="absolute top-full right-0 mt-1 w-56 bg-[#0a0a0d] border border-[#1f1f24] rounded-xl shadow-2xl z-50 p-1.5 space-y-1 font-mono text-xs animate-fade-in">
+              <div 
+                ref={moreMenuRef}
+                className="absolute top-full right-0 mt-1 w-56 bg-[#0a0a0d] border border-[#1f1f24] rounded-xl shadow-2xl z-50 p-1.5 space-y-1 font-mono text-xs animate-fade-in"
+              >
                 <button
                   onClick={() => {
                     handleRunPythonDebugger();
@@ -4122,6 +4217,9 @@ return (
             onStageAll={() => git.stageAllFiles()}
             onUnstageAll={() => git.unstageAllFiles()}
             onCommit={(msg) => git.commitChanges(msg)}
+            onCommitAndPush={(msg) => git.commitAndPushChanges(msg)}
+            onPush={(remote, branch) => git.pushChanges(remote, branch)}
+            onSuggestMessage={() => git.suggestCommitMessage()}
             onCheckoutBranch={(b) => git.checkoutBranch(b)}
             onCreateBranch={(b) => git.createAndCheckoutBranch(b)}
             onDiscardFile={(f) => git.discardFile(f)}
@@ -4174,7 +4272,7 @@ return (
         
         {/* Persistent Codex Left Sidebar */}
         <CodexSidebar
-          currentProjectName={folderPath ? folderPath.split("/").pop() || "Echo Nullity" : "Echo Nullity"}
+          currentProjectName={folderPath ? folderPath.split("/").pop() || "NEXUS" : "NEXUS"}
           recentSessions={snapshotHook.snapshots || []}
           onNewTask={() => {
             setWorkspaceMode("home");
@@ -4187,37 +4285,35 @@ return (
           }}
           onOpenFolder={handleOpenFolder}
           activeItem={activeActivityItem}
-          onSelectItem={(item) => {
-            handleSelectActivityRailItem(item);
-            if (item === "explorer") {
-              setMainView("editor");
-              setWorkspaceMode("workbench");
-            }
-          }}
+          onSelectItem={handleOpenActivityItem}
         />
 
         {workspaceMode === "home" ? (
           <TaskHome
             workspacePath={folderPath || "demo-workspaces/ai_cart_project"}
             onStartTask={(promptText) => {
-              setActiveTaskPrompt(promptText);
-              setWorkspaceMode("workbench");
-              setShowDockedAgentPanel(true);
-              addLog(`[TASK] Started AI task: ${promptText}`);
+              ensureApiKeyConfigured(() => {
+                setActiveTaskPrompt(promptText);
+                setWorkspaceMode("workbench");
+                setShowDockedAgentPanel(true);
+                addLog(`[TASK] Started AI task: ${promptText}`);
+              }, promptText);
             }}
             onContinueSession={async (sessionId, userGoal) => {
               const restoredPrompt = userGoal || "Resumed Continuum Session Task";
-              setActiveTaskPrompt(restoredPrompt);
-              setWorkspaceMode("workbench");
-              setShowDockedAgentPanel(true);
-              if (typeof window !== "undefined" && (window as any).electronAPI?.continuum?.resumeSession) {
-                try {
-                  await (window as any).electronAPI.continuum.resumeSession(sessionId, folderPath || "");
-                  addLog(`[CONTINUUM] Resumed session ${sessionId}`);
-                } catch (e) {
-                  console.error("[IDE] Resume session error:", e);
+              ensureApiKeyConfigured(async () => {
+                setActiveTaskPrompt(restoredPrompt);
+                setWorkspaceMode("workbench");
+                setShowDockedAgentPanel(true);
+                if (typeof window !== "undefined" && (window as any).electronAPI?.continuum?.resumeSession) {
+                  try {
+                    await (window as any).electronAPI.continuum.resumeSession(sessionId, folderPath || "");
+                    addLog(`[CONTINUUM] Resumed session ${sessionId}`);
+                  } catch (e) {
+                    console.error("[IDE] Resume session error:", e);
+                  }
                 }
-              }
+              }, restoredPrompt);
             }}
             onOpenFolder={handleOpenFolder}
             gitBranch={git.currentBranch || "main"}
@@ -4229,113 +4325,118 @@ return (
         {/* Left Sidebar: Persistent Workspace Tool Surface */}
         {showExplorer && (
           <div ref={explorerPanelRef} style={{ width: `${explorerWidth}px`, flexShrink: 0 }} className="bg-[#09090d] border-r border-[#161620] flex flex-col justify-between shrink-0 select-none font-mono text-xs overflow-hidden">
-            {/* Sidebar Header */}
-            <div className="p-2.5 border-b border-[#161620] flex items-center justify-between font-mono text-xs bg-[#0c0c12]">
-              <span className="text-zinc-300 font-bold uppercase tracking-wider text-[10px]">
-                {activeActivityItem === "search"
-                  ? "Search Workspace"
-                  : activeActivityItem === "git"
-                  ? "Source Control"
-                  : activeActivityItem === "sessions"
-                  ? "Continuum Sessions"
-                  : activeActivityItem === "verification"
-                  ? "Patch Safety Firewall"
-                  : "Explorer"}
-              </span>
-              <span className="text-cyan-400 text-[9.5px]">NEXUS</span>
-            </div>
+            {activeActivityItem === "git" ? (
+              <SourceControlPanel
+                isRepo={git.isRepo}
+                currentBranch={git.currentBranch}
+                branches={git.branches}
+                staged={git.staged}
+                unstaged={git.unstaged}
+                untracked={git.untracked}
+                lastCommit={git.lastCommit}
+                loading={git.loading}
+                statusMessage={git.statusMessage}
+                errorMessage={git.errorMessage}
+                onRefresh={() => git.refreshStatus(folderPath || "")}
+                onStageFile={(f) => git.stageFile(f)}
+                onUnstageFile={(f) => git.unstageFile(f)}
+                onStageAll={() => git.stageAllFiles()}
+                onUnstageAll={() => git.unstageAllFiles()}
+                onCommit={(msg) => git.commitChanges(msg)}
+                onCommitAndPush={(msg) => git.commitAndPushChanges(msg)}
+                onPush={(remote, branch) => git.pushChanges(remote, branch)}
+                onSuggestMessage={() => git.suggestCommitMessage()}
+                onCheckoutBranch={(b) => git.checkoutBranch(b)}
+                onCreateBranch={(b) => git.createAndCheckoutBranch(b)}
+                onDiscardFile={(f) => git.discardFile(f)}
+                onOpenFileDiff={handleOpenGitDiff}
+              />
+            ) : (
+              <>
+                {/* Sidebar Header */}
+                <div className="p-2.5 border-b border-[#161620] flex items-center justify-between font-mono text-xs bg-[#0c0c12]">
+                  <span className="text-zinc-300 font-bold uppercase tracking-wider text-[10px]">
+                    {activeActivityItem === "search"
+                      ? "Search Workspace"
+                      : activeActivityItem === "sessions"
+                      ? "Continuum Sessions"
+                      : activeActivityItem === "verification"
+                      ? "Patch Safety Firewall"
+                      : "Explorer"}
+                  </span>
+                  <span className="text-cyan-400 text-[9.5px]">NEXUS</span>
+                </div>
 
-            {/* Sidebar Tool Body */}
-            <div className="flex-1 p-2 overflow-y-auto space-y-1">
-              {activeActivityItem === "search" ? (
-                <SearchPanel
-                  query={search.query}
-                  setQuery={search.setQuery}
-                  replaceText={search.replaceText}
-                  setReplaceText={search.setReplaceText}
-                  isRegex={search.isRegex}
-                  setIsRegex={search.setIsRegex}
-                  isCaseSensitive={search.isCaseSensitive}
-                  setIsCaseSensitive={search.setIsCaseSensitive}
-                  isWholeWord={search.isWholeWord}
-                  setIsWholeWord={search.setIsWholeWord}
-                  includeHidden={search.includeHidden}
-                  setIncludeHidden={search.setIncludeHidden}
-                  results={search.results}
-                  groupedResults={search.groupedResults}
-                  totalFiles={search.totalFiles}
-                  totalMatches={search.totalMatches}
-                  selectedResultIndex={search.selectedResultIndex}
-                  loading={search.loading}
-                  error={search.error}
-                  durationMs={search.durationMs}
-                  onSelectMatch={(m, idx) => {
-                    handleSelectSearchMatch(m, idx || 0);
-                  }}
-                  onReplaceSingle={(m) => search.replaceSingle(m)}
-                  onReplaceAllInFile={(f) => search.replaceAllInFile(f)}
-                  onReplaceAllInWorkspace={() => search.replaceAllInWorkspace()}
-                  onNavigateResult={(dir) => search.navigateResult(dir)}
-                />
-              ) : activeActivityItem === "git" ? (
-                <SourceControlPanel
-                  isRepo={git.isRepo}
-                  currentBranch={git.currentBranch}
-                  branches={git.branches}
-                  staged={git.staged}
-                  unstaged={git.unstaged}
-                  untracked={git.untracked}
-                  lastCommit={git.lastCommit}
-                  loading={git.loading}
-                  statusMessage={git.statusMessage}
-                  errorMessage={git.errorMessage}
-                  onRefresh={() => git.refreshStatus(folderPath || "")}
-                  onStageFile={(f) => git.stageFile(f)}
-                  onUnstageFile={(f) => git.unstageFile(f)}
-                  onStageAll={() => git.stageAllFiles()}
-                  onUnstageAll={() => git.unstageAllFiles()}
-                  onCommit={(msg) => git.commitChanges(msg)}
-                  onCheckoutBranch={(b) => git.checkoutBranch(b)}
-                  onCreateBranch={(b) => git.createAndCheckoutBranch(b)}
-                  onDiscardFile={(f) => git.discardFile(f)}
-                  onOpenFileDiff={handleOpenGitDiff}
-                />
-              ) : activeActivityItem === "sessions" ? (
-                <CodexSidebar
-                  currentProjectName={folderPath ? folderPath.split("/").pop() || "Echo Nullity" : "Echo Nullity"}
-                  recentSessions={snapshotHook.snapshots || []}
-                  onNewTask={() => {
-                    setWorkspaceMode("home");
-                  }}
-                  onSelectSession={(sessId, userGoal) => {
-                    handleResumeSession(sessId);
-                  }}
-                  onOpenFolder={handleOpenFolder}
-                  activeItem={activeActivityItem}
-                  onSelectItem={handleSelectActivityRailItem}
-                />
-              ) : activeActivityItem === "verification" ? (
-                <EngineeringTimeline
-                  activeSessionId={activeSessionId}
-                  workspacePath={folderPath || ""}
-                  activeTask={activeTaskPrompt || undefined}
-                  onSelectAgentPanel={() => setShowDockedAgentPanel(true)}
-                  onSelectFile={(filePath) => {
-                    if (filePath) {
-                      const fileName = filePath.split("/").pop() || filePath;
-                      handleOpenFile({ name: fileName, path: filePath, isDirectory: false });
-                    }
-                  }}
-                />
-              ) : (
-                fileTree && renderTree(fileTree)
-              )}
-            </div>
+                {/* Sidebar Tool Body */}
+                <div className="flex-1 p-2 overflow-y-auto space-y-1">
+                  {activeActivityItem === "search" ? (
+                    <SearchPanel
+                      query={search.query}
+                      setQuery={search.setQuery}
+                      replaceText={search.replaceText}
+                      setReplaceText={search.setReplaceText}
+                      isRegex={search.isRegex}
+                      setIsRegex={search.setIsRegex}
+                      isCaseSensitive={search.isCaseSensitive}
+                      setIsCaseSensitive={search.setIsCaseSensitive}
+                      isWholeWord={search.isWholeWord}
+                      setIsWholeWord={search.setIsWholeWord}
+                      includeHidden={search.includeHidden}
+                      setIncludeHidden={search.setIncludeHidden}
+                      results={search.results}
+                      groupedResults={search.groupedResults}
+                      totalFiles={search.totalFiles}
+                      totalMatches={search.totalMatches}
+                      selectedResultIndex={search.selectedResultIndex}
+                      loading={search.loading}
+                      error={search.error}
+                      durationMs={search.durationMs}
+                      onSelectMatch={(m, idx) => {
+                        handleSelectSearchMatch(m, idx || 0);
+                      }}
+                      onReplaceSingle={(m) => search.replaceSingle(m)}
+                      onReplaceAllInFile={(f) => search.replaceAllInFile(f)}
+                      onReplaceAllInWorkspace={() => search.replaceAllInWorkspace()}
+                      onNavigateResult={(dir) => search.navigateResult(dir)}
+                    />
+                  ) : activeActivityItem === "sessions" ? (
+                    <CodexSidebar
+                      currentProjectName={folderPath ? folderPath.split("/").pop() || "NEXUS" : "NEXUS"}
+                      recentSessions={snapshotHook.snapshots || []}
+                      onNewTask={() => {
+                        setWorkspaceMode("home");
+                      }}
+                      onSelectSession={(sessId, userGoal) => {
+                        handleResumeSession(sessId);
+                      }}
+                      onOpenFolder={handleOpenFolder}
+                      activeItem={activeActivityItem}
+                      onSelectItem={handleOpenActivityItem}
+                    />
+                  ) : activeActivityItem === "verification" ? (
+                    <EngineeringTimeline
+                      activeSessionId={activeSessionId}
+                      workspacePath={folderPath || ""}
+                      activeTask={activeTaskPrompt || undefined}
+                      onSelectAgentPanel={() => setShowDockedAgentPanel(true)}
+                      onSelectFile={(filePath) => {
+                        if (filePath) {
+                          const fileName = filePath.split("/").pop() || filePath;
+                          handleOpenFile({ name: fileName, path: filePath, isDirectory: false });
+                        }
+                      }}
+                    />
+                  ) : (
+                    fileTree && renderTree(fileTree)
+                  )}
+                </div>
 
-            <div className="p-2.5 bg-[#0c0c12] border-t border-[#161620] font-mono text-[9.5px] text-zinc-500 flex items-center justify-between">
-              <span>AST Engine Active</span>
-              <Cpu className="w-3 h-3 text-cyan-400" />
-            </div>
+                <div className="p-2.5 bg-[#0c0c12] border-t border-[#161620] font-mono text-[9.5px] text-zinc-500 flex items-center justify-between">
+                  <span>AST Engine Active</span>
+                  <Cpu className="w-3 h-3 text-cyan-400" />
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -4448,6 +4549,9 @@ return (
                   onStageAll={() => git.stageAllFiles()}
                   onUnstageAll={() => git.unstageAllFiles()}
                   onCommit={(msg) => git.commitChanges(msg)}
+                  onCommitAndPush={(msg) => git.commitAndPushChanges(msg)}
+                  onPush={(remote, branch) => git.pushChanges(remote, branch)}
+                  onSuggestMessage={() => git.suggestCommitMessage()}
                   onCheckoutBranch={(b) => git.checkoutBranch(b)}
                   onCreateBranch={(b) => git.createAndCheckoutBranch(b)}
                   onDiscardFile={(f) => git.discardFile(f)}
@@ -5394,6 +5498,7 @@ return (
             onApplyAllApproved={handleApplyAllAgentApproved}
             runningCommandOutput={agentRunningCommandOutput}
             onSelectVerificationTab={() => setActiveActivityItem("verification")}
+            onRequireApiKey={(pendingAction) => ensureApiKeyConfigured(pendingAction)}
           />
         )}
           </>
@@ -5873,6 +5978,15 @@ return (
         onRestore={handleRestoreSession}
         onDiscard={handleDiscardRecovery}
         onLater={() => setRecoveryDialogOpen(false)}
+      />
+
+      {/* Lazy API Key Required Modal */}
+      <ApiKeyRequiredModal
+        isOpen={showApiKeyRequiredModal}
+        onClose={handleApiKeyModalClose}
+        onSuccess={handleApiKeyModalSuccess}
+        providerName="Gemini"
+        providerId="gemini"
       />
 
     </div>

@@ -1,5 +1,6 @@
 {
   "name": "echo-nullity",
+  "productName": "NEXUS",
   "version": "1.0.0",
   "private": true,
   "main": "desktop/electron/main.js",

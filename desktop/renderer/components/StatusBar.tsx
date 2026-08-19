@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { GitBranch, ShieldCheck, ChevronDown, Bot, Key, X, Loader2, Layers } from "lucide-react";
+import { useOutsideClick } from "../hooks/useOutsideClick";
 
 interface StatusBarProps {
   gitBranch?: string;
@@ -34,6 +35,18 @@ export default function StatusBar({
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [keyValidationMsg, setKeyValidationMsg] = useState("");
   const [validatingKey, setValidatingKey] = useState(false);
+
+  const statusModelTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const statusModelDropdownRef = useOutsideClick<HTMLDivElement>({
+    isOpen: showModelDropdown,
+    onClose: () => setShowModelDropdown(false),
+    triggerRef: statusModelTriggerRef,
+  });
+
+  const statusKeyModalRef = useOutsideClick<HTMLDivElement>({
+    isOpen: showKeyModal,
+    onClose: () => setShowKeyModal(false),
+  });
 
   const fetchAiConfig = async () => {
     if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getConfig) {
@@ -178,6 +191,7 @@ export default function StatusBar({
         {/* Global AI Model Selector */}
         <div className="relative">
           <button
+            ref={statusModelTriggerRef}
             onClick={() => setShowModelDropdown(!showModelDropdown)}
             className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#0f0f16] hover:bg-cyan-950/60 border border-[#20202e] hover:border-cyan-500/40 text-cyan-300 transition-colors cursor-pointer font-bold text-[10.5px]"
             title="Global AI Model Selector"
@@ -189,7 +203,10 @@ export default function StatusBar({
 
           {/* Model Selector Dropdown */}
           {showModelDropdown && (
-            <div className="absolute right-0 bottom-7 w-64 bg-[#0c0c14] border border-[#262636] rounded-xl shadow-2xl z-50 p-2 space-y-2 text-xs font-mono text-zinc-200">
+            <div 
+              ref={statusModelDropdownRef}
+              className="absolute right-0 bottom-7 w-64 bg-[#0c0c14] border border-[#262636] rounded-xl shadow-2xl z-50 p-2 space-y-2 text-xs font-mono text-zinc-200"
+            >
               <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 border-b border-[#1c1c2a] pb-1 flex items-center justify-between">
                 <span>Select AI Provider</span>
                 <button onClick={() => setShowModelDropdown(false)} className="text-zinc-500 hover:text-white">
@@ -271,7 +288,10 @@ export default function StatusBar({
 
       {/* API Key Modal */}
       {showKeyModal && (
-        <div className="fixed bottom-8 right-3 w-80 p-3 bg-[#0c0c14] border border-cyan-500/40 rounded-xl space-y-2 text-xs font-mono shadow-2xl z-50">
+        <div 
+          ref={statusKeyModalRef}
+          className="fixed bottom-8 right-3 w-80 p-3 bg-[#0c0c14] border border-cyan-500/40 rounded-xl space-y-2 text-xs font-mono shadow-2xl z-50"
+        >
           <div className="flex items-center justify-between border-b border-[#1f1f2a] pb-1.5">
             <div className="font-bold text-cyan-300 flex items-center gap-1.5 text-[11px]">
               <Key className="w-3.5 h-3.5 text-cyan-400" />

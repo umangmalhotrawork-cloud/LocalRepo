@@ -134,7 +134,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: 'Echo Nullity — Desktop IDE',
+    title: 'NEXUS — Autonomous Software Engineering',
     backgroundColor: '#050505',
     titleBarStyle: 'hiddenInset',
     webPreferences: {

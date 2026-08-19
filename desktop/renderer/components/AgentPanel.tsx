@@ -27,6 +27,7 @@ import {
   Code2,
   FileText,
 } from "lucide-react";
+import { useOutsideClick } from "../hooks/useOutsideClick";
 
 export type ProposedEdit = {
   filePath: string;
@@ -104,6 +105,7 @@ interface AgentPanelProps {
   runningCommandOutput?: string;
   isDocked?: boolean;
   onSelectVerificationTab?: () => void;
+  onRequireApiKey?: (pendingAction: () => void) => void;
 }
 
 const SHORTCUT_ACTIONS = [
@@ -129,6 +131,7 @@ export default function AgentPanel({
   runningCommandOutput,
   isDocked = false,
   onSelectVerificationTab,
+  onRequireApiKey,
 }: AgentPanelProps) {
   const [taskInput, setTaskInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -144,6 +147,12 @@ export default function AgentPanel({
   const [showContinuumMenu, setShowContinuumMenu] = useState(false);
   const [aiConfig, setAiConfig] = useState<any>(null);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const agentModelTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const agentModelDropdownRef = useOutsideClick<HTMLDivElement>({
+    isOpen: showModelDropdown,
+    onClose: () => setShowModelDropdown(false),
+    triggerRef: agentModelTriggerRef,
+  });
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [keyValidationMsg, setKeyValidationMsg] = useState("");
@@ -416,6 +425,23 @@ export default function AgentPanel({
     const activeTask = taskToRun || taskInput;
     if (!activeTask || !activeTask.trim()) return;
 
+    // Check if active provider API key is configured
+    if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getConfig) {
+      try {
+        const config = await (window as any).electronAPI.ai.getConfig();
+        const activeProvider = config?.activeProvider || "gemini";
+        const providerConfig = config?.providers?.find((p: any) => p.id === activeProvider);
+        const isConfigured = Boolean(providerConfig?.isConfigured && providerConfig?.status === "CONNECTED");
+
+        if (!isConfigured) {
+          if (onRequireApiKey) {
+            onRequireApiKey(() => handleRunAgent(activeTask));
+            return;
+          }
+        }
+      } catch (e) {}
+    }
+
     // Reset autonomous execution state for clean run
     setAutonomousState({
       stage: "RUNNING",
@@ -582,6 +608,7 @@ export default function AgentPanel({
             {/* Model Selector Dropdown Button */}
             <div className="relative">
               <button
+                ref={agentModelTriggerRef}
                 onClick={() => setShowModelDropdown(!showModelDropdown)}
                 className="px-2 py-0.5 rounded-md bg-[#12121a] border border-cyan-500/30 hover:border-cyan-500/60 text-cyan-300 hover:bg-cyan-950/40 text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
                 title="Select Active AI Model"
@@ -592,7 +619,10 @@ export default function AgentPanel({
 
               {/* Model Dropdown Menu */}
               {showModelDropdown && (
-                <div className="absolute right-0 top-7 w-60 bg-[#0c0c14] border border-[#242436] rounded-xl shadow-2xl z-50 p-2 space-y-1.5 text-xs font-mono text-zinc-200">
+                <div 
+                  ref={agentModelDropdownRef}
+                  className="absolute right-0 top-7 w-60 bg-[#0c0c14] border border-[#242436] rounded-xl shadow-2xl z-50 p-2 space-y-1.5 text-xs font-mono text-zinc-200"
+                >
                   <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 border-b border-[#1c1c28] pb-1 flex items-center justify-between">
                     <span>AI Execution Model</span>
                     <button onClick={() => setShowModelDropdown(false)} className="text-zinc-500 hover:text-white">
@@ -975,7 +1005,7 @@ export default function AgentPanel({
             value={taskInput}
             onChange={(e) => setTaskInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 handleRunAgent();
               }

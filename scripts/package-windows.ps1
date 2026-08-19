@@ -1,4 +1,4 @@
-Write-Host "=== Building Echo Nullity for Windows (NSIS & Portable ZIP) ==="
+Write-Host "=== Building NEXUS for Windows (NSIS & Portable ZIP) ==="
 
 Write-Host "[1/3] Running next build..."
 npm run build

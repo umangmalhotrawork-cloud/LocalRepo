@@ -6,6 +6,7 @@ import {
   Sidebar, Terminal, FileText, X, Zap, ShieldAlert, Camera, History,
   Network, Copy, Compass
 } from "lucide-react";
+import { useOutsideClick } from "../hooks/useOutsideClick";
 
 interface CommandItem {
   id: string;
@@ -90,6 +91,10 @@ export default function CommandPalette({
   onSelectTab,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
+  const paletteRef = useOutsideClick<HTMLDivElement>({
+    isOpen,
+    onClose,
+  });
 
   useEffect(() => {
     if (isOpen) setQuery("");
@@ -332,8 +337,18 @@ export default function CommandPalette({
   );
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-start justify-center pt-20 p-4">
-      <div className="w-full max-w-xl bg-[#0a0a0a] border border-cyan-500/40 rounded-2xl shadow-2xl overflow-hidden font-sans">
+    <div 
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-start justify-center pt-20 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div 
+        ref={paletteRef}
+        className="w-full max-w-xl bg-[#0a0a0a] border border-cyan-500/40 rounded-2xl shadow-2xl overflow-hidden font-sans"
+      >
         
         {/* Search Header */}
         <div className="p-4 border-b border-[#1f1f1f] flex items-center gap-3 bg-[#050505]">

@@ -24,7 +24,7 @@ async function exportWorkspaceReport(payload, browserWindow) {
     fs.mkdirSync(assetsDirPath, { recursive: true });
 
     // 1. Write report.html
-    const htmlContent = payload.htmlContent || '<html><body>Echo Nullity Report</body></html>';
+    const htmlContent = payload.htmlContent || '<html><body>NEXUS Engineering Report</body></html>';
     fs.writeFileSync(path.join(reportDirPath, 'report.html'), htmlContent, 'utf-8');
 
     // 2. Write findings.json

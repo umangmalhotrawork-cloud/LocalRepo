@@ -5,10 +5,12 @@ import {
   Bot, Cpu, ShieldCheck, Zap, Layers, Wrench, CheckCircle2, 
   Settings, Key, X, ChevronRight, Activity, Database
 } from "lucide-react";
+import { useOutsideClick } from "../hooks/useOutsideClick";
 
 interface CodexAIControlPopoverProps {
   isOpen: boolean;
   onClose: () => void;
+  triggerRef?: React.RefObject<HTMLElement | null>;
   activeProvider: string;
   activeModel: string;
   onSelectModel: (providerId: string, modelId?: string) => void;
@@ -20,6 +22,7 @@ interface CodexAIControlPopoverProps {
 export default function CodexAIControlPopover({
   isOpen,
   onClose,
+  triggerRef,
   activeProvider = "gemini",
   activeModel = "gemini-1.5-flash",
   onSelectModel,
@@ -27,10 +30,16 @@ export default function CodexAIControlPopover({
   agentStatus = "Idle",
   continuumSynced = true,
 }: CodexAIControlPopoverProps) {
+  const popoverRef = useOutsideClick<HTMLDivElement>({
+    isOpen,
+    onClose,
+    triggerRef,
+  });
+
   if (!isOpen) return null;
 
   return (
-    <div className="absolute top-11 right-3 w-80 bg-[#0a0a0f] border border-[#1f1f2e] rounded-2xl shadow-2xl z-50 p-3 space-y-3 font-mono text-xs text-zinc-200 animate-fade-in select-none">
+    <div ref={popoverRef} className="absolute top-11 right-3 w-80 bg-[#0a0a0f] border border-[#1f1f2e] rounded-2xl shadow-2xl z-50 p-3 space-y-3 font-mono text-xs text-zinc-200 animate-fade-in select-none">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[#1c1c28] pb-2">
         <div className="flex items-center gap-2 font-bold text-cyan-300 text-xs">

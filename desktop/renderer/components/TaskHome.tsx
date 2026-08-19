@@ -116,7 +116,7 @@ export default function TaskHome({
     return `${diffDays}d ago`;
   };
 
-  const workspaceName = workspacePath ? workspacePath.split("/").pop() || "Echo Nullity" : "Echo Nullity";
+  const workspaceName = workspacePath ? workspacePath.split("/").pop() || "NEXUS" : "NEXUS";
 
   return (
     <div className="flex-1 w-full h-full bg-[#07070a] text-zinc-100 flex flex-col items-center justify-between p-6 overflow-y-auto font-sans select-none relative">
@@ -129,15 +129,15 @@ export default function TaskHome({
         <div className="text-center space-y-3">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-500/30 text-cyan-400 text-xs font-mono">
             <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Echo Nullity Coding Agent Engine</span>
+            <span>NEXUS Coding Agent Engine</span>
           </div>
 
           <h1 className="text-4xl font-heading font-extrabold tracking-tight text-white">
-            What should we build in Echo Nullity?
+            What should we build in NEXUS?
           </h1>
 
           <p className="text-sm text-zinc-400 max-w-lg mx-auto font-mono text-[12.5px]">
-            Describe a goal, bug, or refactoring. Echo Nullity will inspect dependencies, plan execution, and verify behavior safely.
+            Describe a goal, bug, or refactoring. NEXUS will inspect dependencies, plan execution, and verify behavior safely.
           </p>
         </div>
 

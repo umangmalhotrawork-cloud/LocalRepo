@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-echo "=== Building Echo Nullity for Linux (AppImage & tar.gz) ==="
+echo "=== Building NEXUS for Linux (AppImage & tar.gz) ==="
 
 echo "[1/3] Running next build..."
 npm run build

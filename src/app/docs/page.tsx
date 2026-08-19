@@ -87,7 +87,7 @@ export default function DocsPage() {
                   <span>1. Setup &amp; Prerequisites</span>
                 </h2>
                 <p className="text-zinc-400 text-xs font-sans leading-relaxed">
-                  Echo Nullity is an offline, local-first Electron + Next.js desktop application. It requires zero cloud infrastructure.
+                  NEXUS is an offline, local-first Electron + Next.js desktop application. It requires zero cloud infrastructure.
                 </p>
 
                 <div className="space-y-2">

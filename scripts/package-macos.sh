@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-echo "=== Building Echo Nullity for macOS (DMG & App Bundle) ==="
+echo "=== Building NEXUS for macOS (DMG & App Bundle) ==="
 
 # 1. Build production web bundle
 echo "[1/4] Running next build..."
@@ -20,11 +20,11 @@ cat << 'INFO_PLIST' > dist/mac/Info.plist
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>Echo Nullity</string>
+    <string>NEXUS</string>
     <key>CFBundleIdentifier</key>
     <string>com.echonullity.ide</string>
     <key>CFBundleName</key>
-    <string>Echo Nullity</string>
+    <string>NEXUS</string>
     <key>CFBundleVersion</key>
     <string>1.0.0</string>
     <key>CFBundleShortVersionString</key>
