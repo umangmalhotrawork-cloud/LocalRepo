@@ -4,6 +4,8 @@ const { runAgentTask, agentManager } = require('../electron/agentManager');
 
 async function main() {
   console.log("[TEST] Starting AI Agent Mode Test Suite...");
+  const origKey = process.env.GEMINI_API_KEY;
+  delete process.env.GEMINI_API_KEY;
   const workspacePath = path.join(__dirname, '../../demo-workspaces/ai_cart_project');
 
   // 1. Task Planning & Step Generation
@@ -52,8 +54,6 @@ async function main() {
   }
 
   // 6. Verify Offline Fallback on Empty or Missing Key
-  const origKey = process.env.GEMINI_API_KEY;
-  delete process.env.GEMINI_API_KEY;
   const resOffline = await runAgentTask({
     task: "Fix all TypeScript errors",
     workspacePath,

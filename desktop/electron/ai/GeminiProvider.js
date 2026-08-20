@@ -126,7 +126,24 @@ class GeminiProvider extends AIProvider {
       ? '\nCRITICAL DIRECTIVE: This is a READ_ONLY analysis task. DO NOT generate code modifications or surgical patches. Return empty proposedEdits: [] for all steps.'
       : '';
 
-    const systemPrompt = `${contextPrefix}You are NEXUS Autonomous AI Agent powered by Gemini.
+    let systemPrompt;
+    if (intent === 'GENERAL_CHAT') {
+      systemPrompt = `${contextPrefix}You are NEXUS AI Assistant powered by Gemini.
+Respond conversationally, helpfully, and concisely to the user's message.
+DO NOT generate any code modifications or surgical patches.
+User Message: "${task}"
+
+Workspace files context:
+${fileSummaries}
+
+Format strictly as JSON:
+{
+  "summary": "<Conversational and helpful response>",
+  "taskIntent": "GENERAL_CHAT",
+  "steps": []
+}`;
+    } else {
+      systemPrompt = `${contextPrefix}You are NEXUS Autonomous AI Agent powered by Gemini.
 Analyze the workspace and task, then output a structured JSON plan with maximum ${maxSteps} steps.${readOnlyDirective}
 Task: "${task}"
 Active editor file: "${relativeTarget}". Treat it as the primary analysis target. All proposedEdits must target this file.
@@ -137,6 +154,7 @@ ${fileSummaries}
 Format strictly as JSON:
 {
   "summary": "<High level execution summary>",
+  "taskIntent": "${intent}",
   "steps": [
     {
       "id": "step-1",
@@ -153,6 +171,7 @@ Format strictly as JSON:
     }
   ]
 }`;
+    }
 
     const cleanModelName = selectedModel.replace(/^models\//, '');
     const requestBody = JSON.stringify({

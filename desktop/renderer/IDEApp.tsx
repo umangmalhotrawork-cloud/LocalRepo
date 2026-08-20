@@ -63,6 +63,7 @@ import CodexSidebar from "./components/CodexSidebar";
 import CodexBottomComposer from "./components/CodexBottomComposer";
 import ApiKeyRequiredModal from "./components/ApiKeyRequiredModal";
 import ContextualToolsDrawer, { ToolTab } from "./components/ContextualToolsDrawer";
+import CapabilityCenterPanel from "./components/CapabilityCenterPanel";
 import ActivityRail, { ActivityRailItem } from "./components/ActivityRail";
 import StatusBar from "./components/StatusBar";
 import BottomPanel, { BottomPanelTab } from "./components/BottomPanel";
@@ -196,6 +197,30 @@ declare global {
         exportCapsule: (payload: { snapshotId?: string; snapshot?: any; workspacePath?: string; exportMode?: 'INLINE' | 'REFERENCE_ONLY'; options?: any }) => Promise<{ success: boolean; capsuleId?: string; path?: string; capsuleMeta?: any; capsule?: any; error?: string }>;
         importCapsule: (payload: { capsulePath?: string; capsuleSerialized?: string; capsule?: any; workspacePath?: string }) => Promise<{ success: boolean; nextSnapshotId?: string; parentSessionId?: string; sequenceNumber?: number; contextText?: string; nextSnapshot?: any; capsuleMeta?: any; handoffContext?: any; error?: string }>;
         openCapsuleDialog: () => Promise<string | null>;
+      };
+      harness?: {
+        createThread?: (options: any) => Promise<any>;
+        getThread?: (threadId: string) => Promise<any>;
+        listThreads?: (filter?: any) => Promise<any>;
+        archiveThread?: (threadId: string) => Promise<any>;
+        startTurn?: (payload: any) => Promise<any>;
+        getTurn?: (turnId: string) => Promise<any>;
+        completeTurn?: (payload: any) => Promise<any>;
+        failTurn?: (payload: any) => Promise<any>;
+        cancelTurn?: (payload: any) => Promise<any>;
+        runTurn?: (payload: any) => Promise<any>;
+        approveAction?: (payload: any) => Promise<any>;
+        rejectAction?: (payload: any) => Promise<any>;
+        routeRequest?: (payload: any) => Promise<any>;
+        handleRequest?: (payload: any) => Promise<any>;
+        startItem?: (payload: any) => Promise<any>;
+        updateItem?: (payload: any) => Promise<any>;
+        completeItem?: (payload: any) => Promise<any>;
+        failItem?: (payload: any) => Promise<any>;
+        getEvents?: (filter?: any) => Promise<any>;
+        cancelSwarm?: (swarmId: string, reason?: string) => Promise<any>;
+        getSwarmStatus?: (swarmId: string) => Promise<any>;
+        onEvent?: (callback: (event: any) => void) => () => void;
       };
     };
   }
@@ -530,7 +555,7 @@ export default function IDEApp() {
     if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getConfig) {
       try {
         const config = await (window as any).electronAPI.ai.getConfig();
-        const activeProvider = targetProvider || config?.activeProvider || "gemini";
+        const activeProvider = targetProvider || aiActiveProvider || config?.activeProvider || "groq";
         setAiActiveProvider(activeProvider);
         if (config?.activeModel) setAiActiveModel(config.activeModel);
         const providerConfig = config?.providers?.find((p: any) => p.id === activeProvider);
@@ -552,8 +577,15 @@ export default function IDEApp() {
     return false;
   };
 
-  const handleApiKeyModalSuccess = () => {
+  const handleApiKeyModalSuccess = (configuredProviderId?: string) => {
     setShowApiKeyRequiredModal(false);
+    const targetProv = configuredProviderId || aiActiveProvider;
+    if (targetProv) {
+      setAiActiveProvider(targetProv);
+      if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.setConfig) {
+        (window as any).electronAPI.ai.setConfig(targetProv);
+      }
+    }
     const pending = pendingAiActionRef.current;
     pendingAiActionRef.current = null;
     pendingAiTaskPromptRef.current = null;
@@ -733,6 +765,7 @@ export default function IDEApp() {
   const [showDockedAgentPanel, setShowDockedAgentPanel] = useState<boolean>(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeContinuumSnapshot, setActiveContinuumSnapshot] = useState<any>(null);
+  const [newChatResetSignal, setNewChatResetSignal] = useState<number>(0);
 
   const handleResumeSession = async (sessionId: string) => {
     if (typeof window !== "undefined" && (window as any).electronAPI?.continuum?.resumeSession) {
@@ -811,6 +844,11 @@ export default function IDEApp() {
     if (item === "terminal") {
       setShowBottomPanel(true);
       setActiveBottomTab("terminal");
+      return;
+    }
+    if ((item as string) === "capabilities") {
+      setToolsDrawerTab("capabilities");
+      setToolsDrawerOpen(true);
       return;
     }
     setActiveActivityItem(item);
@@ -1379,7 +1417,7 @@ export default function IDEApp() {
       const fallbackEntry: HistoryEntry = {
         id: "surg-1786568000-cart-v1",
         timestamp: new Date().toISOString(),
-        file_path: currentTab?.path || "/Users/umangmalhotra/Documents/Nexus/demo-workspaces/ai_cart_project/src/cart_calculator.py",
+        file_path: currentTab?.path || "src/cart_calculator.py",
         operation_type: "APPLY_SURGERY",
         removed_lines: [9, 10, 11, 12],
         before_hash: "a1b2c3d4e5f67890",
@@ -4382,6 +4420,12 @@ return (
             onClosePanel={() => setToolsDrawerOpen(false)}
           />
         }
+        capabilitiesContent={
+          <CapabilityCenterPanel
+            workspacePath={folderPath || undefined}
+            onClose={() => setToolsDrawerOpen(false)}
+          />
+        }
       />
 
       {/* 2. Main Resizable Workspace Grid */}
@@ -4395,6 +4439,7 @@ return (
             setWorkspaceMode("home");
             setMainView("editor");
             setActiveTaskPrompt("");
+            setNewChatResetSignal((prev) => prev + 1);
           }}
           onSelectSession={(sessId, userGoal) => {
             handleResumeSession(sessId);
@@ -4408,16 +4453,22 @@ return (
         {workspaceMode === "home" ? (
           <TaskHome
             workspacePath={folderPath || "demo-workspaces/ai_cart_project"}
-            onStartTask={(promptText) => {
+            resetSignal={newChatResetSignal}
+            onStartTask={(promptText, providerId, modelId) => {
+              const targetProv = providerId || aiActiveProvider || "groq";
+              if (providerId) setAiActiveProvider(providerId);
+              if (modelId) setAiActiveModel(modelId);
               ensureApiKeyConfigured(() => {
                 setActiveTaskPrompt(promptText);
                 setWorkspaceMode("workbench");
                 setShowDockedAgentPanel(true);
                 addLog(`[TASK] Started AI task: ${promptText}`);
-              }, promptText);
+              }, promptText, targetProv);
             }}
-            onContinueSession={async (sessionId, userGoal) => {
+            onContinueSession={async (sessionId, userGoal, providerId) => {
               const restoredPrompt = userGoal || "Resumed Continuum Session Task";
+              const targetProv = providerId || aiActiveProvider || "groq";
+              if (providerId) setAiActiveProvider(providerId);
               ensureApiKeyConfigured(async () => {
                 setActiveTaskPrompt(restoredPrompt);
                 setWorkspaceMode("workbench");
@@ -4430,7 +4481,7 @@ return (
                     console.error("[IDE] Resume session error:", e);
                   }
                 }
-              }, restoredPrompt);
+              }, restoredPrompt, targetProv);
             }}
             onOpenFolder={handleOpenFolder}
             gitBranch={git.currentBranch || "main"}

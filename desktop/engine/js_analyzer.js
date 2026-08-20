@@ -1,6 +1,9 @@
 const fs = require('fs');
 const path = require('path');
-const ts = require('typescript');
+let ts = null;
+try {
+  ts = require('typescript');
+} catch (e) {}
 
 function analyzeJS(filePath, mode = 'analyze', sourceContent) {
   if (sourceContent === undefined && !fs.existsSync(filePath)) {

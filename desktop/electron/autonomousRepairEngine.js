@@ -129,6 +129,17 @@ class AutonomousRepairEngine {
 
     notify('AUTONOMOUS_STARTED', { taskPrompt, maxIterations });
 
+    if (isCancelled) {
+      this.activeRepairs.delete(repairId);
+      return {
+        repairId,
+        status: 'CANCELLED',
+        reason: 'USER_CANCELLED',
+        iterations: [],
+        completed: false,
+      };
+    }
+
     // Step 1: Detect test runner
     const detection = testRunnerDetector.detect(workspacePath);
     if (!detection.detected) {

@@ -11,10 +11,25 @@ const SECRET_PATTERNS = [
     type: "GEMINI_API_KEY",
     regex: /(?:GEMINI_API_KEY\s*[:=]\s*['"]?|AIza)[A-Za-z0-9_-]{10,50}['"]?/gi,
   },
+  // Groq API Key
+  {
+    type: "GROQ_API_KEY",
+    regex: /(?:GROQ_API_KEY\s*[:=]\s*['"]?|gsk_)[A-Za-z0-9_-]{15,60}['"]?/gi,
+  },
   // OpenAI API Key
   {
     type: "OPENAI_API_KEY",
     regex: /(?:OPENAI_API_KEY\s*[:=]\s*['"]?|sk-[A-Za-z0-9_-]{15,50})['"]?/gi,
+  },
+  // Anthropic / Claude API Key
+  {
+    type: "CLAUDE_API_KEY",
+    regex: /(?:ANTHROPIC_API_KEY|CLAUDE_API_KEY)\s*[:=]\s*['"]?[A-Za-z0-9_-]{15,60}['"]?|sk-ant-[A-Za-z0-9_-]{15,60}/gi,
+  },
+  // xAI Grok API Key
+  {
+    type: "GROK_API_KEY",
+    regex: /(?:XAI_API_KEY|GROK_API_KEY)\s*[:=]\s*['"]?[A-Za-z0-9_-]{15,60}['"]?|xai-[A-Za-z0-9_-]{15,60}/gi,
   },
   // NVIDIA / NVAPI Key
   {

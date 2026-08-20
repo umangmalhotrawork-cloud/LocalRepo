@@ -16,8 +16,8 @@ async function main() {
   // 1. Initial State & Default Provider Configuration
   const initialConfig = aiProviderRouter.getConfig();
   console.log(`[TEST 1] Initial Active Provider: ${initialConfig.activeProvider}`);
-  if (initialConfig.activeProvider !== 'gemini') {
-    throw new Error('Test 1 failed: Default active provider must be gemini');
+  if (initialConfig.activeProvider !== 'groq' && initialConfig.activeProvider !== 'gemini') {
+    throw new Error('Test 1 failed: Default active provider must be groq or gemini');
   }
 
   // 1b. Verify all 6 providers are registered

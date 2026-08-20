@@ -28,8 +28,8 @@ class AIProviderRouter {
     this.apiKeys = new Map();
     this.keyValidationStatus = new Map();
 
-    this.activeProviderId = PROVIDER_IDS.GEMINI;
-    this.activeModelId = DEFAULT_MODELS[PROVIDER_IDS.GEMINI];
+    this.activeProviderId = PROVIDER_IDS.GROQ;
+    this.activeModelId = DEFAULT_MODELS[PROVIDER_IDS.GROQ];
 
     this.registerProviders();
     this.initDefaultKeys();
@@ -44,7 +44,7 @@ class AIProviderRouter {
         }
       } catch (e) {}
     }
-    return path.join(process.cwd(), '.echo-nullity-recovery', 'nexus_ai_vault.json');
+    return path.join(process.cwd(), '.nexus-recovery', 'nexus_ai_vault.json');
   }
 
   saveKeyToVault(providerId, apiKey) {
@@ -114,15 +114,15 @@ class AIProviderRouter {
   }
 
   registerProviders() {
-    const gemini = new GeminiProvider();
     const groq = new GroqProvider();
+    const gemini = new GeminiProvider();
     const openai = new OpenAIProvider();
     const claude = new ClaudeProvider();
     const deepseek = new DeepSeekProvider();
     const grok = new GrokProvider();
 
-    this.providers.set(gemini.getId(), gemini);
     this.providers.set(groq.getId(), groq);
+    this.providers.set(gemini.getId(), gemini);
     this.providers.set(openai.getId(), openai);
     this.providers.set(claude.getId(), claude);
     this.providers.set(deepseek.getId(), deepseek);
@@ -132,8 +132,8 @@ class AIProviderRouter {
   initDefaultKeys() {
     // 1. Check environment variables per provider
     const envMappings = {
-      [PROVIDER_IDS.GEMINI]: ['GEMINI_API_KEY'],
       [PROVIDER_IDS.GROQ]: ['GROQ_API_KEY'],
+      [PROVIDER_IDS.GEMINI]: ['GEMINI_API_KEY'],
       [PROVIDER_IDS.OPENAI]: ['OPENAI_API_KEY'],
       [PROVIDER_IDS.CLAUDE]: ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY'],
       [PROVIDER_IDS.DEEPSEEK]: ['DEEPSEEK_API_KEY'],
@@ -153,14 +153,26 @@ class AIProviderRouter {
 
     // 2. Load keys from encrypted persistent vault
     this.loadKeysFromVault();
+
+    // 3. Align activeProviderId to configured provider if present
+    if (this.apiKeys.has(PROVIDER_IDS.GROQ)) {
+      this.activeProviderId = PROVIDER_IDS.GROQ;
+      this.activeModelId = DEFAULT_MODELS[PROVIDER_IDS.GROQ];
+    } else {
+      const firstConnected = Array.from(this.apiKeys.keys())[0];
+      if (firstConnected && this.providers.has(firstConnected)) {
+        this.activeProviderId = firstConnected;
+        this.activeModelId = this.providers.get(firstConnected).getDefaultModel();
+      }
+    }
   }
 
   getActiveProvider() {
-    return this.providers.get(this.activeProviderId) || this.providers.get(PROVIDER_IDS.GEMINI);
+    return this.providers.get(this.activeProviderId) || this.providers.get(PROVIDER_IDS.GROQ);
   }
 
   getActiveModel() {
-    return this.activeModelId || DEFAULT_MODELS[this.activeProviderId] || 'gemini-1.5-flash';
+    return this.activeModelId || DEFAULT_MODELS[this.activeProviderId] || 'llama-3.3-70b-versatile';
   }
 
   getMaskedKey(providerId) {
@@ -242,6 +254,8 @@ class AIProviderRouter {
       this.apiKeys.set(providerId, trimmedKey);
       this.keyValidationStatus.set(providerId, PROVIDER_STATUS.CONNECTED);
       this.saveKeyToVault(providerId, trimmedKey);
+      this.activeProviderId = providerId;
+      this.activeModelId = provider.getDefaultModel();
       return {
         success: true,
         status: PROVIDER_STATUS.CONNECTED,
@@ -278,9 +292,10 @@ class AIProviderRouter {
   /**
    * Resolves target provider, model, and isolated key.
    * GUARANTEE: Never sends one provider's key to another provider.
+   * If the target provider is not configured, returns null (delegates to offline deterministic engine).
    */
   resolveProviderAndModel(requestedProviderId, requestedModelId) {
-    const pId = requestedProviderId || this.activeProviderId;
+    const pId = requestedProviderId || this.activeProviderId || PROVIDER_IDS.GROQ;
     const mId = requestedModelId || (pId === this.activeProviderId ? this.activeModelId : undefined);
 
     let provider = this.providers.get(pId);
@@ -294,19 +309,6 @@ class AIProviderRouter {
         apiKey,
         modelId: targetModel,
         isFallback: false,
-        requestedProviderId: pId,
-        requestedModelId: mId,
-      };
-    }
-
-    const defaultProvider = this.getActiveProvider();
-    const defaultKey = this.apiKeys.get(defaultProvider.getId());
-    if (defaultProvider && defaultProvider.isConfigured(defaultKey)) {
-      return {
-        provider: defaultProvider,
-        apiKey: defaultKey,
-        modelId: this.getActiveModel(),
-        isFallback: true,
         requestedProviderId: pId,
         requestedModelId: mId,
       };

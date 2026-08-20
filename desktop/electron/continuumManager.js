@@ -7,8 +7,10 @@
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
-const { app } = require('electron');
+let app = null;
+try {
+  app = require('electron').app;
+} catch (e) {}
 const { continuumEngine } = require('../engine/continuum_engine');
 const secretFilter = require('../security/secretFilter');
 const { recoveryStore } = require('./recoveryStore');

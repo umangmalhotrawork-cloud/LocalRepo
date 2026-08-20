@@ -2,11 +2,11 @@
 
 import React, { useState, useEffect } from "react";
 import { 
-  FolderTree, Search, GitBranch, FlaskConical, Bug, Terminal, 
+  FolderTree, Search, GitBranch, FlaskConical, Bug, Terminal, Plug,
   X, ChevronRight, Maximize2, Minimize2
 } from "lucide-react";
 
-export type ToolTab = "explorer" | "search" | "git" | "tests" | "debugger" | "terminal";
+export type ToolTab = "explorer" | "search" | "git" | "tests" | "debugger" | "terminal" | "capabilities";
 
 interface ContextualToolsDrawerProps {
   isOpen: boolean;
@@ -20,6 +20,7 @@ interface ContextualToolsDrawerProps {
   testsContent: React.ReactNode;
   debuggerContent: React.ReactNode;
   terminalContent: React.ReactNode;
+  capabilitiesContent?: React.ReactNode;
 }
 
 export default function ContextualToolsDrawer({
@@ -33,6 +34,7 @@ export default function ContextualToolsDrawer({
   testsContent,
   debuggerContent,
   terminalContent,
+  capabilitiesContent,
 }: ContextualToolsDrawerProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -131,6 +133,17 @@ export default function ContextualToolsDrawer({
             <Terminal className="w-3.5 h-3.5" />
             <span>Terminal</span>
           </button>
+
+          <button
+            onClick={() => onTabChange("capabilities")}
+            className={`px-2 py-1 rounded flex items-center gap-1.5 transition-all text-[11px] cursor-pointer ${
+              activeTab === "capabilities" ? "bg-purple-950 text-purple-300 font-bold border border-purple-500/30" : "text-zinc-400 hover:text-zinc-200"
+            }`}
+            title="Capabilities & MCP (⌘⇧C)"
+          >
+            <Plug className="w-3.5 h-3.5" />
+            <span>MCP & Skills</span>
+          </button>
         </div>
 
         <div className="flex items-center gap-1 text-zinc-500">
@@ -159,6 +172,7 @@ export default function ContextualToolsDrawer({
         {activeTab === "tests" && <div className="w-full h-full overflow-y-auto">{testsContent}</div>}
         {activeTab === "debugger" && <div className="w-full h-full overflow-y-auto">{debuggerContent}</div>}
         {activeTab === "terminal" && <div className="w-full h-full overflow-y-auto p-2">{terminalContent}</div>}
+        {activeTab === "capabilities" && <div className="w-full h-full overflow-hidden">{capabilitiesContent}</div>}
       </div>
     </div>
   );

@@ -19,8 +19,11 @@ async function runSessionModelSelectionTests() {
 
   const workspacePath = path.join(__dirname, '..', '..', 'demo-workspaces', 'ai_cart_project');
 
-  // Set dummy API key for testing provider router resolution
+  // Set dummy API key for testing provider router resolution with mock validation
+  const geminiProv = aiProviderRouter.providers.get('gemini');
+  geminiProv.validateKey = async () => ({ valid: true });
   await aiProviderRouter.setApiKey('gemini', 'AIzaSyTestApiKey1234567890');
+  aiProviderRouter.setConfig('gemini', 'gemini-1.5-flash');
 
   // TEST 1: Default global provider/model works
   const defaultConfig = aiProviderRouter.getConfig();

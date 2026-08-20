@@ -175,6 +175,18 @@ export default function CodexSidebar({
             <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
             <span className="truncate">Patch Safety Firewall</span>
           </button>
+
+          <button
+            onClick={() => onSelectItem("capabilities")}
+            className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer ${
+              activeItem === "capabilities"
+                ? "bg-[#161224] text-purple-300 font-bold border border-purple-500/30"
+                : "text-zinc-400 hover:text-zinc-200 hover:bg-[#101016]"
+            }`}
+          >
+            <Plug className="w-4 h-4 text-purple-400 shrink-0" />
+            <span className="truncate">MCP & Skills Center</span>
+          </button>
         </div>
 
         {/* Projects & Task History Section */}

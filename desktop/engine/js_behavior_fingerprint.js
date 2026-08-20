@@ -10,7 +10,10 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const child_process = require('child_process');
-const ts = require('typescript');
+let ts = null;
+try {
+  ts = require('typescript');
+} catch (e) {}
 
 const SCHEMA_VERSION = 1;
 const DEFAULT_TIMEOUT_MS = 2000;

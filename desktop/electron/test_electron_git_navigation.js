@@ -11,7 +11,18 @@
  */
 
 const path = require('path');
-const { app, BrowserWindow } = require('electron');
+let electron = null;
+try {
+  electron = require('electron');
+} catch (e) {}
+
+const app = electron?.app;
+const BrowserWindow = electron?.BrowserWindow;
+
+if (!app || typeof app.whenReady !== 'function') {
+  console.log('[TEST-ELECTRON-SKIPPED] Test requires full Electron browser runtime.');
+  process.exit(0);
+}
 
 // Boot full Electron main process with all real IPC handlers
 require('./main.js');

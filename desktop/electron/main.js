@@ -25,6 +25,7 @@ const { continuumManager } = require('./continuumManager');
 const { continuumEngine } = require('../engine/continuum_engine');
 const { continuumContextBuilder } = require('../engine/continuum_context_builder');
 const { continuumCapsuleBuilder } = require('../engine/continuum_capsule_builder');
+const { harnessRuntime } = require('./harness');
 const secretFilter = require('../security/secretFilter');
 const testManager = require('./testManager');
 const { profilerManager } = require('./profilerManager');
@@ -237,17 +238,23 @@ function createWindow() {
         }
       });
   } else {
-    const prodPath = path.join(__dirname, '..', '..', 'out', 'desktop.html');
-    const fallbackProdPath = path.join(__dirname, '..', '..', 'out', 'index.html');
-    const finalPath = fs.existsSync(prodPath) ? prodPath : fallbackProdPath;
+    const candidatePaths = [
+      path.join(app.getAppPath(), 'out', 'desktop.html'),
+      path.join(__dirname, '..', '..', 'out', 'desktop.html'),
+      path.join(app.getAppPath(), 'out', 'index.html'),
+      path.join(__dirname, '..', '..', 'out', 'index.html'),
+      path.join(app.getAppPath(), 'desktop.html'),
+    ];
 
-    if (fs.existsSync(finalPath)) {
+    const finalPath = candidatePaths.find((p) => fs.existsSync(p));
+
+    if (finalPath) {
       console.log(`[ELECTRON] Loading production build asset: ${finalPath}`);
       mainWindow.loadFile(finalPath).catch((err) => {
         console.error('[ELECTRON] Failed to load production file:', err.message);
       });
     } else {
-      console.error('[ELECTRON] Production build file not found at:', finalPath);
+      console.error('[ELECTRON] Production build file not found in candidates:', candidatePaths);
     }
   }
 
@@ -837,6 +844,10 @@ ipcMain.handle('dialog:open-folder', async () => {
 
   const folderPath = result.filePaths[0];
   const tree = buildFileTree(folderPath);
+  try {
+    await harnessRuntime.loadProjectCapabilities(folderPath);
+    harnessRuntime.startWatchingProjectCapabilities(folderPath);
+  } catch (e) {}
   return { folderPath, tree };
 });
 
@@ -2160,11 +2171,12 @@ ipcMain.handle('evidence:traverse', async (_, payload = {}) => {
   return evidenceGraph.traverseFrom(startId, safeSession, direction);
 });
 
-// AI Agent Mode IPC Handler
+// AI Agent Mode IPC Handler (Legacy Compatibility - delegates to Harness)
 ipcMain.handle('agent:run', async (_, payload = {}) => {
   if (!payload || typeof payload !== 'object') {
     return { success: false, task: '', summary: 'Malformed payload: object required', steps: [] };
   }
+  console.log('[IPC:agent:run] Legacy agent:run called, delegating via agentManager facade into HarnessRuntime');
   return agentManager.runAgentTask(payload);
 });
 
@@ -2490,6 +2502,212 @@ ipcMain.handle('continuum:import-capsule', async (_, payload = {}) => {
     console.error('[MAIN] Error importing Continuum capsule:', err);
     return { success: false, error: err.message };
   }
+});
+
+// Harness Core IPC Handlers (Codex-style Harness Foundation)
+ipcMain.handle('harness:create-thread', async (_, options) => {
+  return harnessRuntime.createThread(options);
+});
+
+ipcMain.handle('harness:get-thread', async (_, threadId) => {
+  return harnessRuntime.getThread(threadId);
+});
+
+ipcMain.handle('harness:list-threads', async (_, filter) => {
+  return harnessRuntime.listThreads(filter);
+});
+
+ipcMain.handle('harness:archive-thread', async (_, threadId) => {
+  return harnessRuntime.archiveThread(threadId);
+});
+
+ipcMain.handle('harness:start-turn', async (_, { threadId, userInput, metadata, options }) => {
+  return harnessRuntime.startTurn(threadId, userInput, metadata, options);
+});
+
+ipcMain.handle('harness:get-turn', async (_, turnId) => {
+  return harnessRuntime.getTurn(turnId);
+});
+
+ipcMain.handle('harness:complete-turn', async (_, { turnId, metadata }) => {
+  return harnessRuntime.completeTurn(turnId, metadata);
+});
+
+ipcMain.handle('harness:fail-turn', async (_, { turnId, error, metadata }) => {
+  return harnessRuntime.failTurn(turnId, error, metadata);
+});
+
+ipcMain.handle('harness:cancel-turn', async (_, { turnId, metadata }) => {
+  return harnessRuntime.cancelTurn(turnId, metadata);
+});
+
+ipcMain.handle('harness:run-turn', async (_, payload) => {
+  return harnessRuntime.runTurn(payload);
+});
+
+ipcMain.handle('harness:approve-action', async (_, payload) => {
+  return harnessRuntime.approveAction(payload);
+});
+
+ipcMain.handle('harness:reject-action', async (_, payload) => {
+  return harnessRuntime.rejectAction(payload);
+});
+
+ipcMain.handle('harness:route-request', async (_, payload = {}) => {
+  const userInput = typeof payload === 'string' ? payload : (payload.userInput || '');
+  const context = typeof payload === 'object' ? (payload.context || payload) : {};
+  return harnessRuntime.classifyRequest(userInput, context);
+});
+
+ipcMain.handle('harness:handle-request', async (_, payload = {}) => {
+  return harnessRuntime.handleRequest(payload);
+});
+
+ipcMain.handle('harness:start-item', async (_, { turnId, type, payload, metadata, options }) => {
+  return harnessRuntime.startItem(turnId, type, payload, metadata, options);
+});
+
+ipcMain.handle('harness:update-item', async (_, { itemId, payloadUpdates, metadataUpdates }) => {
+  return harnessRuntime.updateItem(itemId, payloadUpdates, metadataUpdates);
+});
+
+ipcMain.handle('harness:complete-item', async (_, { itemId, finalPayload, metadataUpdates }) => {
+  return harnessRuntime.completeItem(itemId, finalPayload, metadataUpdates);
+});
+
+ipcMain.handle('harness:fail-item', async (_, { itemId, error, metadataUpdates }) => {
+  return harnessRuntime.failItem(itemId, error, metadataUpdates);
+});
+
+ipcMain.handle('harness:get-events', async (_, filter) => {
+  return harnessRuntime.getEvents(filter);
+});
+
+ipcMain.handle('harness:cancel-swarm', async (_, payload = {}) => {
+  const swarmId = typeof payload === 'string' ? payload : payload.swarmId;
+  const reason = typeof payload === 'object' ? payload.reason : undefined;
+  return harnessRuntime.cancelSwarm(swarmId, reason);
+});
+
+ipcMain.handle('harness:get-swarm-status', async (_, swarmId) => {
+  return harnessRuntime.getSwarmStatus(swarmId);
+});
+
+// Project-Level MCP & Skill Discovery IPC Handlers (Milestone 13)
+ipcMain.handle('harness:discover-project-capabilities', async (_, workspacePath) => {
+  return harnessRuntime.discoverProjectCapabilities(workspacePath);
+});
+
+ipcMain.handle('harness:load-project-capabilities', async (_, payload = {}) => {
+  const ws = typeof payload === 'string' ? payload : payload.workspacePath;
+  const opts = typeof payload === 'object' ? payload.options : {};
+  return harnessRuntime.loadProjectCapabilities(ws, opts);
+});
+
+ipcMain.handle('harness:reload-project-capabilities', async (_, payload = {}) => {
+  const ws = typeof payload === 'string' ? payload : payload.workspacePath;
+  const opts = typeof payload === 'object' ? payload.options : {};
+  return harnessRuntime.reloadProjectCapabilities(ws, opts);
+});
+
+ipcMain.handle('harness:get-project-metadata', async (_, workspacePath) => {
+  return harnessRuntime.getProjectPersistenceMetadata(workspacePath);
+});
+
+// Capability Center & MCP Control Center IPC Handlers (Milestone 15)
+ipcMain.handle('harness:get-capabilities', async () => {
+  return harnessRuntime.capabilityRegistry.listCapabilities();
+});
+
+ipcMain.handle('harness:get-capability', async (_, id) => {
+  return harnessRuntime.capabilityRegistry.getCapability(id);
+});
+
+ipcMain.handle('harness:get-mcp-servers', async () => {
+  return harnessRuntime.mcpServerManager.listServers();
+});
+
+ipcMain.handle('harness:get-mcp-server-status', async (_, serverId) => {
+  return harnessRuntime.mcpServerManager.getServerStatus(serverId);
+});
+
+ipcMain.handle('harness:get-mcp-server-tools', async (_, serverId) => {
+  const s = harnessRuntime.mcpServerManager.getServer(serverId);
+  return s ? s.tools : [];
+});
+
+ipcMain.handle('harness:get-skills', async () => {
+  return harnessRuntime.skillRegistry.listSkills();
+});
+
+ipcMain.handle('harness:get-skill', async (_, skillId) => {
+  return harnessRuntime.skillRegistry.getSkill(skillId);
+});
+
+ipcMain.handle('harness:get-project-capability-status', async (_, workspacePath) => {
+  return harnessRuntime.discoverProjectCapabilities(workspacePath);
+});
+
+ipcMain.handle('harness:start-mcp-server', async (_, serverId) => {
+  return harnessRuntime.startMCPServer(serverId);
+});
+
+ipcMain.handle('harness:stop-mcp-server', async (_, serverId) => {
+  return harnessRuntime.stopMCPServer(serverId);
+});
+
+ipcMain.handle('harness:restart-mcp-server', async (_, serverId) => {
+  return harnessRuntime.restartMCPServer(serverId);
+});
+
+ipcMain.handle('harness:enable-skill', async (_, skillId) => {
+  return harnessRuntime.enableSkill(skillId);
+});
+
+ipcMain.handle('harness:disable-skill', async (_, skillId) => {
+  return harnessRuntime.disableSkill(skillId);
+});
+
+// 3-Way ChangeSet Conflict Resolution IPC Handlers (Milestone 16)
+ipcMain.handle('harness:list-change-conflicts', async () => {
+  return harnessRuntime.listChangeConflicts().map((c) => c.toJSON());
+});
+
+ipcMain.handle('harness:get-change-conflict', async (_, conflictId) => {
+  const c = harnessRuntime.getChangeConflict(conflictId);
+  return c ? c.toJSON() : null;
+});
+
+ipcMain.handle('harness:resolve-conflict-hunk', async (_, payload = {}) => {
+  return harnessRuntime.resolveChangeConflictHunk(
+    payload.conflictId,
+    payload.hunkId,
+    payload.resolution,
+    payload.customContent,
+    payload.context
+  );
+});
+
+ipcMain.handle('harness:create-parent-changeset-from-conflicts', async (_, payload = {}) => {
+  const cs = harnessRuntime.createParentChangeSetFromConflicts(payload);
+  return cs.toJSON();
+});
+
+ipcMain.handle('harness:apply-resolved-conflicts', async (_, payload = {}) => {
+  return harnessRuntime.applyResolvedConflicts(payload);
+});
+
+ipcMain.handle('harness:cancel-conflict-resolution', async (_, payload = {}) => {
+  return harnessRuntime.cancelConflictResolution(payload);
+});
+
+// Stream Harness Events directly to Electron Renderer
+harnessRuntime.subscribe((event) => {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('harness:event', event);
+    }
+  } catch (e) {}
 });
 
 // Test Explorer & Coverage IPC Handlers

@@ -6,7 +6,10 @@
 
 const fs = require('fs');
 const path = require('path');
-const ts = require('typescript');
+let ts = null;
+try {
+  ts = require('typescript');
+} catch (e) {}
 
 function extractJSBDG(filePath, sourceContent, relPath) {
   const code = sourceContent !== undefined ? sourceContent : fs.readFileSync(filePath, 'utf-8');

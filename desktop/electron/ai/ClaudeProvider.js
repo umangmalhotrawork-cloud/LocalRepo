@@ -169,7 +169,23 @@ class ClaudeProvider extends AIProvider {
       ? '\nCRITICAL DIRECTIVE: This is a READ_ONLY analysis task. DO NOT generate code modifications or surgical patches. Return empty proposedEdits: [] for all steps.'
       : '';
 
-    const systemPrompt = `${contextPrefix}You are NEXUS Autonomous AI Agent powered by Claude.
+    let systemPrompt;
+    if (intent === 'GENERAL_CHAT') {
+      systemPrompt = `${contextPrefix}You are NEXUS AI Assistant powered by Claude.
+Respond conversationally, helpfully, and concisely to the user's message.
+DO NOT generate any code modifications or surgical patches.
+
+Workspace files context:
+${fileSummaries}
+
+Respond ONLY with a valid JSON object matching this schema:
+{
+  "summary": "<Helpful conversational response>",
+  "taskIntent": "GENERAL_CHAT",
+  "steps": []
+}`;
+    } else {
+      systemPrompt = `${contextPrefix}You are NEXUS Autonomous AI Agent powered by Claude.
 Analyze the workspace and task, then output a structured JSON plan with maximum ${maxSteps} steps.${readOnlyDirective}
 Active editor file: "${relativeTarget}". Treat it as the primary analysis target. All proposedEdits must target this file.
 
@@ -179,6 +195,7 @@ ${fileSummaries}
 Respond ONLY with a valid JSON object strictly matching this schema (no markdown wrap, no conversational filler):
 {
   "summary": "<High level execution summary>",
+  "taskIntent": "${intent}",
   "steps": [
     {
       "id": "step-1",
@@ -195,13 +212,14 @@ Respond ONLY with a valid JSON object strictly matching this schema (no markdown
     }
   ]
 }`;
+    }
 
     const requestBody = {
       model: selectedModel,
       max_tokens: 3000,
       system: systemPrompt,
       messages: [
-        { role: 'user', content: `Task Directive: "${task}"\nGenerate the structured execution plan in JSON.` },
+        { role: 'user', content: intent === 'GENERAL_CHAT' ? `User message: "${task}"` : `Task Directive: "${task}"\nGenerate the structured execution plan in JSON.` },
       ],
       temperature: 0.1,
     };

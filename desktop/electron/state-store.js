@@ -1,6 +1,9 @@
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
+let app = null;
+try {
+  app = require('electron').app;
+} catch (e) {}
 
 const STATE_FILE_NAME = 'workspace-state.json';
 

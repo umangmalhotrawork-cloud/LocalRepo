@@ -12,6 +12,7 @@ const gitManager = require('./gitManager');
 
 async function runGitWorkflowTestSuite() {
   console.log('[TEST SUITE] Starting NEXUS local Git workflow verification...');
+  process.env.GIT_CONFIG_GLOBAL = '/dev/null';
   const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus_git_workspace_'));
 
   try {

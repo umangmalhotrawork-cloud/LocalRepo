@@ -28,6 +28,9 @@ import {
   FileText,
 } from "lucide-react";
 import { useOutsideClick } from "../hooks/useOutsideClick";
+import SwarmActivityPanel from "./SwarmActivityPanel";
+import ChangeConflictResolver, { ConflictItem } from "./ChangeConflictResolver";
+import { useSwarmActivity } from "../hooks/useSwarmActivity";
 
 export type ProposedEdit = {
   filePath: string;
@@ -73,7 +76,7 @@ export type AgentMessage = {
   content: string;
   timestamp: number;
   turnId?: string;
-  status?: "THINKING" | "PLAN_READY" | "APPLIED" | "VERIFIED" | "UNKNOWN" | "ERROR";
+  status?: "THINKING" | "PLAN_READY" | "APPLIED" | "VERIFIED" | "UNKNOWN" | "ERROR" | "STREAMING";
   execution?: {
     providerId: string;
     modelId: string;
@@ -157,6 +160,8 @@ export default function AgentPanel({
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [keyValidationMsg, setKeyValidationMsg] = useState("");
   const [validatingKey, setValidatingKey] = useState(false);
+  const [conflictResolverOpen, setConflictResolverOpen] = useState(false);
+  const [activeConflicts, setActiveConflicts] = useState<ConflictItem[]>([]);
   const [autonomousState, setAutonomousState] = useState<{
     repairId?: string;
     stage: string;
@@ -172,6 +177,212 @@ export default function AgentPanel({
     iteration: 1,
     maxIterations: 3,
   });
+  const [harnessThreadId, setHarnessThreadId] = useState<string | null>(null);
+  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<{
+    callId: string;
+    toolName: string;
+    policyDecision?: any;
+    error?: string;
+  } | null>(null);
+
+  const swarmActivity = useSwarmActivity({
+    threadId: harnessThreadId || activeSessionId || null,
+  });
+
+  // Subscribe to push events from the new Codex Harness Event Stream
+  useEffect(() => {
+    if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.onEvent) {
+      const unsubscribe = (window as any).electronAPI.harness.onEvent((event: any) => {
+        if (!event) return;
+        const { type, payload, turnId, threadId } = event;
+
+        if (threadId) {
+          setHarnessThreadId((prev) => prev || threadId);
+        }
+
+        if (type && type.startsWith("SWARM_")) {
+          setAutonomousState((prev) => ({
+            ...prev,
+            stage: type.replace("SWARM_", "SWARM "),
+            activeRole: "Swarm Orchestrator",
+          }));
+        }
+
+        if (type === "TURN_STARTED") {
+          setLoading(true);
+          setActiveTurnId(turnId);
+          setAutonomousState((prev) => ({ ...prev, stage: "PLANNING" }));
+        } else if (type === "ITEM_STARTED" || type === "ITEM_UPDATED" || type === "ITEM_COMPLETED") {
+          const item = payload?.item || {};
+          if (item.type === "TOOL_CALL") {
+            const tc = item.payload || {};
+            const stepTitle = tc.toolName ? `Execute ${tc.toolName}` : "Running Tool";
+            const stepReason = tc.arguments ? (typeof tc.arguments === "string" ? tc.arguments : JSON.stringify(tc.arguments)) : "";
+            setSteps((prev) => {
+              const exists = prev.find((s) => s.id === item.itemId || s.id === tc.callId);
+              if (exists) return prev;
+              return [
+                ...prev,
+                {
+                  id: item.itemId || tc.callId || `step_${Date.now()}`,
+                  title: stepTitle,
+                  reasoning: stepReason,
+                  filesRead: tc.arguments?.path ? [tc.arguments.path] : [],
+                  proposedEdits: [],
+                  status: "pending",
+                },
+              ];
+            });
+            setExpandedSteps((prev) => ({ ...prev, [item.itemId || tc.callId]: true }));
+            setAutonomousState((prev) => ({ ...prev, stage: "CODE", activeRole: tc.toolName }));
+          } else if (item.type === "TOOL_RESULT") {
+            const tr = item.payload || {};
+            setSteps((prev) =>
+              prev.map((s) => {
+                if (s.id === item.itemId || (tr.callId && s.id.includes(tr.callId))) {
+                  return { ...s, status: tr.success ? "applied" : "error" };
+                }
+                return s;
+              })
+            );
+          } else if (item.type === "FILE_CHANGE") {
+            const fc = item.payload || {};
+            if (fc.filePath) {
+              const newEdit: ProposedEdit = {
+                filePath: fc.filePath,
+                original: fc.original || "",
+                replacement: fc.replacement || "",
+              };
+              setSteps((prev) => {
+                if (prev.length === 0) {
+                  return [
+                    {
+                      id: item.itemId || `change_${Date.now()}`,
+                      title: `Apply Patch on ${fc.filePath}`,
+                      reasoning: "Transactional code modification applied",
+                      filesRead: [fc.filePath],
+                      proposedEdits: [newEdit],
+                      firewallResult: fc.firewall,
+                      status: "applied",
+                    },
+                  ];
+                }
+                return prev.map((s, idx) =>
+                  idx === prev.length - 1
+                    ? {
+                        ...s,
+                        proposedEdits: [...(s.proposedEdits || []), newEdit],
+                        firewallResult: fc.firewall || s.firewallResult,
+                        status: "applied",
+                      }
+                    : s
+                );
+              });
+            }
+          } else if (item.type === "APPROVAL_REQUEST") {
+            const ar = item.payload || {};
+            setPendingApproval({
+              callId: ar.callId,
+              toolName: ar.toolName,
+              policyDecision: ar.policyDecision,
+              error: ar.error,
+            });
+            setAutonomousState((prev) => ({ ...prev, stage: "REVIEW" }));
+          } else if (item.type === "AGENT_MESSAGE") {
+            const am = item.payload || {};
+            const textContent = am.text || am.summary || payload?.text || "";
+
+            if (type === "ITEM_STARTED") {
+              setMessages((prev) => {
+                const exists = prev.find((m) => m.id === item.itemId);
+                if (exists) return prev;
+                return [
+                  ...prev,
+                  {
+                    id: item.itemId || `agent_${Date.now()}`,
+                    role: "agent",
+                    content: textContent,
+                    timestamp: Date.now(),
+                    status: "STREAMING",
+                    execution: {
+                      providerId: aiConfig?.activeProvider || "groq",
+                      modelId: aiConfig?.activeModel || "llama-3.3-70b-versatile",
+                    },
+                  },
+                ];
+              });
+            } else if (type === "ITEM_UPDATED") {
+              setMessages((prev) => {
+                const exists = prev.some((m) => m.id === item.itemId);
+                if (!exists) {
+                  return [
+                    ...prev,
+                    {
+                      id: item.itemId || `agent_${Date.now()}`,
+                      role: "agent",
+                      content: textContent,
+                      timestamp: Date.now(),
+                      status: "STREAMING",
+                      execution: {
+                        providerId: aiConfig?.activeProvider || "groq",
+                        modelId: aiConfig?.activeModel || "llama-3.3-70b-versatile",
+                      },
+                    },
+                  ];
+                }
+                return prev.map((m) =>
+                  m.id === item.itemId
+                    ? { ...m, content: textContent, status: "STREAMING" }
+                    : m
+                );
+              });
+            } else if (type === "ITEM_COMPLETED") {
+              const finalSummary = am.text || am.summary || "Task completed.";
+              setMessages((prev) => {
+                const exists = prev.some((m) => m.id === item.itemId);
+                if (exists) {
+                  return prev.map((m) =>
+                    m.id === item.itemId
+                      ? { ...m, content: finalSummary, status: "VERIFIED" }
+                      : m
+                  );
+                }
+                return [
+                  ...prev,
+                  {
+                    id: item.itemId || `agent_${Date.now()}`,
+                    role: "agent",
+                    content: finalSummary,
+                    timestamp: Date.now(),
+                    status: "VERIFIED",
+                    execution: {
+                      providerId: aiConfig?.activeProvider || "groq",
+                      modelId: aiConfig?.activeModel || "llama-3.3-70b-versatile",
+                    },
+                  },
+                ];
+              });
+              setAutonomousState((prev) => ({ ...prev, stage: "VERIFICATION" }));
+            }
+          }
+        } else if (type === "TURN_COMPLETED") {
+          setLoading(false);
+          setPendingApproval(null);
+          setActiveTurnId(null);
+          setAutonomousState((prev) => ({ ...prev, stage: "COMPLETED" }));
+        } else if (type === "TURN_FAILED" || type === "HARNESS_ERROR") {
+          setLoading(false);
+          setPendingApproval(null);
+          setAutonomousState((prev) => ({ ...prev, stage: "FAILED" }));
+        }
+      });
+
+      return () => {
+        if (typeof unsubscribe === "function") unsubscribe();
+      };
+    }
+  }, [aiConfig]);
 
   useEffect(() => {
     if (typeof window !== "undefined" && (window as any).electronAPI?.autonomous?.onProgress) {
@@ -202,6 +413,13 @@ export default function AgentPanel({
 
   const handleCancelRepair = async () => {
     setLoading(false);
+    if (activeTurnId && typeof window !== "undefined" && (window as any).electronAPI?.harness?.cancelTurn) {
+      try {
+        await (window as any).electronAPI.harness.cancelTurn({ turnId: activeTurnId });
+      } catch (e) {
+        console.error("[AGENT-PANEL] Failed to cancel harness turn:", e);
+      }
+    }
     if (autonomousState.repairId && typeof window !== "undefined" && (window as any).electronAPI?.autonomous?.cancel) {
       try {
         await (window as any).electronAPI.autonomous.cancel(autonomousState.repairId);
@@ -431,7 +649,7 @@ export default function AgentPanel({
     if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getConfig) {
       try {
         const config = await (window as any).electronAPI.ai.getConfig();
-        const activeProvider = config?.activeProvider || "gemini";
+        const activeProvider = config?.activeProvider || aiConfig?.activeProvider || "groq";
         const providerConfig = config?.providers?.find((p: any) => p.id === activeProvider);
         const isConfigured = Boolean(providerConfig?.isConfigured && providerConfig?.status === "CONNECTED");
 
@@ -472,11 +690,50 @@ export default function AgentPanel({
 
     try {
       let res: AgentTaskResult;
-      if (typeof window !== "undefined" && (window as any).electronAPI?.agent?.run) {
+      if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.runTurn) {
+        let threadIdToUse = harnessThreadId;
+        if (!threadIdToUse && (window as any).electronAPI?.harness?.createThread) {
+          try {
+            const newThread = await (window as any).electronAPI.harness.createThread({
+              metadata: { workspacePath, activeFilePath, activeSessionId },
+            });
+            threadIdToUse = newThread?.threadId;
+            setHarnessThreadId(threadIdToUse);
+          } catch (e) {}
+        }
+
+        const harnessRes = await (window as any).electronAPI.harness.runTurn({
+          threadId: threadIdToUse || `thread_${Date.now()}`,
+          userInput: activeTask,
+          workspacePath,
+          activeFilePath,
+          intent: "MUTATION",
+          providerId: aiConfig?.activeProvider,
+          modelId: aiConfig?.activeModel,
+          continuumSnapshot: currentSnapshot,
+        });
+
+        if (harnessRes && harnessRes.success) {
+          res = {
+            success: true,
+            task: activeTask,
+            summary: harnessRes.finalResponse || "Task completed successfully via Codex Harness.",
+            steps: steps,
+            execution: {
+              providerId: aiConfig?.activeProvider || "groq",
+              modelId: aiConfig?.activeModel || "llama-3.3-70b-versatile",
+            },
+          };
+          setResult(res);
+        } else {
+          throw new Error(harnessRes?.error || "Harness turn failed");
+        }
+      } else if (typeof window !== "undefined" && (window as any).electronAPI?.agent?.run) {
         res = await (window as any).electronAPI.agent.run({
           task: activeTask,
           workspacePath,
           activeFilePath,
+          isExplicitEditorTarget: Boolean(selectionInfo?.text),
           maxSteps: 5,
           continuumSnapshot: currentSnapshot,
           continuumContextText: activeContinuumContextText,
@@ -485,6 +742,8 @@ export default function AgentPanel({
           selectionText: selectionInfo?.text,
           selectionLineRange: selectionInfo ? `${selectionInfo.startLineNumber}-${selectionInfo.endLineNumber}` : undefined,
         });
+        setResult(res);
+        setSteps(res.steps || []);
       } else {
         // Fallback for browser testing
         const targetFile = activeFilePath || "src/calculator.py";
@@ -792,6 +1051,23 @@ export default function AgentPanel({
           </div>
         )}
 
+        {/* Swarm Multi-Agent Visualizer (Milestone 11B) */}
+        {(swarmActivity.swarm || swarmActivity.tasks.length > 0) && (
+          <div className="mb-3 animate-fadeIn">
+            <SwarmActivityPanel
+              swarm={swarmActivity.swarm}
+              tasks={swarmActivity.tasks}
+              selectedTaskId={swarmActivity.selectedTaskId}
+              conflicts={swarmActivity.conflicts}
+              changeSets={swarmActivity.changeSets}
+              onSelectTask={swarmActivity.selectTask}
+              onCancelSwarm={swarmActivity.cancelSwarm}
+              onPreviewDiff={onPreviewDiff}
+              onResolveConflicts={() => setConflictResolverOpen(true)}
+            />
+          </div>
+        )}
+
         {/* Message Bubbles */}
         {messages.map((msg) => (
           <div key={msg.id} className="space-y-2">
@@ -939,6 +1215,43 @@ export default function AgentPanel({
           </div>
         ))}
 
+        {/* Interactive Authorization / Approval Request Banner */}
+        {pendingApproval && (
+          <div className="p-3 rounded-xl bg-[#1c1408] border border-amber-500/50 space-y-2 text-amber-200 font-mono text-[11px] shadow-lg animate-fadeIn">
+            <div className="flex items-center gap-1.5 font-bold text-[11px] text-amber-300">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Authorization Required: {pendingApproval.toolName}</span>
+            </div>
+            <p className="text-[10.5px] text-amber-100/80 leading-relaxed">
+              {pendingApproval.error || pendingApproval.policyDecision?.reason || "This operation requires explicit user authorization under current safety policy."}
+            </p>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={async () => {
+                  if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.approveAction) {
+                    await (window as any).electronAPI.harness.approveAction({ turnId: activeTurnId, callId: pendingApproval.callId });
+                    setPendingApproval(null);
+                  }
+                }}
+                className="px-3 py-1 rounded bg-emerald-950 hover:bg-emerald-900 border border-emerald-500/40 text-emerald-300 font-bold text-[10px] cursor-pointer transition-colors"
+              >
+                Authorize & Continue
+              </button>
+              <button
+                onClick={async () => {
+                  if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.rejectAction) {
+                    await (window as any).electronAPI.harness.rejectAction({ turnId: activeTurnId, callId: pendingApproval.callId, reason: "Rejected by user" });
+                    setPendingApproval(null);
+                  }
+                }}
+                className="px-3 py-1 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 text-[10px] cursor-pointer transition-colors"
+              >
+                Reject
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Live Agent Execution Timeline */}
         {loading && (
           <div className="p-3 rounded-xl bg-[#0a0a10] border border-cyan-500/30 space-y-2.5 font-mono text-[11px]">
@@ -1084,6 +1397,70 @@ export default function AgentPanel({
           </button>
         </div>
       </div>
+
+      {/* 3-Way ChangeSet Conflict Resolver (Milestone 16) */}
+      <ChangeConflictResolver
+        isOpen={conflictResolverOpen}
+        conflicts={
+          activeConflicts.length > 0
+            ? activeConflicts
+            : (swarmActivity.conflicts?.conflicts?.map((c: any, idx: number) => ({
+                conflictId: `conf_${idx}`,
+                filePath: c.filePath || c.file || "conflicted_file",
+                baseContent: c.baseContent || "",
+                parentContent: c.parentContent || c.original || "",
+                incomingContent: c.incomingContent || c.replacement || "",
+                conflictType: c.category || "FILE_CONFLICT",
+                status: "MANUAL_REQUIRED" as const,
+                hunks: [
+                  {
+                    hunkId: "hunk_0",
+                    startLine: 1,
+                    endLine: 10,
+                    base: c.baseContent || "",
+                    parent: c.parentContent || c.original || "",
+                    incoming: c.incomingContent || c.replacement || "",
+                    status: "CONFLICT" as const,
+                  },
+                ],
+              })) || [])
+        }
+        workspacePath={workspacePath}
+        onResolveHunk={async (conflictId, hunkId, resolution, customContent) => {
+          const harness = (window as any).electronAPI?.harness;
+          if (harness?.resolveConflictHunk) {
+            await harness.resolveConflictHunk({
+              conflictId,
+              hunkId,
+              resolution,
+              customContent,
+              context: { threadId: activeSessionId },
+            });
+            if (harness.listChangeConflicts) {
+              const updated = await harness.listChangeConflicts();
+              if (Array.isArray(updated)) setActiveConflicts(updated);
+            }
+          }
+        }}
+        onApplyResolved={async () => {
+          const harness = (window as any).electronAPI?.harness;
+          if (harness?.applyResolvedConflicts) {
+            await harness.applyResolvedConflicts({
+              workspacePath,
+              threadId: activeSessionId,
+              autoApprove: true,
+            });
+            setConflictResolverOpen(false);
+          }
+        }}
+        onCancel={() => {
+          setConflictResolverOpen(false);
+          const harness = (window as any).electronAPI?.harness;
+          if (harness?.cancelConflictResolution) {
+            harness.cancelConflictResolution({ threadId: activeSessionId });
+          }
+        }}
+      />
     </div>
   );
 }

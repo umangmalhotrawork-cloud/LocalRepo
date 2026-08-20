@@ -1,6 +1,12 @@
 const fs = require('fs');
 const path = require('path');
-const { dialog, app } = require('electron');
+let dialog = null;
+let app = null;
+try {
+  const electron = require('electron');
+  dialog = electron.dialog;
+  app = electron.app;
+} catch (e) {}
 
 async function exportWorkspaceReport(payload, browserWindow) {
   try {

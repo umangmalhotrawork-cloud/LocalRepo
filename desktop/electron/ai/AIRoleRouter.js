@@ -29,40 +29,40 @@ const ROLE_DEFINITIONS = [
     roleId: ROLE_IDS.PLANNER,
     displayName: 'Planner',
     description: 'Analyzes user directives and proposes surgical implementation strategy',
-    defaultProviderId: PROVIDER_IDS.GEMINI,
-    defaultModelId: DEFAULT_MODELS[PROVIDER_IDS.GEMINI],
+    defaultProviderId: PROVIDER_IDS.GROQ,
+    defaultModelId: DEFAULT_MODELS[PROVIDER_IDS.GROQ],
     enabled: true,
   },
   {
     roleId: ROLE_IDS.CODER,
     displayName: 'Coder',
     description: 'Implements surgical code modifications matching plan specifications',
-    defaultProviderId: PROVIDER_IDS.GEMINI,
-    defaultModelId: DEFAULT_MODELS[PROVIDER_IDS.GEMINI],
+    defaultProviderId: PROVIDER_IDS.GROQ,
+    defaultModelId: DEFAULT_MODELS[PROVIDER_IDS.GROQ],
     enabled: true,
   },
   {
     roleId: ROLE_IDS.REVIEWER,
     displayName: 'Reviewer',
     description: 'Advisory code review evaluating safety and structural integrity',
-    defaultProviderId: PROVIDER_IDS.GEMINI,
-    defaultModelId: DEFAULT_MODELS[PROVIDER_IDS.GEMINI],
+    defaultProviderId: PROVIDER_IDS.GROQ,
+    defaultModelId: DEFAULT_MODELS[PROVIDER_IDS.GROQ],
     enabled: true,
   },
   {
     roleId: ROLE_IDS.DEBUGGER,
     displayName: 'Debugger',
     description: 'Diagnoses test runner failures and computes root cause analysis',
-    defaultProviderId: PROVIDER_IDS.GEMINI,
-    defaultModelId: DEFAULT_MODELS[PROVIDER_IDS.GEMINI],
+    defaultProviderId: PROVIDER_IDS.GROQ,
+    defaultModelId: DEFAULT_MODELS[PROVIDER_IDS.GROQ],
     enabled: true,
   },
   {
     roleId: ROLE_IDS.TEST_ANALYST,
     displayName: 'Test Analyst',
     description: 'Analyzes test suites and coverage reports for verification targets',
-    defaultProviderId: PROVIDER_IDS.GEMINI,
-    defaultModelId: DEFAULT_MODELS[PROVIDER_IDS.GEMINI],
+    defaultProviderId: PROVIDER_IDS.GROQ,
+    defaultModelId: DEFAULT_MODELS[PROVIDER_IDS.GROQ],
     enabled: true,
   },
 ];
@@ -131,8 +131,8 @@ class AIRoleRouter {
       return { success: false, error: `Unknown role ID: ${roleId}` };
     }
 
-    const resolvedProvider = providerId || PROVIDER_IDS.GEMINI;
-    const resolvedModel = modelId || DEFAULT_MODELS[resolvedProvider] || 'gemini-1.5-flash';
+    const resolvedProvider = providerId || PROVIDER_IDS.GROQ;
+    const resolvedModel = modelId || DEFAULT_MODELS[resolvedProvider] || 'llama-3.3-70b-versatile';
 
     this.globalRoleConfig.set(norm, {
       roleId: norm,
@@ -201,7 +201,7 @@ class AIRoleRouter {
       return {
         roleId: norm,
         providerId: sessionConfig.aiState.provider,
-        modelId: sessionConfig.aiState.modelName || DEFAULT_MODELS[sessionConfig.aiState.provider] || 'gemini-1.5-flash',
+        modelId: sessionConfig.aiState.modelName || DEFAULT_MODELS[sessionConfig.aiState.provider] || 'llama-3.3-70b-versatile',
         enabled: true,
         precedence: 'session_aistate',
       };

@@ -2,7 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { app } = require('electron');
+let app = null;
+try {
+  app = require('electron').app;
+} catch (e) {}
 
 class RecoveryStore {
   constructor() {

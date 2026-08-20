@@ -92,6 +92,185 @@ class OpenAICompatibleProvider extends AIProvider {
     });
   }
 
+  /**
+   * Streams chat completions via standard Server-Sent Events (SSE).
+   * @param {string} apiKey
+   * @param {string} model
+   * @param {Array<Object>} messages
+   * @param {Object} options
+   * @returns {AsyncIterable<Object>}
+   */
+  async *streamChatCompletions(apiKey, model, messages, options = {}) {
+    const fullUrl = this.baseUrl.endsWith('/chat/completions')
+      ? this.baseUrl
+      : `${this.baseUrl}/chat/completions`;
+    const parsed = new URL(fullUrl);
+    const transport = parsed.protocol === 'http:' ? http : https;
+
+    const requestHeaders = {
+      'Authorization': `Bearer ${apiKey.trim()}`,
+      'User-Agent': 'NEXUS-Workbench-App',
+      'Accept': 'text/event-stream',
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    };
+
+    const payload = {
+      model,
+      messages,
+      temperature: options.temperature ?? 0.1,
+      max_tokens: options.maxTokens ?? 3000,
+      stream: true,
+      ...(options.extraBody || {}),
+    };
+
+    const postData = JSON.stringify(payload);
+    requestHeaders['Content-Length'] = Buffer.byteLength(postData);
+
+    const abortSignal = options.abortSignal;
+    let req;
+
+    const chunkQueue = [];
+    let resolveNext = null;
+    let rejectNext = null;
+    let streamEnded = false;
+    let streamError = null;
+
+    const pushChunk = (item) => {
+      if (resolveNext) {
+        const resolve = resolveNext;
+        resolveNext = null;
+        rejectNext = null;
+        resolve(item);
+      } else {
+        chunkQueue.push(item);
+      }
+    };
+
+    const pushError = (err) => {
+      streamError = err;
+      if (rejectNext) {
+        const reject = rejectNext;
+        resolveNext = null;
+        rejectNext = null;
+        reject(err);
+      }
+    };
+
+    const pushEnd = () => {
+      streamEnded = true;
+      if (resolveNext) {
+        const resolve = resolveNext;
+        resolveNext = null;
+        rejectNext = null;
+        resolve(null);
+      }
+    };
+
+    req = transport.request(
+      {
+        protocol: parsed.protocol,
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === 'http:' ? 80 : 443),
+        path: `${parsed.pathname}${parsed.search}`,
+        method: 'POST',
+        headers: requestHeaders,
+        timeout: options.timeoutMs || 45000,
+      },
+      (res) => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          let errBody = '';
+          res.on('data', (d) => (errBody += d));
+          res.on('end', () => {
+            pushError(new Error(`HTTP ${res.statusCode}: ${errBody || res.statusMessage}`));
+          });
+          return;
+        }
+
+        let buffer = '';
+        res.on('data', (chunk) => {
+          buffer += chunk.toString('utf-8');
+          const lines = buffer.split('\n');
+          buffer = lines.pop(); // Keep partial line
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith(':')) continue;
+            if (trimmed === 'data: [DONE]') {
+              continue;
+            }
+            if (trimmed.startsWith('data: ')) {
+              const dataStr = trimmed.slice(6);
+              try {
+                const parsedData = JSON.parse(dataStr);
+                const choice = parsedData.choices?.[0];
+                if (choice) {
+                  const delta = choice.delta || {};
+                  const finishReason = choice.finish_reason || null;
+                  pushChunk({
+                    content: delta.content || '',
+                    role: delta.role || 'assistant',
+                    toolCalls: delta.tool_calls || null,
+                    finishReason,
+                    raw: parsedData,
+                  });
+                }
+              } catch (parseErr) {
+                // Ignore transient unparsed line
+              }
+            }
+          }
+        });
+
+        res.on('end', () => {
+          pushEnd();
+        });
+
+        res.on('error', (err) => {
+          pushError(err);
+        });
+      }
+    );
+
+    req.on('error', (err) => pushError(err));
+    req.on('timeout', () => {
+      req.destroy();
+      pushError(new Error(`Stream connection to ${this.name} timed out`));
+    });
+
+    if (abortSignal) {
+      abortSignal.addEventListener('abort', () => {
+        if (req && !req.destroyed) req.destroy();
+        pushError(new Error('Stream aborted by client'));
+      });
+    }
+
+    req.write(postData);
+    req.end();
+
+    try {
+      while (true) {
+        if (streamError) throw streamError;
+        if (chunkQueue.length > 0) {
+          const item = chunkQueue.shift();
+          if (item) yield item;
+        } else if (streamEnded) {
+          break;
+        } else {
+          const item = await new Promise((resolve, reject) => {
+            resolveNext = resolve;
+            rejectNext = reject;
+          });
+          if (item) yield item;
+        }
+      }
+    } finally {
+      if (req && !req.destroyed) {
+        req.destroy();
+      }
+    }
+  }
+
   async validateKey(apiKey) {
     if (!this.isConfigured(apiKey)) {
       return { valid: false, error: `${this.name} API key is missing or empty` };
@@ -177,7 +356,23 @@ class OpenAICompatibleProvider extends AIProvider {
       ? '\nCRITICAL DIRECTIVE: This is a READ_ONLY analysis task. DO NOT generate code modifications or surgical patches. Return empty proposedEdits: [] for all steps.'
       : '';
 
-    const systemPrompt = `${contextPrefix}You are NEXUS Autonomous AI Agent powered by ${this.name}.
+    let systemPrompt;
+    if (intent === 'GENERAL_CHAT') {
+      systemPrompt = `${contextPrefix}You are NEXUS AI Assistant powered by ${this.name}.
+Respond conversationally, helpfully, and concisely to the user's message.
+DO NOT generate any code modifications or surgical patches.
+
+Workspace files context:
+${fileSummaries}
+
+Respond ONLY with a valid JSON object matching this schema:
+{
+  "summary": "<Helpful conversational response>",
+  "taskIntent": "GENERAL_CHAT",
+  "steps": []
+}`;
+    } else {
+      systemPrompt = `${contextPrefix}You are NEXUS Autonomous AI Agent powered by ${this.name}.
 Analyze the workspace and task, then output a structured JSON plan with maximum ${maxSteps} steps.${readOnlyDirective}
 Active editor file: "${relativeTarget}". Treat it as the primary analysis target. All proposedEdits must target this file.
 
@@ -187,6 +382,7 @@ ${fileSummaries}
 Respond ONLY with a valid JSON object strictly matching this schema:
 {
   "summary": "<High level execution summary>",
+  "taskIntent": "${intent}",
   "steps": [
     {
       "id": "step-1",
@@ -203,12 +399,13 @@ Respond ONLY with a valid JSON object strictly matching this schema:
     }
   ]
 }`;
+    }
 
     const requestBody = {
       model: selectedModel,
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Task Directive: "${task}"\nGenerate the structured execution plan in JSON.` },
+        { role: 'user', content: intent === 'GENERAL_CHAT' ? `User message: "${task}"` : `Task Directive: "${task}"\nGenerate the structured execution plan in JSON.` },
       ],
       temperature: 0.1,
       max_tokens: 3000,
