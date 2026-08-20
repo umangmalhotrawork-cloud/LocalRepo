@@ -224,11 +224,11 @@ export default function CodexBottomComposer({
                     borderColor: "var(--theme-border-card, #242436)",
                     color: "var(--theme-accent, #22d3ee)",
                   }}
-                  className="px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 cursor-pointer"
+                  className="px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 cursor-pointer max-w-[180px]"
                 >
-                  <Cpu className="w-3.5 h-3.5 text-purple-400" />
-                  <span>Gemini 1.5 Flash</span>
-                  <ChevronDown className="w-3 h-3 text-zinc-500" />
+                  <Cpu className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                  <span className="truncate capitalize">{activeProvider} ({activeModel.split('/').pop()?.replace(/^models\//, '') || activeModel})</span>
+                  <ChevronDown className="w-3 h-3 text-zinc-500 shrink-0" />
                 </button>
 
                 {showModelDropdown && (
@@ -238,41 +238,34 @@ export default function CodexBottomComposer({
                       backgroundColor: "var(--theme-surface-card, #0c0c14)",
                       borderColor: "var(--theme-border-card, #242436)",
                     }}
-                    className="absolute left-0 bottom-9 w-52 border rounded-xl shadow-2xl z-50 p-1 space-y-1 text-xs"
+                    className="absolute left-0 bottom-9 w-64 border rounded-xl shadow-2xl z-50 p-1.5 space-y-1 text-xs max-h-56 overflow-y-auto"
                   >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSelectModel("gemini", "gemini-1.5-flash");
-                        setShowModelDropdown(false);
-                      }}
-                      className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between hover:bg-white/5 text-cyan-300 cursor-pointer font-bold"
-                    >
-                      <span>✓ Gemini 1.5 Flash</span>
-                      <span className="text-[9px] text-emerald-400">Connected</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSelectModel("claude");
-                        setShowModelDropdown(false);
-                      }}
-                      className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between hover:bg-white/5 text-zinc-400 cursor-pointer opacity-70"
-                    >
-                      <span>Claude</span>
-                      <span className="text-[9px] text-zinc-500">Fallback</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSelectModel("grok");
-                        setShowModelDropdown(false);
-                      }}
-                      className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between hover:bg-white/5 text-zinc-400 cursor-pointer opacity-70"
-                    >
-                      <span>Grok</span>
-                      <span className="text-[9px] text-zinc-500">Fallback</span>
-                    </button>
+                    {[
+                      { id: "gemini", name: "Gemini", defaultModel: "gemini-1.5-flash" },
+                      { id: "groq", name: "Groq", defaultModel: "llama-3.3-70b-versatile" },
+                      { id: "openai", name: "OpenAI", defaultModel: "gpt-4o" },
+                      { id: "claude", name: "Claude", defaultModel: "claude-3-5-sonnet-20241022" },
+                      { id: "deepseek", name: "DeepSeek", defaultModel: "deepseek-coder" },
+                      { id: "grok", name: "Grok", defaultModel: "grok-2-latest" },
+                    ].map((p) => {
+                      const isSel = activeProvider === p.id;
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            onSelectModel(p.id, p.defaultModel);
+                            setShowModelDropdown(false);
+                          }}
+                          className={`w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between hover:bg-white/5 cursor-pointer text-xs ${
+                            isSel ? "text-cyan-300 font-bold bg-cyan-950/40" : "text-zinc-400"
+                          }`}
+                        >
+                          <span className="truncate">{isSel ? `✓ ${p.name}` : p.name}</span>
+                          <span className="text-[9px] text-zinc-500 capitalize">{p.defaultModel.split('-')[0]}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>

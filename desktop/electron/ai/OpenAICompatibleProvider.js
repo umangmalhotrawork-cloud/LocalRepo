@@ -1,44 +1,40 @@
 /**
- * NEXUS Multi-Model AI Architecture - Anthropic Claude Provider Adapter
+ * NEXUS Multi-Model AI Architecture - OpenAI Compatible Base Provider Adapter
+ * Powers OpenAI, Groq, DeepSeek, and Grok (xAI) using standard REST APIs.
  */
 
 const https = require('https');
+const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const AIProvider = require('./AIProvider');
-const { PROVIDER_IDS, DEFAULT_MODELS } = require('./types');
 
-class ClaudeProvider extends AIProvider {
-  constructor() {
-    super(
-      PROVIDER_IDS.CLAUDE,
-      'Claude',
-      [
-        { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet' },
-        { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku' },
-        { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus' },
-        { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku' },
-      ],
-      DEFAULT_MODELS[PROVIDER_IDS.CLAUDE] || 'claude-3-5-sonnet-20241022'
-    );
+class OpenAICompatibleProvider extends AIProvider {
+  constructor(id, name, baseUrl, staticModels = [], defaultModel = '', options = {}) {
+    super(id, name, staticModels, defaultModel);
+    this.baseUrl = baseUrl.replace(/\/+$/, '');
+    this.staticModels = staticModels;
     this.dynamicModels = null;
+    this.options = options;
   }
 
   getModels() {
     if (this.dynamicModels && this.dynamicModels.length > 0) {
       return this.dynamicModels;
     }
-    return this.models;
+    return this.staticModels;
   }
 
-  request(endpoint, method = 'GET', apiKey = '', body = null, timeoutMs = 25000) {
-    const parsed = new URL(`https://api.anthropic.com/v1${endpoint}`);
+  request(endpoint, method = 'GET', apiKey = '', body = null, headers = {}, timeoutMs = 25000) {
+    const fullUrl = endpoint.startsWith('http') ? endpoint : `${this.baseUrl}${endpoint}`;
+    const parsed = new URL(fullUrl);
+    const transport = parsed.protocol === 'http:' ? http : https;
 
     const requestHeaders = {
-      'x-api-key': apiKey.trim(),
-      'anthropic-version': '2023-06-01',
+      'Authorization': `Bearer ${apiKey.trim()}`,
       'User-Agent': 'NEXUS-Workbench-App',
       'Accept': 'application/json',
+      ...headers,
     };
 
     let postData = null;
@@ -49,10 +45,11 @@ class ClaudeProvider extends AIProvider {
     }
 
     return new Promise((resolve, reject) => {
-      const req = https.request(
+      const req = transport.request(
         {
+          protocol: parsed.protocol,
           hostname: parsed.hostname,
-          port: 443,
+          port: parsed.port || (parsed.protocol === 'http:' ? 80 : 443),
           path: `${parsed.pathname}${parsed.search}`,
           method,
           headers: requestHeaders,
@@ -85,7 +82,7 @@ class ClaudeProvider extends AIProvider {
       req.on('error', reject);
       req.on('timeout', () => {
         req.destroy();
-        reject(new Error(`Connection to Claude API timed out after ${timeoutMs}ms`));
+        reject(new Error(`Connection to ${this.name} timed out after ${timeoutMs}ms`));
       });
 
       if (postData) {
@@ -97,26 +94,37 @@ class ClaudeProvider extends AIProvider {
 
   async validateKey(apiKey) {
     if (!this.isConfigured(apiKey)) {
-      return { valid: false, error: 'Claude API key is missing or empty' };
+      return { valid: false, error: `${this.name} API key is missing or empty` };
     }
 
     try {
-      const res = await this.request('/models', 'GET', apiKey, null, 12000);
+      const res = await this.request('/models', 'GET', apiKey, null, {}, 12000);
       const rawModels = res.data?.data || (Array.isArray(res.data) ? res.data : []);
 
       if (Array.isArray(rawModels) && rawModels.length > 0) {
+        // Filter and map relevant models
         const mapped = rawModels
-          .filter((m) => m.id && typeof m.id === 'string' && m.id.includes('claude'))
+          .filter((m) => {
+            const id = (m.id || '').toLowerCase();
+            // Filter out non-chat / whisper / embedding models if possible
+            if (id.includes('embed') || id.includes('whisper') || id.includes('tts') || id.includes('dall-e') || id.includes('audio') || id.includes('moderation') || id.includes('guard')) {
+              return false;
+            }
+            return true;
+          })
           .map((m) => ({
             id: m.id,
-            name: m.display_name || m.id,
+            name: m.name || m.id,
           }));
 
         if (mapped.length > 0) {
+          // Prepend default model if present in static list
           const combinedMap = new Map();
-          for (const sm of this.models) combinedMap.set(sm.id, sm);
+          for (const sm of this.staticModels) combinedMap.set(sm.id, sm);
           for (const dm of mapped) {
-            if (!combinedMap.has(dm.id)) combinedMap.set(dm.id, dm);
+            if (!combinedMap.has(dm.id)) {
+              combinedMap.set(dm.id, dm);
+            }
           }
           this.dynamicModels = Array.from(combinedMap.values());
         }
@@ -126,10 +134,10 @@ class ClaudeProvider extends AIProvider {
     } catch (err) {
       const code = err.statusCode;
       let userFriendly = err.message;
-      if (code === 401 || userFriendly.toLowerCase().includes('auth') || userFriendly.toLowerCase().includes('invalid')) {
-        userFriendly = 'Invalid Claude API key. Please verify your credentials.';
+      if (code === 401 || userFriendly.toLowerCase().includes('invalid') || userFriendly.toLowerCase().includes('auth')) {
+        userFriendly = `Invalid ${this.name} API key. Please verify your credentials.`;
       } else if (code === 429) {
-        userFriendly = 'Claude rate limit or quota exceeded.';
+        userFriendly = `${this.name} rate limit or quota exceeded.`;
       }
       return { valid: false, error: userFriendly, statusCode: code };
     }
@@ -137,7 +145,7 @@ class ClaudeProvider extends AIProvider {
 
   async generateAgentPlan(apiKey, model, payload = {}) {
     if (!this.isConfigured(apiKey)) {
-      throw new Error('Claude API key is not configured');
+      throw new Error(`${this.name} API key is not configured`);
     }
 
     const {
@@ -169,14 +177,14 @@ class ClaudeProvider extends AIProvider {
       ? '\nCRITICAL DIRECTIVE: This is a READ_ONLY analysis task. DO NOT generate code modifications or surgical patches. Return empty proposedEdits: [] for all steps.'
       : '';
 
-    const systemPrompt = `${contextPrefix}You are NEXUS Autonomous AI Agent powered by Claude.
+    const systemPrompt = `${contextPrefix}You are NEXUS Autonomous AI Agent powered by ${this.name}.
 Analyze the workspace and task, then output a structured JSON plan with maximum ${maxSteps} steps.${readOnlyDirective}
 Active editor file: "${relativeTarget}". Treat it as the primary analysis target. All proposedEdits must target this file.
 
 Workspace files context:
 ${fileSummaries}
 
-Respond ONLY with a valid JSON object strictly matching this schema (no markdown wrap, no conversational filler):
+Respond ONLY with a valid JSON object strictly matching this schema:
 {
   "summary": "<High level execution summary>",
   "steps": [
@@ -198,26 +206,40 @@ Respond ONLY with a valid JSON object strictly matching this schema (no markdown
 
     const requestBody = {
       model: selectedModel,
-      max_tokens: 3000,
-      system: systemPrompt,
       messages: [
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: `Task Directive: "${task}"\nGenerate the structured execution plan in JSON.` },
       ],
       temperature: 0.1,
+      max_tokens: 3000,
     };
 
-    const res = await this.request('/messages', 'POST', apiKey, requestBody, 35000);
-    const textPart = res.data?.content?.[0]?.text || '';
+    if (this.options.supportsJsonMode !== false) {
+      requestBody.response_format = { type: 'json_object' };
+    }
 
-    if (!textPart || !textPart.trim()) {
-      throw new Error('Empty response from Claude API');
+    let res;
+    try {
+      res = await this.request('/chat/completions', 'POST', apiKey, requestBody, {}, 35000);
+    } catch (apiErr) {
+      if (apiErr.data?.error?.message && apiErr.data.error.message.includes('response_format')) {
+        delete requestBody.response_format;
+        res = await this.request('/chat/completions', 'POST', apiKey, requestBody, {}, 35000);
+      } else {
+        throw apiErr;
+      }
+    }
+
+    const content = res.data?.choices?.[0]?.message?.content || '';
+    if (!content || !content.trim()) {
+      throw new Error(`Empty response from ${this.name} API`);
     }
 
     let parsed = null;
     try {
-      parsed = JSON.parse(textPart);
+      parsed = JSON.parse(content);
     } catch (parseErr) {
-      const match = textPart.match(/\{[\s\S]*\}/);
+      const match = content.match(/\{[\s\S]*\}/);
       if (match) {
         try {
           parsed = JSON.parse(match[0]);
@@ -226,12 +248,12 @@ Respond ONLY with a valid JSON object strictly matching this schema (no markdown
     }
 
     if (!parsed || typeof parsed !== 'object') {
-      throw new Error(`Invalid JSON format returned from Claude model ${selectedModel}`);
+      throw new Error(`Invalid JSON format returned from ${this.name} model ${selectedModel}`);
     }
 
     const normalizedSteps = Array.isArray(parsed.steps) ? parsed.steps : [];
     return {
-      summary: parsed.summary || `Plan generated by Claude (${selectedModel})`,
+      summary: parsed.summary || `Plan generated by ${this.name} (${selectedModel})`,
       steps: normalizedSteps.map((s, idx) => ({
         id: s.id || `step-${idx + 1}`,
         title: s.title || `Step ${idx + 1}`,
@@ -247,13 +269,13 @@ Respond ONLY with a valid JSON object strictly matching this schema (no markdown
               }))
           : [],
       })),
-      rawResponse: textPart,
+      rawResponse: content,
     };
   }
 
   async generateCodeAction(apiKey, model, payload = {}) {
     if (!this.isConfigured(apiKey)) {
-      throw new Error('Claude API key is not configured');
+      throw new Error(`${this.name} API key is not configured`);
     }
 
     const {
@@ -268,7 +290,7 @@ Respond ONLY with a valid JSON object strictly matching this schema (no markdown
     const selectedModel = model || this.getDefaultModel();
     const contextPrefix = continuumContextText ? `${continuumContextText}\n\n---\n\n` : '';
 
-    const systemPrompt = `${contextPrefix}You are an expert AI code assistant integrated into NEXUS Workbench powered by Claude.
+    const systemPrompt = `${contextPrefix}You are an expert AI code assistant integrated into NEXUS Workbench powered by ${this.name}.
 Your task is to perform the action "${action}" on the provided code selection.
 Language: ${language}
 File: ${filePath}
@@ -285,19 +307,19 @@ If your response proposes replacement code for the selection, ensure the replace
 
     const requestBody = {
       model: selectedModel,
-      max_tokens: 2048,
-      system: systemPrompt,
       messages: [
+        { role: 'system', content: systemPrompt },
         {
           role: 'user',
           content: `Code Selection:\n\`\`\`${language}\n${selection}\n\`\`\`\n\nFull File Context (reference):\n\`\`\`${language}\n${(fullFile || '').slice(0, 3000)}\n\`\`\``,
         },
       ],
       temperature: 0.2,
+      max_tokens: 2048,
     };
 
-    const res = await this.request('/messages', 'POST', apiKey, requestBody, 25000);
-    const text = res.data?.content?.[0]?.text || 'No response generated.';
+    const res = await this.request('/chat/completions', 'POST', apiKey, requestBody, {}, 25000);
+    const text = res.data?.choices?.[0]?.message?.content || 'No response generated.';
 
     let proposedPatch = undefined;
     if (['fix', 'refactor', 'docs'].includes(action)) {
@@ -321,4 +343,4 @@ If your response proposes replacement code for the selection, ensure the replace
   }
 }
 
-module.exports = ClaudeProvider;
+module.exports = OpenAICompatibleProvider;

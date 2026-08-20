@@ -31,14 +31,14 @@ class ContinuumManager {
 
     // Fallback standard location
     const homeDir = os.homedir();
-    const defaultDir = path.join(homeDir, 'Library', 'Application Support', 'echo-nullity');
+    const defaultDir = path.join(homeDir, 'Library', 'Application Support', 'NEXUS');
     try {
       if (!fs.existsSync(defaultDir)) {
         fs.mkdirSync(defaultDir, { recursive: true });
       }
       return defaultDir;
     } catch (e) {
-      const fallback = path.join(process.cwd(), '.echo-nullity-continuum');
+      const fallback = path.join(process.cwd(), '.nexus-continuum');
       try { fs.mkdirSync(fallback, { recursive: true }); } catch (_) {}
       return fallback;
     }

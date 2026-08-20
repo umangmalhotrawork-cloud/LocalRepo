@@ -1,37 +1,24 @@
 /**
- * NEXUS Multi-Model AI Architecture - DeepSeek Provider Adapter (Architecture-Ready / Unconfigured)
+ * NEXUS Multi-Model AI Architecture - DeepSeek Provider Adapter
  */
 
-const AIProvider = require('./AIProvider');
-const { PROVIDER_IDS } = require('./types');
+const OpenAICompatibleProvider = require('./OpenAICompatibleProvider');
+const { PROVIDER_IDS, DEFAULT_MODELS } = require('./types');
 
-class DeepSeekProvider extends AIProvider {
+class DeepSeekProvider extends OpenAICompatibleProvider {
   constructor() {
     super(
       PROVIDER_IDS.DEEPSEEK,
       'DeepSeek',
+      'https://api.deepseek.com',
       [
-        { id: 'deepseek-coder-v2', name: 'DeepSeek Coder V2' },
-        { id: 'deepseek-chat', name: 'DeepSeek Chat V2' },
+        { id: 'deepseek-coder', name: 'DeepSeek Coder' },
+        { id: 'deepseek-chat', name: 'DeepSeek Chat' },
+        { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner (R1)' },
       ],
-      'deepseek-coder-v2'
+      DEFAULT_MODELS[PROVIDER_IDS.DEEPSEEK] || 'deepseek-coder',
+      { supportsJsonMode: true }
     );
-  }
-
-  isConfigured(apiKey) {
-    return false;
-  }
-
-  async validateKey(apiKey) {
-    return { valid: false, error: 'DeepSeek provider integration is coming soon in Phase 2.' };
-  }
-
-  async generateAgentPlan(apiKey, model, payload) {
-    throw new Error('DeepSeek provider is not configured for Phase 1. Please select Gemini.');
-  }
-
-  async generateCodeAction(apiKey, model, payload) {
-    throw new Error('DeepSeek provider is not configured for Phase 1. Please select Gemini.');
   }
 }
 

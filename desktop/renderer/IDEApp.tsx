@@ -511,20 +511,33 @@ export default function IDEApp() {
   const [toolsDrawerTab, setToolsDrawerTab] = useState<ToolTab>("explorer");
 
   // Lazy API Key Prompt State
+  const [aiActiveProvider, setAiActiveProvider] = useState<string>("gemini");
+  const [aiActiveModel, setAiActiveModel] = useState<string>("gemini-1.5-flash");
   const [showApiKeyRequiredModal, setShowApiKeyRequiredModal] = useState<boolean>(false);
   const pendingAiActionRef = useRef<(() => void) | null>(null);
   const pendingAiTaskPromptRef = useRef<string | null>(null);
 
-  const ensureApiKeyConfigured = async (onConfigured: () => void, taskPrompt?: string): Promise<boolean> => {
+  useEffect(() => {
+    if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getConfig) {
+      (window as any).electronAPI.ai.getConfig().then((cfg: any) => {
+        if (cfg?.activeProvider) setAiActiveProvider(cfg.activeProvider);
+        if (cfg?.activeModel) setAiActiveModel(cfg.activeModel);
+      }).catch(() => {});
+    }
+  }, []);
+
+  const ensureApiKeyConfigured = async (onConfigured?: () => void, taskPrompt?: string, targetProvider?: string): Promise<boolean> => {
     if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getConfig) {
       try {
         const config = await (window as any).electronAPI.ai.getConfig();
-        const activeProvider = config?.activeProvider || "gemini";
+        const activeProvider = targetProvider || config?.activeProvider || "gemini";
+        setAiActiveProvider(activeProvider);
+        if (config?.activeModel) setAiActiveModel(config.activeModel);
         const providerConfig = config?.providers?.find((p: any) => p.id === activeProvider);
         const isConfigured = Boolean(providerConfig?.isConfigured && providerConfig?.status === "CONNECTED");
 
         if (isConfigured) {
-          onConfigured();
+          if (onConfigured) onConfigured();
           return true;
         }
       } catch (e) {
@@ -533,7 +546,7 @@ export default function IDEApp() {
     }
 
     // Key is missing/unconfigured -> save pending action in memory & show modal
-    pendingAiActionRef.current = onConfigured;
+    pendingAiActionRef.current = onConfigured || null;
     pendingAiTaskPromptRef.current = taskPrompt || null;
     setShowApiKeyRequiredModal(true);
     return false;
@@ -4091,15 +4104,19 @@ return (
               isOpen={showCodexAiControl}
               onClose={() => setShowCodexAiControl(false)}
               triggerRef={aiControlTriggerRef}
-              activeProvider="gemini"
-              activeModel="gemini-1.5-flash"
+              activeProvider={aiActiveProvider}
+              activeModel={aiActiveModel}
               onSelectModel={(pId, mId) => {
+                setAiActiveProvider(pId);
+                if (mId) setAiActiveModel(mId);
                 if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.setConfig) {
                   (window as any).electronAPI.ai.setConfig(pId, mId);
                 }
               }}
-              onOpenApiKeyModal={() => {
+              onOpenApiKeyModal={(pId) => {
+                if (pId) setAiActiveProvider(pId);
                 setShowCodexAiControl(false);
+                setShowApiKeyRequiredModal(true);
               }}
             />
           </div>
@@ -6136,8 +6153,7 @@ return (
         isOpen={showApiKeyRequiredModal}
         onClose={handleApiKeyModalClose}
         onSuccess={handleApiKeyModalSuccess}
-        providerName="Gemini"
-        providerId="gemini"
+        providerId={aiActiveProvider}
       />
 
     </div>

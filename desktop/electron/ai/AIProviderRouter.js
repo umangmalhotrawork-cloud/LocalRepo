@@ -1,10 +1,18 @@
+/**
+ * NEXUS Multi-Model AI Architecture - Provider-Agnostic AI Router
+ * Manages provider registration, secure per-provider credential storage,
+ * dynamic model routing, and strict key isolation.
+ */
+
 const fs = require('fs');
 const path = require('path');
-const { PROVIDER_IDS, PROVIDER_STATUS, DEFAULT_MODELS } = require('./types');
+const { PROVIDER_IDS, PROVIDER_STATUS, DEFAULT_MODELS, PROVIDER_METADATA } = require('./types');
 const GeminiProvider = require('./GeminiProvider');
+const GroqProvider = require('./GroqProvider');
+const OpenAIProvider = require('./OpenAIProvider');
 const ClaudeProvider = require('./ClaudeProvider');
-const GrokProvider = require('./GrokProvider');
 const DeepSeekProvider = require('./DeepSeekProvider');
+const GrokProvider = require('./GrokProvider');
 
 let appModule = null;
 let safeStorageModule = null;
@@ -36,13 +44,18 @@ class AIProviderRouter {
         }
       } catch (e) {}
     }
-    return null;
+    return path.join(process.cwd(), '.echo-nullity-recovery', 'nexus_ai_vault.json');
   }
 
   saveKeyToVault(providerId, apiKey) {
     const vaultPath = this.getVaultFilePath();
     if (!vaultPath) return;
     try {
+      const dir = path.dirname(vaultPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
       let vault = {};
       if (fs.existsSync(vaultPath)) {
         try {
@@ -51,6 +64,7 @@ class AIProviderRouter {
           vault = {};
         }
       }
+
       if (apiKey) {
         if (safeStorageModule && typeof safeStorageModule.isEncryptionAvailable === 'function' && safeStorageModule.isEncryptionAvailable()) {
           vault[providerId] = { enc: safeStorageModule.encryptString(apiKey).toString('hex') };
@@ -60,6 +74,7 @@ class AIProviderRouter {
       } else {
         delete vault[providerId];
       }
+
       fs.writeFileSync(vaultPath, JSON.stringify(vault, null, 2), 'utf8');
     } catch (e) {
       console.warn('[AI-VAULT] Failed to persist key to vault:', e.message);
@@ -100,23 +115,43 @@ class AIProviderRouter {
 
   registerProviders() {
     const gemini = new GeminiProvider();
+    const groq = new GroqProvider();
+    const openai = new OpenAIProvider();
     const claude = new ClaudeProvider();
-    const grok = new GrokProvider();
     const deepseek = new DeepSeekProvider();
+    const grok = new GrokProvider();
 
     this.providers.set(gemini.getId(), gemini);
+    this.providers.set(groq.getId(), groq);
+    this.providers.set(openai.getId(), openai);
     this.providers.set(claude.getId(), claude);
-    this.providers.set(grok.getId(), grok);
     this.providers.set(deepseek.getId(), deepseek);
+    this.providers.set(grok.getId(), grok);
   }
 
   initDefaultKeys() {
-    const envGeminiKey = process.env.GEMINI_API_KEY;
-    if (envGeminiKey && envGeminiKey.trim()) {
-      this.apiKeys.set(PROVIDER_IDS.GEMINI, envGeminiKey.trim());
-      this.keyValidationStatus.set(PROVIDER_IDS.GEMINI, PROVIDER_STATUS.CONNECTED);
-      return;
+    // 1. Check environment variables per provider
+    const envMappings = {
+      [PROVIDER_IDS.GEMINI]: ['GEMINI_API_KEY'],
+      [PROVIDER_IDS.GROQ]: ['GROQ_API_KEY'],
+      [PROVIDER_IDS.OPENAI]: ['OPENAI_API_KEY'],
+      [PROVIDER_IDS.CLAUDE]: ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY'],
+      [PROVIDER_IDS.DEEPSEEK]: ['DEEPSEEK_API_KEY'],
+      [PROVIDER_IDS.GROK]: ['XAI_API_KEY', 'GROK_API_KEY'],
+    };
+
+    for (const [pId, envKeys] of Object.entries(envMappings)) {
+      for (const envKey of envKeys) {
+        const val = process.env[envKey];
+        if (val && val.trim()) {
+          this.apiKeys.set(pId, val.trim());
+          this.keyValidationStatus.set(pId, PROVIDER_STATUS.CONNECTED);
+          break;
+        }
+      }
     }
+
+    // 2. Load keys from encrypted persistent vault
     this.loadKeysFromVault();
   }
 
@@ -139,15 +174,10 @@ class AIProviderRouter {
   }
 
   getProviderStatus(providerId) {
-    if (providerId !== PROVIDER_IDS.GEMINI) {
-      return PROVIDER_STATUS.NOT_CONFIGURED;
-    }
-
     const key = this.apiKeys.get(providerId);
     if (!key || !key.trim()) {
       return PROVIDER_STATUS.NOT_CONFIGURED;
     }
-
     return this.keyValidationStatus.get(providerId) || PROVIDER_STATUS.CONNECTED;
   }
 
@@ -155,6 +185,7 @@ class AIProviderRouter {
     const providersList = Array.from(this.providers.values()).map((p) => {
       const pId = p.getId();
       const status = this.getProviderStatus(pId);
+      const meta = PROVIDER_METADATA[pId] || {};
       return {
         id: pId,
         name: p.getName(),
@@ -163,6 +194,8 @@ class AIProviderRouter {
         status,
         maskedKey: this.getMaskedKey(pId),
         isConfigured: status === PROVIDER_STATUS.CONNECTED,
+        keyPlaceholder: meta.keyPlaceholder || 'Enter API key...',
+        helpUrl: meta.helpUrl || '',
       };
     });
 
@@ -194,10 +227,6 @@ class AIProviderRouter {
       return { success: false, error: `Unsupported provider: ${providerId}` };
     }
 
-    if (providerId !== PROVIDER_IDS.GEMINI) {
-      return { success: false, error: `Provider ${providerId} is not functional in Phase 1.` };
-    }
-
     const trimmedKey = (apiKey || '').trim();
     if (!trimmedKey) {
       this.apiKeys.delete(providerId);
@@ -218,13 +247,14 @@ class AIProviderRouter {
         status: PROVIDER_STATUS.CONNECTED,
         maskedKey: this.getMaskedKey(providerId),
         configured: true,
+        models: provider.getModels(),
       };
     } else {
       this.keyValidationStatus.set(providerId, PROVIDER_STATUS.INVALID_KEY);
       return {
         success: false,
         status: PROVIDER_STATUS.INVALID_KEY,
-        error: validation.error || 'Invalid API key or Gemini connection failed.',
+        error: validation.error || `Invalid API key or ${provider.getName()} connection failed.`,
         configured: false,
       };
     }
@@ -245,6 +275,10 @@ class AIProviderRouter {
     return provider.validateKey(apiKey);
   }
 
+  /**
+   * Resolves target provider, model, and isolated key.
+   * GUARANTEE: Never sends one provider's key to another provider.
+   */
   resolveProviderAndModel(requestedProviderId, requestedModelId) {
     const pId = requestedProviderId || this.activeProviderId;
     const mId = requestedModelId || (pId === this.activeProviderId ? this.activeModelId : undefined);

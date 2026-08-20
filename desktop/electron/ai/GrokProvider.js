@@ -1,37 +1,24 @@
 /**
- * NEXUS Multi-Model AI Architecture - Grok Provider Adapter (Architecture-Ready / Unconfigured)
+ * NEXUS Multi-Model AI Architecture - Grok (xAI) Provider Adapter
  */
 
-const AIProvider = require('./AIProvider');
-const { PROVIDER_IDS } = require('./types');
+const OpenAICompatibleProvider = require('./OpenAICompatibleProvider');
+const { PROVIDER_IDS, DEFAULT_MODELS } = require('./types');
 
-class GrokProvider extends AIProvider {
+class GrokProvider extends OpenAICompatibleProvider {
   constructor() {
     super(
       PROVIDER_IDS.GROK,
       'Grok',
+      'https://api.x.ai/v1',
       [
-        { id: 'grok-2', name: 'Grok 2' },
+        { id: 'grok-2-latest', name: 'Grok 2' },
         { id: 'grok-beta', name: 'Grok Beta' },
+        { id: 'grok-vision-beta', name: 'Grok Vision Beta' },
       ],
-      'grok-2'
+      DEFAULT_MODELS[PROVIDER_IDS.GROK] || 'grok-2-latest',
+      { supportsJsonMode: true }
     );
-  }
-
-  isConfigured(apiKey) {
-    return false;
-  }
-
-  async validateKey(apiKey) {
-    return { valid: false, error: 'Grok provider integration is coming soon in Phase 2.' };
-  }
-
-  async generateAgentPlan(apiKey, model, payload) {
-    throw new Error('Grok provider is not configured for Phase 1. Please select Gemini.');
-  }
-
-  async generateCodeAction(apiKey, model, payload) {
-    throw new Error('Grok provider is not configured for Phase 1. Please select Gemini.');
   }
 }
 

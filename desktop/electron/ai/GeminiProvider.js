@@ -6,7 +6,7 @@ const https = require('https');
 const path = require('path');
 const fs = require('fs');
 const AIProvider = require('./AIProvider');
-const { PROVIDER_IDS } = require('./types');
+const { PROVIDER_IDS, DEFAULT_MODELS } = require('./types');
 
 class GeminiProvider extends AIProvider {
   constructor() {
@@ -16,25 +16,37 @@ class GeminiProvider extends AIProvider {
       [
         { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash' },
         { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' },
+        { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
+        { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
       ],
-      'gemini-1.5-flash'
+      DEFAULT_MODELS[PROVIDER_IDS.GEMINI] || 'gemini-1.5-flash'
     );
+    this.dynamicModels = null;
+  }
+
+  getModels() {
+    if (this.dynamicModels && this.dynamicModels.length > 0) {
+      return this.dynamicModels;
+    }
+    return this.models;
   }
 
   async validateKey(apiKey) {
     if (!this.isConfigured(apiKey)) {
-      return { valid: false, error: 'Gemini API key is missing' };
+      return { valid: false, error: 'Gemini API key is missing or empty' };
     }
 
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey.trim())}`;
       const responseText = await new Promise((resolve, reject) => {
-        const req = https.get(url, { timeout: 10000 }, (res) => {
+        const req = https.get(url, { timeout: 12000 }, (res) => {
           let data = '';
           res.on('data', (c) => (data += c));
           res.on('end', () => {
             if (res.statusCode >= 200 && res.statusCode < 300) {
               resolve(data);
+            } else if (res.statusCode === 400 || res.statusCode === 403) {
+              reject(new Error('Invalid Gemini API key. Please check your credentials at Google AI Studio.'));
             } else {
               reject(new Error(`API returned status ${res.statusCode}`));
             }
@@ -43,17 +55,40 @@ class GeminiProvider extends AIProvider {
         req.on('error', reject);
         req.on('timeout', () => {
           req.destroy();
-          reject(new Error('Connection timed out'));
+          reject(new Error('Connection timed out connecting to Gemini API'));
         });
       });
 
       const parsed = JSON.parse(responseText);
-      if (Array.isArray(parsed.models)) {
-        return { valid: true };
+      if (Array.isArray(parsed.models) && parsed.models.length > 0) {
+        const mapped = parsed.models
+          .filter((m) => {
+            const name = (m.name || '').replace(/^models\//, '');
+            const methods = Array.isArray(m.supportedGenerationMethods) ? m.supportedGenerationMethods : [];
+            return methods.includes('generateContent') || name.includes('gemini');
+          })
+          .map((m) => {
+            const cleanId = (m.name || '').replace(/^models\//, '');
+            return {
+              id: cleanId,
+              name: m.displayName || cleanId,
+            };
+          });
+
+        if (mapped.length > 0) {
+          const combinedMap = new Map();
+          for (const sm of this.models) combinedMap.set(sm.id, sm);
+          for (const dm of mapped) {
+            if (!combinedMap.has(dm.id)) combinedMap.set(dm.id, dm);
+          }
+          this.dynamicModels = Array.from(combinedMap.values());
+        }
+
+        return { valid: true, models: this.getModels() };
       }
       return { valid: false, error: 'Invalid response from Gemini API' };
     } catch (err) {
-      return { valid: false, error: err.message || 'Key validation failed' };
+      return { valid: false, error: err.message || 'Gemini key validation failed' };
     }
   }
 
@@ -73,9 +108,9 @@ class GeminiProvider extends AIProvider {
       intent = 'MUTATION',
     } = payload;
 
-    const selectedModel = model || this.defaultModel;
-    const relativeTarget = path.relative(workspacePath, targetFile) || path.basename(targetFile);
-    const orderedFiles = [targetFile, ...files.filter((file) => path.resolve(file) !== path.resolve(targetFile))];
+    const selectedModel = model || this.getDefaultModel();
+    const relativeTarget = targetFile ? (path.relative(workspacePath, targetFile) || path.basename(targetFile)) : 'workspace';
+    const orderedFiles = targetFile ? [targetFile, ...files.filter((file) => path.resolve(file) !== path.resolve(targetFile))] : files;
 
     const fileSummaries = orderedFiles.slice(0, 10).map((f) => {
       try {
@@ -119,12 +154,13 @@ Format strictly as JSON:
   ]
 }`;
 
+    const cleanModelName = selectedModel.replace(/^models\//, '');
     const requestBody = JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
       generationConfig: { temperature: 0.1, maxOutputTokens: 3000 },
     });
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cleanModelName)}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
 
     const responseText = await new Promise((resolve, reject) => {
       const req = https.request(
@@ -135,7 +171,7 @@ Format strictly as JSON:
             'Content-Type': 'application/json',
             'Content-Length': Buffer.byteLength(requestBody),
           },
-          timeout: 20000,
+          timeout: 25000,
         },
         (res) => {
           let data = '';
@@ -225,7 +261,8 @@ Format strictly as JSON:
       continuumContextText = '',
     } = payload;
 
-    const selectedModel = model || this.defaultModel;
+    const selectedModel = model || this.getDefaultModel();
+    const cleanModelName = selectedModel.replace(/^models\//, '');
     const contextPrefix = continuumContextText ? `${continuumContextText}\n\n---\n\n` : '';
     const systemPrompt = `${contextPrefix}You are an expert AI code assistant integrated into NEXUS Workbench.
 Your task is to perform the action "${action}" on the provided code selection.
@@ -247,7 +284,7 @@ If your response proposes replacement code for the selection, ensure the replace
         {
           role: 'user',
           parts: [
-            { text: `${systemPrompt}\n\nCode Selection:\n\`\`\`${language}\n${selection}\n\`\`\`\n\nFull File Context (reference):\n\`\`\`${language}\n${fullFile.slice(0, 3000)}\n\`\`\`` },
+            { text: `${systemPrompt}\n\nCode Selection:\n\`\`\`${language}\n${selection}\n\`\`\`\n\nFull File Context (reference):\n\`\`\`${language}\n${(fullFile || '').slice(0, 3000)}\n\`\`\`` },
           ],
         },
       ],
@@ -257,7 +294,7 @@ If your response proposes replacement code for the selection, ensure the replace
       },
     });
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cleanModelName)}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
 
     const responseText = await new Promise((resolve, reject) => {
       const req = https.request(
@@ -268,7 +305,7 @@ If your response proposes replacement code for the selection, ensure the replace
             'Content-Type': 'application/json',
             'Content-Length': Buffer.byteLength(requestBody),
           },
-          timeout: 15000,
+          timeout: 20000,
         },
         (res) => {
           let data = '';
@@ -316,6 +353,8 @@ If your response proposes replacement code for the selection, ensure the replace
       action,
       response: text,
       proposedPatch,
+      model: cleanModelName,
+      provider: this.getId(),
     };
   }
 }

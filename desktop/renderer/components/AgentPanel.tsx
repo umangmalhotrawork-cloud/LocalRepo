@@ -105,7 +105,7 @@ interface AgentPanelProps {
   runningCommandOutput?: string;
   isDocked?: boolean;
   onSelectVerificationTab?: () => void;
-  onRequireApiKey?: (pendingAction: () => void) => void;
+  onRequireApiKey?: (pendingAction?: () => void) => void;
 }
 
 const SHORTCUT_ACTIONS = [
@@ -258,13 +258,14 @@ export default function AgentPanel({
     setShowModelDropdown(false);
   };
 
-  const handleSaveApiKey = async () => {
+  const handleSaveApiKey = async (providerId?: string) => {
     if (!apiKeyInput.trim()) return;
+    const targetProviderId = providerId || aiConfig?.activeProvider || "gemini";
     setValidatingKey(true);
     setKeyValidationMsg("");
     try {
       if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.setApiKey) {
-        const res = await (window as any).electronAPI.ai.setApiKey("gemini", apiKeyInput.trim());
+        const res = await (window as any).electronAPI.ai.setApiKey(targetProviderId, apiKeyInput.trim());
         if (res.success) {
           setKeyValidationMsg("Connected successfully");
           setApiKeyInput("");
@@ -281,10 +282,11 @@ export default function AgentPanel({
     }
   };
 
-  const handleRemoveApiKey = async () => {
+  const handleRemoveApiKey = async (providerId?: string) => {
+    const targetProviderId = providerId || aiConfig?.activeProvider || "gemini";
     try {
       if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.removeApiKey) {
-        await (window as any).electronAPI.ai.removeApiKey("gemini");
+        await (window as any).electronAPI.ai.removeApiKey(targetProviderId);
         setApiKeyInput("");
         setKeyValidationMsg("API key removed");
         fetchAiConfig();
@@ -621,32 +623,36 @@ export default function AgentPanel({
               <button
                 ref={agentModelTriggerRef}
                 onClick={() => setShowModelDropdown(!showModelDropdown)}
-                className="px-2 py-0.5 rounded-md bg-[#12121a] border border-cyan-500/30 hover:border-cyan-500/60 text-cyan-300 hover:bg-cyan-950/40 text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                className="px-2 py-0.5 rounded-md bg-[#12121a] border border-cyan-500/30 hover:border-cyan-500/60 text-cyan-300 hover:bg-cyan-950/40 text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors max-w-[170px]"
                 title="Select Active AI Model"
               >
-                <span>{activeProviderName} {aiConfig?.activeModel === "gemini-1.5-pro" ? "Pro" : "Flash"}</span>
-                <ChevronDown className="w-3 h-3 text-cyan-400" />
+                <span className="truncate">
+                  {aiConfig?.providers?.find((p: any) => p.id === aiConfig?.activeProvider)?.name || activeProviderName} ({aiConfig?.activeModel ? aiConfig.activeModel.split('/').pop().replace(/^models\//, '') : "Default"})
+                </span>
+                <ChevronDown className="w-3 h-3 text-cyan-400 shrink-0" />
               </button>
 
               {/* Model Dropdown Menu */}
               {showModelDropdown && (
                 <div 
                   ref={agentModelDropdownRef}
-                  className="absolute right-0 top-7 w-60 bg-[#0c0c14] border border-[#242436] rounded-xl shadow-2xl z-50 p-2 space-y-1.5 text-xs font-mono text-zinc-200"
+                  className="absolute right-0 top-7 w-72 bg-[#0c0c14] border border-[#242436] rounded-xl shadow-2xl z-50 p-2 space-y-1.5 text-xs font-mono text-zinc-200"
                 >
                   <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 border-b border-[#1c1c28] pb-1 flex items-center justify-between">
-                    <span>AI Execution Model</span>
+                    <span>AI Execution Provider & Model</span>
                     <button onClick={() => setShowModelDropdown(false)} className="text-zinc-500 hover:text-white">
                       <X className="w-3 h-3" />
                     </button>
                   </div>
 
-                  <div className="space-y-1">
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-0.5">
                     {(aiConfig?.providers || [
-                      { id: "gemini", name: "Gemini Flash", status: "CONNECTED", isConfigured: true },
-                      { id: "claude", name: "Claude Sonnet", status: "NOT_CONFIGURED", isConfigured: false },
-                      { id: "grok", name: "Grok 2", status: "NOT_CONFIGURED", isConfigured: false },
-                      { id: "deepseek", name: "DeepSeek Coder", status: "NOT_CONFIGURED", isConfigured: false },
+                      { id: "gemini", name: "Gemini", status: "CONNECTED", isConfigured: true },
+                      { id: "groq", name: "Groq", status: "NOT_CONFIGURED", isConfigured: false },
+                      { id: "openai", name: "OpenAI", status: "NOT_CONFIGURED", isConfigured: false },
+                      { id: "claude", name: "Claude", status: "NOT_CONFIGURED", isConfigured: false },
+                      { id: "deepseek", name: "DeepSeek", status: "NOT_CONFIGURED", isConfigured: false },
+                      { id: "grok", name: "Grok", status: "NOT_CONFIGURED", isConfigured: false },
                     ]).map((provider: any) => {
                       const isSelected = (aiConfig?.activeProvider || "gemini") === provider.id;
                       const isConnected = provider.isConfigured;
@@ -654,20 +660,62 @@ export default function AgentPanel({
                       return (
                         <div
                           key={provider.id}
-                          onClick={() => handleSelectModel(provider.id)}
-                          className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-between ${
+                          className={`p-1.5 rounded-lg border transition-all ${
                             isSelected
                               ? "bg-[#111827] border-cyan-500/50 text-cyan-300"
                               : "bg-[#09090e] border-[#181824] hover:bg-[#12121c] text-zinc-300"
                           }`}
                         >
-                          <div className="flex items-center gap-1.5 font-bold text-[10.5px]">
-                            <span>{isSelected ? "✓" : "○"}</span>
-                            <span>{provider.name}</span>
+                          <div className="flex items-center justify-between">
+                            <button
+                              onClick={() => handleSelectModel(provider.id)}
+                              className="flex items-center gap-1.5 font-bold text-[10.5px] hover:text-cyan-200 cursor-pointer flex-1 text-left"
+                            >
+                              <span>{isSelected ? "✓" : "○"}</span>
+                              <span>{provider.name}</span>
+                            </button>
+
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-[8.5px] px-1 py-0.2 rounded font-bold ${isConnected ? "text-emerald-400 bg-emerald-950/60" : "text-zinc-500 bg-zinc-900"}`}>
+                                {isConnected ? "Ready" : "No Key"}
+                              </span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowModelDropdown(false);
+                                  if (onRequireApiKey) {
+                                    onRequireApiKey();
+                                  } else {
+                                    setShowKeyModal(true);
+                                  }
+                                }}
+                                className="px-1.5 py-0.5 rounded bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/30 text-cyan-300 text-[8.5px] font-bold cursor-pointer"
+                              >
+                                Key
+                              </button>
+                            </div>
                           </div>
-                          <span className={`text-[9px] px-1 py-0.2 rounded ${isConnected ? "text-emerald-400 bg-emerald-950/60" : "text-zinc-500 bg-zinc-900"}`}>
-                            {isConnected ? "Ready" : "Not configured"}
-                          </span>
+
+                          {/* Sub-models list when provider is selected */}
+                          {isSelected && Array.isArray(provider.models) && provider.models.length > 0 && (
+                            <div className="mt-1 pt-1 border-t border-[#181824] space-y-0.5">
+                              {provider.models.slice(0, 5).map((m: any) => {
+                                const isMSelected = aiConfig?.activeModel === m.id;
+                                return (
+                                  <button
+                                    key={m.id}
+                                    onClick={() => handleSelectModel(provider.id, m.id)}
+                                    className={`w-full px-1.5 py-0.5 rounded text-[9.5px] text-left flex items-center justify-between cursor-pointer ${
+                                      isMSelected ? "bg-cyan-950/60 text-cyan-200 font-bold" : "text-zinc-400 hover:text-zinc-200"
+                                    }`}
+                                  >
+                                    <span className="truncate">{m.name || m.id}</span>
+                                    {isMSelected && <Check className="w-2.5 h-2.5 text-cyan-400" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
