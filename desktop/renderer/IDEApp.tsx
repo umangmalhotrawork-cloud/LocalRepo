@@ -3,12 +3,12 @@
 console.log('[IDE-APP] module evaluated');
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import { 
-  FolderOpen, FolderTree, FileText, ChevronRight, ChevronDown, Play, Sparkles, 
-  Terminal as TerminalIcon, Zap, X, Check, Save, RotateCcw, ArrowRight, 
+import {
+  FolderOpen, FolderTree, FileText, ChevronRight, ChevronDown, Play, Sparkles,
+  Terminal as TerminalIcon, Zap, X, Check, Save, RotateCcw, ArrowRight,
   Command, Search, Cpu, Layers, Activity, BarChart3, CheckCircle2, AlertTriangle, ShieldCheck, ShieldAlert,
-  LayoutDashboard, Clock, FileSearch, Network, Download, Flame, Sun, Moon, Copy, GitPullRequest, GitBranch, Compass, Globe, FileCode, Bug, Bot, FlaskConical,
-  History as HistoryIcon, Camera, Square, StepForward
+  LayoutDashboard, Clock, FileSearch, Network, Download, Flame, Sun, Moon, Copy, GitPullRequest, GitBranch, Compass, Globe, FileCode, Bug, Bot, FlaskConical, Github,
+  History as HistoryIcon, Camera, Square, StepForward, Palette
 } from "lucide-react";
 
 import ConfirmDialog from "./components/ConfirmDialog";
@@ -56,6 +56,9 @@ import SecurityAuditPanel from "./components/SecurityAuditPanel";
 import TaskHome from "./components/TaskHome";
 import AgentWorkspace from "./components/AgentWorkspace";
 import CodexAIControlPopover from "./components/CodexAIControlPopover";
+import ThemesPopover from "./components/ThemesPopover";
+import GithubConnectModal from "./components/GithubConnectModal";
+import { getTheme, applyThemeToDocument, registerMonacoThemes } from "./theme/themeRegistry";
 import CodexSidebar from "./components/CodexSidebar";
 import CodexBottomComposer from "./components/CodexBottomComposer";
 import ApiKeyRequiredModal from "./components/ApiKeyRequiredModal";
@@ -156,6 +159,11 @@ declare global {
         checkout: (workspacePath: string, branch: string) => Promise<any>;
         createBranch: (workspacePath: string, branch: string) => Promise<any>;
         discard: (workspacePath: string, file: string) => Promise<any>;
+      };
+      github?: {
+        status: () => Promise<{ isConnected: boolean; user?: any; error?: string }>;
+        connect: (payload?: any) => Promise<{ success: boolean; isConnected: boolean; user?: any; error?: string }>;
+        disconnect: () => Promise<{ success: boolean }>;
       };
       search?: {
         run: (payload: any) => Promise<{ success: boolean; results: SearchMatchItem[]; totalFiles: number; totalMatches: number; durationMs: number; error?: string }>;
@@ -279,23 +287,23 @@ const defaultCartCalculatorCode = `def calculate_cart_total(items, discount_code
     Contains AI-generated vacuous identity statements.
     """
     subtotal = sum(item["price"] * item["quantity"] for item in items)
-    
+
     # Vacuous identity operations inserted by LLM codegen
     subtotal = subtotal * 1
     subtotal = subtotal + 0
     subtotal = subtotal - 0
     subtotal = subtotal / 1
-    
+
     discount_amount = 0.0
     if discount_code == "SUMMER10":
         discount_amount = subtotal * 0.10
     elif discount_code == "WELCOME20":
         discount_amount = subtotal * 0.20
-        
+
     taxable_amount = max(0.0, subtotal - discount_amount)
     tax = taxable_amount * tax_rate
     final_total = taxable_amount + tax
-    
+
     return round(final_total, 2)
 `;
 
@@ -368,7 +376,7 @@ export default function IDEApp() {
     "demo-workspaces/ai_cart_project": true,
     "demo-workspaces/ai_cart_project/src": true,
   });
-  
+
   const [findings, setFindings] = useState<Finding[]>([
     {
       line: 9,
@@ -664,13 +672,47 @@ export default function IDEApp() {
   const [terminalPanelMode, setTerminalPanelMode] = useState<"terminal" | "output" | "debug" | "logs" | "python">("terminal");
   const [showRightPanel, setShowRightPanel] = useState<boolean>(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState<boolean>(false);
+  const [activeThemeId, setActiveThemeId] = useState<string>("nexus-dark");
+  const [showThemesPicker, setShowThemesPicker] = useState<boolean>(false);
+  const [showGithubModal, setShowGithubModal] = useState<boolean>(false);
   const aiControlTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const themesTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const githubTriggerRef = useRef<HTMLButtonElement | null>(null);
   const moreMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const moreMenuRef = useOutsideClick<HTMLDivElement>({
     isOpen: moreMenuOpen,
     onClose: () => setMoreMenuOpen(false),
     triggerRef: moreMenuTriggerRef,
   });
+
+  // Load persisted theme on mount
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        const saved = window.localStorage.getItem("nexus_theme_id");
+        if (saved) {
+          setActiveThemeId(saved);
+        }
+      }
+    } catch (e) {}
+  }, []);
+
+  // Synchronize CSS variables and Monaco theme
+  useEffect(() => {
+    const themeDef = getTheme(activeThemeId);
+    applyThemeToDocument(themeDef, monacoRef.current);
+  }, [activeThemeId]);
+
+  const handleSelectTheme = (themeId: string) => {
+    setActiveThemeId(themeId);
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        window.localStorage.setItem("nexus_theme_id", themeId);
+      }
+    } catch (e) {}
+    const themeDef = getTheme(themeId);
+    applyThemeToDocument(themeDef, monacoRef.current);
+  };
   const [showBottomPanel, setShowBottomPanel] = useState<boolean>(false);
   const [activeBottomTab, setActiveBottomTab] = useState<BottomPanelTab>("terminal");
   const [bottomPanelHeight, setBottomPanelHeight] = useState<number>(200);
@@ -1324,7 +1366,7 @@ export default function IDEApp() {
       const fallbackEntry: HistoryEntry = {
         id: "surg-1786568000-cart-v1",
         timestamp: new Date().toISOString(),
-        file_path: currentTab?.path || "/Users/umangmalhotra/Documents/Echo Nullity/demo-workspaces/ai_cart_project/src/cart_calculator.py",
+        file_path: currentTab?.path || "/Users/umangmalhotra/Documents/Nexus/demo-workspaces/ai_cart_project/src/cart_calculator.py",
         operation_type: "APPLY_SURGERY",
         removed_lines: [9, 10, 11, 12],
         before_hash: "a1b2c3d4e5f67890",
@@ -1654,7 +1696,7 @@ export default function IDEApp() {
           setFileTree(demo.tree);
           saveRecentWorkspace(demo.folderPath);
           addLog(`[DEMO] Loaded workspace from disk: ${demo.folderPath}`);
-          
+
           const targetPath = `${demo.folderPath}/src/cart_calculator.py`;
           console.log('[IDE-APP] invoking readFile for', targetPath);
           const fileRes = await window.electronAPI.readFile(targetPath);
@@ -1919,7 +1961,7 @@ export default function IDEApp() {
   // Keyboard Shortcuts Listener
   useEffect(() => {
     if (typeof window === "undefined") return;
-    
+
     const handleKeyDown = (e: KeyboardEvent) => {
       const isCmd = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
@@ -3729,6 +3771,10 @@ export default function IDEApp() {
     editorRef.current = editor;
     monacoRef.current = monaco;
 
+    registerMonacoThemes(monaco);
+    const themeDef = getTheme(activeThemeId);
+    applyThemeToDocument(themeDef, monaco);
+
     setTimeout(() => {
       try {
         console.log('[MONACO] invoking editor.layout() and focus()');
@@ -3831,26 +3877,12 @@ export default function IDEApp() {
           } catch (e) {}
         }, 50);
       }
-      
-      monaco.editor.defineTheme("echo-dark", {
-        base: "vs-dark",
-        inherit: true,
-        rules: [
-          { token: "keyword", foreground: "8b5cf6", fontStyle: "bold" },
-          { token: "identifier", foreground: "22d3ee" },
-          { token: "string", foreground: "10b981" },
-          { token: "comment", foreground: "6b7280", fontStyle: "italic" },
-        ],
-        colors: {
-          "editor.background": "#050505",
-          "editor.foreground": "#e5e7eb",
-          "editorLineNumber.foreground": "#4b5563",
-          "editorLineNumber.activeForeground": "#22d3ee",
-          "editor.lineHighlightBackground": "#0d0d0d",
-          "editorGutter.background": "#050505",
-        },
-      });
-      monaco.editor.setTheme("echo-dark");
+
+      registerMonacoThemes(monaco);
+      const themeDef = getTheme(activeThemeId);
+      if (monaco?.editor?.setTheme) {
+        monaco.editor.setTheme(themeDef.monacoThemeId);
+      }
     } catch (err) {
       console.error("[MONACO] Error setting up Monaco theme/events:", err);
     }
@@ -3959,13 +3991,32 @@ export default function IDEApp() {
     console.log(`[P-METRICS] window=${window.innerWidth} root=${rootRef.current?.clientWidth} row=${contentRowRef.current?.clientWidth} exp=${explorerPanelRef.current?.clientWidth} edit=${editorPaneRef.current?.clientWidth} ana=${analysisPanelRef.current?.clientWidth} mon=${monacoWrapperRef.current?.clientWidth}`);
   }
 return (
-    <div ref={rootRef} style={{ width: "100vw", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }} className="flex flex-col h-screen w-screen bg-[#050505] text-white font-sans overflow-hidden select-none relative">
-      
+    <div
+      ref={rootRef}
+      data-theme={activeThemeId}
+      style={{
+        width: "100vw",
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        backgroundColor: "var(--bg-app, #050505)",
+        color: "var(--text-main, #ffffff)"
+      }}
+      className="flex flex-col h-screen w-screen bg-[#050505] text-white font-sans overflow-hidden select-none relative"
+    >
+
       {/* Animated Top Edge Cyan Scanline */}
       <div className="top-scanline" />
 
       {/* 1. Header Navigation Bar */}
-      <header className="h-10 bg-[#08080c] border-b border-[#161620] flex items-center justify-between px-3 text-xs font-mono shrink-0 z-20 shadow-sm min-w-0 w-full select-none gap-2">
+      <header
+        style={{
+          backgroundColor: "var(--bg-header, #08080c)",
+          borderColor: "var(--border-app, #161620)",
+        }}
+        className="h-10 bg-[#08080c] border-b border-[#161620] flex items-center justify-between px-3 text-xs font-mono shrink-0 z-20 shadow-sm min-w-0 w-full select-none gap-2"
+      >
         {/* Left Zone: Branding + Project Switcher + Home Launcher */}
         <div className="flex-none shrink-0 flex items-center gap-2">
           <div className="flex items-center gap-2 pr-2 border-r border-[#1a1a24]">
@@ -4053,6 +4104,31 @@ return (
             />
           </div>
 
+          {/* Global NEXUS Themes (BETWEEN AI Control and AI Dock) */}
+          <div className="relative shrink-0">
+            <button
+              ref={themesTriggerRef}
+              onClick={() => setShowThemesPicker((prev) => !prev)}
+              className={`px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 transition-all cursor-pointer ${
+                showThemesPicker
+                  ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold shadow-[0_0_8px_rgba(6,182,212,0.25)]"
+                  : "bg-[#101016] hover:bg-[#181822] border-[#20202d] text-cyan-300"
+              }`}
+              title="Global NEXUS Themes"
+            >
+              <Palette className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span>Themes ▾</span>
+            </button>
+
+            <ThemesPopover
+              isOpen={showThemesPicker}
+              onClose={() => setShowThemesPicker(false)}
+              triggerRef={themesTriggerRef}
+              activeThemeId={activeThemeId}
+              onSelectTheme={handleSelectTheme}
+            />
+          </div>
+
           {/* AI Agent Dock Toggle */}
           <button
             onClick={() => setShowDockedAgentPanel((prev) => !prev)}
@@ -4067,6 +4143,30 @@ return (
             <span>AI Dock</span>
           </button>
 
+          {/* GitHub Header Button */}
+          <div className="relative shrink-0">
+            <button
+              ref={githubTriggerRef}
+              onClick={() => setShowGithubModal((prev) => !prev)}
+              className={`px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 transition-all cursor-pointer ${
+                showGithubModal
+                  ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold shadow-[0_0_8px_rgba(6,182,212,0.25)]"
+                  : "bg-[#101016] hover:bg-[#181822] border-[#20202d] text-cyan-300"
+              }`}
+              title="GitHub Account Connection"
+            >
+              <Github className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span>GitHub</span>
+            </button>
+
+            <GithubConnectModal
+              isOpen={showGithubModal}
+              onClose={() => setShowGithubModal(false)}
+              triggerRef={githubTriggerRef}
+              workspacePath={folderPath || ""}
+            />
+          </div>
+
           {/* More Menu Dropdown (⋯) */}
           <div className="relative shrink-0">
             <button
@@ -4079,7 +4179,7 @@ return (
             </button>
 
             {moreMenuOpen && (
-              <div 
+              <div
                 ref={moreMenuRef}
                 className="absolute top-full right-0 mt-1 w-56 bg-[#0a0a0d] border border-[#1f1f24] rounded-xl shadow-2xl z-50 p-1.5 space-y-1 font-mono text-xs animate-fade-in"
               >
@@ -4269,7 +4369,7 @@ return (
 
       {/* 2. Main Resizable Workspace Grid */}
       <div ref={contentRowRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", overflow: "hidden" }} className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
-        
+
         {/* Persistent Codex Left Sidebar */}
         <CodexSidebar
           currentProjectName={folderPath ? folderPath.split("/").pop() || "NEXUS" : "NEXUS"}
@@ -4324,7 +4424,17 @@ return (
 
         {/* Left Sidebar: Persistent Workspace Tool Surface */}
         {showExplorer && (
-          <div ref={explorerPanelRef} style={{ width: `${explorerWidth}px`, flexShrink: 0 }} className="bg-[#09090d] border-r border-[#161620] flex flex-col justify-between shrink-0 select-none font-mono text-xs overflow-hidden">
+          <div
+            ref={explorerPanelRef}
+            style={{
+              width: `${explorerWidth}px`,
+              flexShrink: 0,
+              backgroundColor: "var(--theme-surface-panel, #09090d)",
+              borderColor: "var(--theme-border, #161620)",
+              color: "var(--theme-text, #f4f4f5)",
+            }}
+            className="border-r flex flex-col justify-between shrink-0 select-none font-mono text-xs overflow-hidden"
+          >
             {activeActivityItem === "git" ? (
               <SourceControlPanel
                 isRepo={git.isRepo}
@@ -4354,7 +4464,13 @@ return (
             ) : (
               <>
                 {/* Sidebar Header */}
-                <div className="p-2.5 border-b border-[#161620] flex items-center justify-between font-mono text-xs bg-[#0c0c12]">
+                <div
+                  style={{
+                    backgroundColor: "var(--theme-surface, #0c0c12)",
+                    borderColor: "var(--theme-border, #161620)",
+                  }}
+                  className="p-2.5 border-b flex items-center justify-between font-mono text-xs"
+                >
                   <span className="text-zinc-300 font-bold uppercase tracking-wider text-[10px]">
                     {activeActivityItem === "search"
                       ? "Search Workspace"
@@ -4431,7 +4547,14 @@ return (
                   )}
                 </div>
 
-                <div className="p-2.5 bg-[#0c0c12] border-t border-[#161620] font-mono text-[9.5px] text-zinc-500 flex items-center justify-between">
+                <div
+                  style={{
+                    backgroundColor: "var(--theme-surface, #0c0c12)",
+                    borderColor: "var(--theme-border, #161620)",
+                    color: "var(--theme-text-subtle, #71717a)",
+                  }}
+                  className="p-2.5 border-t font-mono text-[9.5px] flex items-center justify-between"
+                >
                   <span>AST Engine Active</span>
                   <Cpu className="w-3 h-3 text-cyan-400" />
                 </div>
@@ -4446,8 +4569,21 @@ return (
         )}
 
         {/* Center Pane: Multi-Tab Monaco Editor, Workspace Dashboard, or Workspace Graph */}
-        <div ref={editorPaneRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }} className="flex-1 min-w-0 flex flex-col overflow-hidden bg-[#050505]">
-          
+        <div
+          ref={editorPaneRef}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            backgroundColor: "var(--theme-background, #050505)",
+            color: "var(--theme-text, #ffffff)",
+          }}
+          className="flex-1 min-w-0 flex flex-col overflow-hidden"
+        >
+
           {mainView === "dashboard" || mainView === "luminance" ? (
             <WorkspaceDashboard
               summary={workspaceSummary || workspaceReport}
@@ -4643,9 +4779,15 @@ return (
                   onNavigateResult={(dir) => search.navigateResult(dir)}
                 />
               </div>
-              <div className="flex-1 h-full flex flex-col bg-[#050507]">
+              <div className="flex-1 h-full flex flex-col" style={{ backgroundColor: "var(--theme-background, #050507)" }}>
                 {/* Multi-Tab Bar */}
-                <div className="h-9 bg-[#0a0a0a] border-b border-[#1f1f1f] flex items-center px-2 gap-1 font-mono text-xs overflow-x-auto shrink-0">
+                <div
+                  style={{
+                    backgroundColor: "var(--theme-surface, #0a0a0a)",
+                    borderColor: "var(--theme-border, #1f1f1f)",
+                  }}
+                  className="h-9 border-b flex items-center px-2 gap-1 font-mono text-xs overflow-x-auto shrink-0"
+                >
                   {openTabs.map((tab) => (
                     <div
                       key={tab.path}
@@ -4654,20 +4796,29 @@ return (
                         restoreTabCursor(tab.path);
                         runAnalysis(tab);
                       }}
+                      style={
+                        activeTabPath === tab.path
+                          ? {
+                              backgroundColor: "var(--theme-background, #050505)",
+                              color: "var(--theme-accent, #22d3ee)",
+                              borderColor: "var(--theme-border-focus, #22d3ee)",
+                            }
+                          : undefined
+                      }
                       className={`group px-3 py-1 rounded-t-lg flex items-center gap-2 cursor-pointer transition-all ${
                         activeTabPath === tab.path
-                          ? "bg-[#050505] text-cyan-400 border-t border-x border-cyan-500/40 font-bold shadow-sm"
-                          : "text-zinc-400 hover:text-white hover:bg-zinc-900/40"
+                          ? "border-t border-x font-bold shadow-sm"
+                          : "text-zinc-400 hover:text-white hover:bg-white/5"
                       }`}
                     >
-                      <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                      <FileText className="w-3.5 h-3.5" style={{ color: activeTabPath === tab.path ? "var(--theme-accent, #22d3ee)" : undefined }} />
                       <span>{tab.name}</span>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           handleCloseTab(tab.path);
                         }}
-                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-opacity cursor-pointer"
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-white/10 text-zinc-400 hover:text-white transition-opacity cursor-pointer"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -4675,7 +4826,7 @@ return (
                   ))}
                 </div>
                 {/* Editor Surface */}
-                <div className="flex-1 relative bg-[#050505] overflow-hidden">
+                <div className="flex-1 relative overflow-hidden" style={{ backgroundColor: "var(--theme-editor-background, #050505)" }}>
                   {activeTab ? (
                     <MonacoEditor
                       key={activeTab.path}
@@ -4935,7 +5086,7 @@ return (
         {showRightPanel && (
           <div ref={analysisPanelRef} style={{ width: `${analysisWidth}px`, flexShrink: 0 }} className="bg-[#0a0a0a] border-l border-[#1f1f1f] flex flex-col justify-between p-4 space-y-4 shrink-0 overflow-y-auto select-none">
             <div className="space-y-4">
-              
+
               {/* Header */}
               <div className="pb-3 border-b border-[#1f1f1f] flex items-center justify-between">
                 <span className="font-heading font-bold text-sm text-white">Code Analysis</span>
@@ -5553,7 +5704,7 @@ return (
       {/* 4. Right-Side Sliding Diff Drawer */}
       {diffDrawerOpen && diffData && (
         <div className="fixed inset-y-0 right-0 w-[540px] bg-[#0a0a0a] border-l border-cyan-500/40 shadow-2xl z-50 flex flex-col overflow-hidden animate-slide-left">
-          
+
           <div className="p-4 border-b border-[#1f1f1f] flex items-center justify-between bg-[#050505]">
             <div className="flex items-center gap-2 font-mono">
               <Sparkles className="w-4 h-4 text-cyan-400" />
@@ -5649,7 +5800,7 @@ return (
 
           <div className="flex-1 p-4 overflow-y-auto font-mono text-xs space-y-2 bg-[#050505]">
             <span className="text-zinc-500 uppercase tracking-widest text-[10px]">Unified AST Diff Stream</span>
-            
+
             <div className="space-y-1 border border-[#1f1f1f] rounded-xl p-3 bg-[#0d0d0d]">
               {(() => {
                 const originalLines = diffData.original_source.split("\n");

@@ -90,6 +90,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createBranch: (workspacePath, branch) => ipcRenderer.invoke('git:createBranch', { workspacePath, branch }),
     discard: (workspacePath, file) => ipcRenderer.invoke('git:discard', { workspacePath, file }),
   },
+  github: {
+    configStatus: () => ipcRenderer.invoke('github:configStatus'),
+    status: () => ipcRenderer.invoke('github:status'),
+    connect: () => ipcRenderer.invoke('github:connect'),
+    disconnect: () => ipcRenderer.invoke('github:disconnect'),
+    listRepos: () => ipcRenderer.invoke('github:listRepos'),
+    associateRepo: (payload) => ipcRenderer.invoke('github:associateRepo', payload),
+    getSelectedRepo: (workspacePath) => ipcRenderer.invoke('github:getSelectedRepo', workspacePath),
+  },
   search: {
     run: (payload) => ipcRenderer.invoke('search:run', payload),
     replace: (payload) => ipcRenderer.invoke('search:replace', payload),

@@ -49,9 +49,22 @@ export default function ContextualToolsDrawer({
   if (!isOpen) return null;
 
   return (
-    <div className={`fixed inset-y-0 left-0 ${isExpanded ? "w-[650px]" : "w-[380px]"} max-w-[90vw] z-50 shadow-2xl bg-[#09090d] border-r border-[#1f1f24] flex flex-col font-sans select-none animate-slideInLeft transition-all duration-200`}>
+    <div 
+      style={{
+        backgroundColor: "var(--theme-surface-panel, #09090d)",
+        borderColor: "var(--theme-border, #1f1f24)",
+        color: "var(--theme-text, #f4f4f5)",
+      }}
+      className={`fixed inset-y-0 left-0 ${isExpanded ? "w-[650px]" : "w-[380px]"} max-w-[90vw] z-50 shadow-2xl border-r flex flex-col font-sans select-none animate-slideInLeft transition-all duration-200`}
+    >
       {/* Header with Navigation Tabs */}
-      <div className="h-10 px-3 bg-[#060609] border-b border-[#1f1f24] flex items-center justify-between font-mono text-xs shrink-0">
+      <div 
+        style={{
+          backgroundColor: "var(--theme-surface, #060609)",
+          borderColor: "var(--theme-border, #1f1f24)",
+        }}
+        className="h-10 px-3 border-b flex items-center justify-between font-mono text-xs shrink-0"
+      >
         <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
           <button
             onClick={() => onTabChange("explorer")}

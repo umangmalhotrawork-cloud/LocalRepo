@@ -73,22 +73,49 @@ export default function CodexSidebar({
   ];
 
   return (
-    <aside className="w-64 bg-[#08080c] border-r border-[#161620] flex flex-col h-full shrink-0 select-none font-mono text-xs text-zinc-300">
+    <aside 
+      style={{
+        backgroundColor: "var(--theme-surface, #08080c)",
+        borderColor: "var(--theme-border, #161620)",
+        color: "var(--theme-text, #f4f4f5)",
+      }}
+      className="w-64 border-r flex flex-col h-full shrink-0 select-none font-mono text-xs"
+    >
       {/* Top Branding & New Chat */}
-      <div className="p-3 border-b border-[#161620] space-y-2.5 bg-[#0a0a0f]">
+      <div 
+        style={{
+          backgroundColor: "var(--theme-surface-panel, #0a0a0f)",
+          borderColor: "var(--theme-border, #161620)",
+        }}
+        className="p-3 border-b space-y-2.5"
+      >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-cyan-400 shrink-0" />
-            <span className="font-bold text-sm text-white tracking-tight">NEXUS</span>
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: "var(--theme-accent, #22d3ee)" }} />
+            <span className="font-bold text-sm tracking-tight" style={{ color: "var(--theme-text, #ffffff)" }}>NEXUS</span>
           </div>
-          <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-[#161622] text-cyan-300 border border-[#222234] font-mono">v1.0.0</span>
+          <span 
+            className="text-[9.5px] px-1.5 py-0.5 rounded font-mono border"
+            style={{
+              backgroundColor: "var(--theme-surface-raised, #161622)",
+              borderColor: "var(--theme-border-card, #222234)",
+              color: "var(--theme-accent, #22d3ee)",
+            }}
+          >
+            v1.0.0
+          </span>
         </div>
 
         <button
           onClick={onNewTask}
-          className="w-full py-2 px-3 rounded-xl bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 hover:text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-cyan-950/40"
+          style={{
+            backgroundColor: "var(--theme-accent-dim, rgba(34,211,238,0.15))",
+            borderColor: "var(--theme-border-focus, rgba(34,211,238,0.4))",
+            color: "var(--theme-accent, #22d3ee)",
+          }}
+          className="w-full py-2 px-3 rounded-xl border font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md hover:brightness-125"
         >
-          <Plus className="w-4 h-4 text-cyan-400" />
+          <Plus className="w-4 h-4" style={{ color: "var(--theme-accent, #22d3ee)" }} />
           <span>New Task / Chat</span>
         </button>
       </div>
@@ -97,7 +124,7 @@ export default function CodexSidebar({
       <div className="flex-1 overflow-y-auto p-2 space-y-4">
         {/* Navigation Section */}
         <div className="space-y-0.5">
-          <div className="px-2 text-[9.5px] font-bold text-zinc-500 uppercase tracking-wider mb-1">
+          <div className="px-2 text-[9.5px] font-bold uppercase tracking-wider mb-1" style={{ color: "var(--theme-text-subtle, #71717a)" }}>
             Navigation
           </div>
 
@@ -105,8 +132,8 @@ export default function CodexSidebar({
             onClick={() => onSelectItem("explorer")}
             className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer ${
               activeItem === "explorer"
-                ? "bg-[#121624] text-cyan-300 font-bold border border-cyan-500/30"
-                : "text-zinc-400 hover:text-zinc-200 hover:bg-[#101016]"
+                ? "bg-cyan-950/60 text-cyan-300 font-bold border border-cyan-500/30"
+                : "text-zinc-400 hover:text-zinc-200 hover:bg-white/5"
             }`}
           >
             <FolderTree className="w-4 h-4 text-cyan-400 shrink-0" />

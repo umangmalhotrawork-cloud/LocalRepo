@@ -3,10 +3,18 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { execFile, spawn: execSpawn } = require('child_process');
+const { loadEnvConfig, isGitHubClientIdConfigured } = require('./envLoader');
+
+// Keep this before any OAuth-dependent require. githubAuthManager reads the
+// value when its GitHub IPC handlers run, so Electron must load .env first.
+loadEnvConfig();
+console.log(`GitHub OAuth Client ID: ${isGitHubClientIdConfigured() ? 'configured' : 'missing'}`);
+
 const { loadState, saveState } = require('./state-store');
 const { exportWorkspaceReport } = require('./report-export');
 const ptyManager = require('./ptyManager');
 const gitManager = require('./gitManager');
+const { githubAuthManager } = require('./githubAuthManager');
 const searchManager = require('./searchManager');
 const aiManager = require('./aiManager');
 const agentManager = require('./agentManager');
@@ -2042,6 +2050,35 @@ ipcMain.handle('git:commitAndPush', async (_, { workspacePath, message }) => {
 
 ipcMain.handle('git:suggestCommitMessage', async (_, workspacePath) => {
   return gitManager.suggestCommitMessage(workspacePath);
+});
+
+// GitHub Authentication IPC Handlers
+ipcMain.handle('github:configStatus', async () => {
+  return githubAuthManager.getOAuthConfigStatus();
+});
+
+ipcMain.handle('github:status', async () => {
+  return githubAuthManager.getStatus();
+});
+
+ipcMain.handle('github:connect', async () => {
+  return githubAuthManager.connect();
+});
+
+ipcMain.handle('github:disconnect', async () => {
+  return githubAuthManager.disconnect();
+});
+
+ipcMain.handle('github:listRepos', async () => {
+  return githubAuthManager.listRepositories();
+});
+
+ipcMain.handle('github:associateRepo', async (_, { workspacePath, repo }) => {
+  return githubAuthManager.associateRepository(workspacePath, repo);
+});
+
+ipcMain.handle('github:getSelectedRepo', async (_, workspacePath) => {
+  return githubAuthManager.getSelectedRepository(workspacePath);
 });
 
 // Workspace Search & Replace IPC Handlers

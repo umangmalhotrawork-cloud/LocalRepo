@@ -34,7 +34,14 @@ export default function ActivityRail({
   onOpenSettings,
 }: ActivityRailProps) {
   return (
-    <aside className="w-11 bg-[#08080c] border-r border-[#161620] flex flex-col items-center py-2 shrink-0 select-none z-30 justify-between font-mono">
+    <aside 
+      style={{
+        backgroundColor: "var(--theme-surface, #08080c)",
+        borderColor: "var(--theme-border, #161620)",
+        color: "var(--theme-text, #f4f4f5)",
+      }}
+      className="w-11 border-r flex flex-col items-center py-2 shrink-0 select-none z-30 justify-between font-mono"
+    >
       {/* Top Tool Group */}
       <div className="flex flex-col items-center gap-1 w-full">
         {/* Explorer */}

@@ -590,14 +590,25 @@ export default function AgentPanel({
 
   return (
     <div
+      style={{
+        backgroundColor: "var(--theme-surface, #08080c)",
+        borderColor: "var(--theme-border, #161620)",
+        color: "var(--theme-text, #f4f4f5)",
+      }}
       className={
         isDocked
-          ? "w-[440px] max-w-full h-full bg-[#08080c] border-l border-[#161620] shadow-xl z-20 flex flex-col font-mono text-xs select-none shrink-0 overflow-hidden"
-          : "fixed inset-y-0 right-0 w-[480px] max-w-full bg-[#08080c] border-l border-[#161620] shadow-2xl z-50 flex flex-col font-mono text-xs select-none"
+          ? "w-[440px] max-w-full h-full border-l shadow-xl z-20 flex flex-col font-mono text-xs select-none shrink-0 overflow-hidden"
+          : "fixed inset-y-0 right-0 w-[480px] max-w-full border-l shadow-2xl z-50 flex flex-col font-mono text-xs select-none"
       }
     >
       {/* 3A. Session Header Region */}
-      <div className="bg-[#0b0b10] border-b border-[#161620] p-2.5 space-y-1.5 shrink-0">
+      <div 
+        style={{
+          backgroundColor: "var(--theme-surface-panel, #0b0b10)",
+          borderColor: "var(--theme-border, #161620)",
+        }}
+        className="border-b p-2.5 space-y-1.5 shrink-0"
+      >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5 text-cyan-400 font-bold text-xs">
             <Bot className="w-4 h-4 text-cyan-400" />

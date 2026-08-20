@@ -115,7 +115,14 @@ export default function StatusBar({
   const displayModelName = activeProvider ? `${activeProvider.name} Flash` : "Gemini Flash";
 
   return (
-    <footer className="h-6 bg-[#060609] border-t border-[#161620] px-3 flex items-center justify-between text-[11px] font-mono text-zinc-400 select-none shrink-0 z-40 relative">
+    <footer 
+      style={{
+        backgroundColor: "var(--theme-surface, #060609)",
+        borderColor: "var(--theme-border, #161620)",
+        color: "var(--theme-text-muted, #a1a1aa)",
+      }}
+      className="h-6 border-t px-3 flex items-center justify-between text-[11px] font-mono select-none shrink-0 z-40 relative"
+    >
       {/* Left Items */}
       <div className="flex items-center gap-2.5">
         {/* Git Branch */}

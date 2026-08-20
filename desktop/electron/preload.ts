@@ -12,4 +12,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('python:output', listener);
     return () => ipcRenderer.removeListener('python:output', listener);
   },
+  github: {
+    configStatus: () => ipcRenderer.invoke('github:configStatus'),
+    status: () => ipcRenderer.invoke('github:status'),
+    connect: () => ipcRenderer.invoke('github:connect'),
+    disconnect: () => ipcRenderer.invoke('github:disconnect'),
+    listRepos: () => ipcRenderer.invoke('github:listRepos'),
+    associateRepo: (payload: { workspacePath: string; repo: any }) => ipcRenderer.invoke('github:associateRepo', payload),
+    getSelectedRepo: (workspacePath: string) => ipcRenderer.invoke('github:getSelectedRepo', workspacePath),
+  },
 });

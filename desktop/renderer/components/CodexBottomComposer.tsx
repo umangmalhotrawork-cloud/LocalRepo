@@ -59,32 +59,56 @@ export default function CodexBottomComposer({
   return (
     <div className="w-full max-w-3xl mx-auto flex flex-col items-center gap-2 select-none font-mono">
       {/* 1. Context Row: Workspace -> Local -> Branch -> CONTINUUM (Immediately right of branch!) */}
-      <div className="flex items-center gap-2 text-xs text-zinc-400 font-mono">
+      <div className="flex items-center gap-2 text-xs font-mono" style={{ color: "var(--theme-text-muted, #a1a1aa)" }}>
         {/* Workspace Pill */}
         <button
           onClick={onOpenFolder}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0e0e16] hover:bg-[#141420] border border-[#1e1e2c] text-zinc-300 transition-colors cursor-pointer text-[11px]"
+          style={{
+            backgroundColor: "var(--theme-surface-raised, #0e0e16)",
+            borderColor: "var(--theme-border, #1e1e2c)",
+            color: "var(--theme-text, #f4f4f5)",
+          }}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-colors cursor-pointer text-[11px]"
         >
           <FolderOpen className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
           <span className="font-bold truncate max-w-[140px]">{workspaceName}</span>
         </button>
 
         {/* Environment Pill */}
-        <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-[#0e0e16] border border-[#1e1e2c] text-zinc-400 text-[11px]">
+        <div 
+          style={{
+            backgroundColor: "var(--theme-surface-raised, #0e0e16)",
+            borderColor: "var(--theme-border, #1e1e2c)",
+            color: "var(--theme-text-muted, #a1a1aa)",
+          }}
+          className="flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px]"
+        >
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
           <span>Local</span>
         </div>
 
         {/* Branch Pill */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0e0e16] border border-[#1e1e2c] text-purple-300 text-[11px]">
-          <GitBranch className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+        <div 
+          style={{
+            backgroundColor: "var(--theme-surface-raised, #0e0e16)",
+            borderColor: "var(--theme-border, #1e1e2c)",
+            color: "var(--theme-accent-secondary, #a855f7)",
+          }}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px]"
+        >
+          <GitBranch className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--theme-accent-secondary, #a855f7)" }} />
           <span className="font-bold truncate max-w-[150px]">{gitBranch}</span>
         </div>
 
         {/* CONTINUUM Pill — IMMEDIATELY TO THE RIGHT OF THE BRANCH! */}
         <button
           onClick={onOpenContinuum}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 font-bold transition-all cursor-pointer text-[11px] shadow-sm shadow-cyan-950/50"
+          style={{
+            backgroundColor: "var(--theme-accent-dim, rgba(34,211,238,0.15))",
+            borderColor: "var(--theme-border-focus, rgba(34,211,238,0.4))",
+            color: "var(--theme-accent, #22d3ee)",
+          }}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-bold transition-all cursor-pointer text-[11px] shadow-sm hover:brightness-125"
           title="Open Continuum Session Memory & Lineage"
         >
           <Layers className="w-3.5 h-3.5 text-cyan-400 shrink-0 animate-pulse" />
@@ -94,7 +118,13 @@ export default function CodexBottomComposer({
 
       {/* 2. Codex Agent Composer Container */}
       <form onSubmit={handleSubmit} className="w-full">
-        <div className="bg-[#0b0b12] border border-[#222234] focus-within:border-cyan-500/60 rounded-2xl p-3.5 shadow-2xl transition-all relative space-y-2">
+        <div 
+          style={{
+            backgroundColor: "var(--theme-surface-panel, #0b0b12)",
+            borderColor: "var(--theme-border-card, #222234)",
+          }}
+          className="border focus-within:border-cyan-500/60 rounded-2xl p-3.5 shadow-2xl transition-all relative space-y-2"
+        >
           {/* Prompt Textarea */}
           <textarea
             value={prompt}
@@ -107,16 +137,24 @@ export default function CodexBottomComposer({
             }}
             placeholder="Ask NEXUS to investigate or change code... (⌘Enter to send)"
             disabled={disabled}
-            className="w-full h-20 bg-transparent text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none resize-none font-mono"
+            style={{ color: "var(--theme-text, #f4f4f5)" }}
+            className="w-full h-20 bg-transparent text-xs placeholder-zinc-500 focus:outline-none resize-none font-mono"
           />
 
           {/* Bottom Control Row */}
-          <div className="flex items-center justify-between pt-2 border-t border-[#1a1a28] text-xs">
+          <div 
+            style={{ borderColor: "var(--theme-border-subtle, #1a1a28)" }}
+            className="flex items-center justify-between pt-2 border-t text-xs"
+          >
             <div className="flex items-center gap-2 relative">
               {/* Attachment / Action Button */}
               <button
                 type="button"
-                className="w-7 h-7 rounded-lg bg-[#141420] hover:bg-[#1a1a2a] border border-[#242436] flex items-center justify-center text-zinc-400 hover:text-cyan-300 transition-colors cursor-pointer"
+                style={{
+                  backgroundColor: "var(--theme-surface-raised, #141420)",
+                  borderColor: "var(--theme-border-card, #242436)",
+                }}
+                className="w-7 h-7 rounded-lg border flex items-center justify-center text-zinc-400 hover:text-cyan-300 transition-colors cursor-pointer"
                 title="Attach Context or File"
               >
                 <Plus className="w-4 h-4" />
@@ -128,7 +166,12 @@ export default function CodexBottomComposer({
                   ref={approvalTriggerRef}
                   type="button"
                   onClick={() => setShowApprovalDropdown((prev) => !prev)}
-                  className="px-2.5 py-1 rounded-lg bg-[#141420] hover:bg-[#1a1a2a] border border-[#242436] text-zinc-300 text-[11px] font-mono flex items-center gap-1.5 cursor-pointer"
+                  style={{
+                    backgroundColor: "var(--theme-surface-raised, #141420)",
+                    borderColor: "var(--theme-border-card, #242436)",
+                    color: "var(--theme-text, #f4f4f5)",
+                  }}
+                  className="px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 cursor-pointer"
                 >
                   <ShieldCheck className={`w-3.5 h-3.5 ${approvalMode === "auto" ? "text-emerald-400" : "text-amber-400"}`} />
                   <span>{approvalMode === "auto" ? "Auto-Approve Safe" : "Require Approval"}</span>
@@ -138,7 +181,11 @@ export default function CodexBottomComposer({
                 {showApprovalDropdown && (
                   <div 
                     ref={approvalDropdownRef}
-                    className="absolute left-0 bottom-9 w-48 bg-[#0c0c14] border border-[#242436] rounded-xl shadow-2xl z-50 p-1 space-y-1 text-xs"
+                    style={{
+                      backgroundColor: "var(--theme-surface-card, #0c0c14)",
+                      borderColor: "var(--theme-border-card, #242436)",
+                    }}
+                    className="absolute left-0 bottom-9 w-48 border rounded-xl shadow-2xl z-50 p-1 space-y-1 text-xs"
                   >
                     <button
                       type="button"
@@ -146,7 +193,7 @@ export default function CodexBottomComposer({
                         setApprovalMode("auto");
                         setShowApprovalDropdown(false);
                       }}
-                      className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between hover:bg-[#141420] text-emerald-300 cursor-pointer"
+                      className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between hover:bg-white/5 text-emerald-300 cursor-pointer"
                     >
                       <span>Auto-Approve Safe</span>
                       {approvalMode === "auto" && <Check className="w-3.5 h-3.5 text-emerald-400" />}
@@ -157,7 +204,7 @@ export default function CodexBottomComposer({
                         setApprovalMode("strict");
                         setShowApprovalDropdown(false);
                       }}
-                      className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between hover:bg-[#141420] text-amber-300 cursor-pointer"
+                      className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between hover:bg-white/5 text-amber-300 cursor-pointer"
                     >
                       <span>Require Approval</span>
                       {approvalMode === "strict" && <Check className="w-3.5 h-3.5 text-amber-400" />}
@@ -172,7 +219,12 @@ export default function CodexBottomComposer({
                   ref={modelTriggerRef}
                   type="button"
                   onClick={() => setShowModelDropdown((prev) => !prev)}
-                  className="px-2.5 py-1 rounded-lg bg-[#141420] hover:bg-[#1a1a2a] border border-[#242436] text-cyan-300 text-[11px] font-mono flex items-center gap-1.5 cursor-pointer"
+                  style={{
+                    backgroundColor: "var(--theme-surface-raised, #141420)",
+                    borderColor: "var(--theme-border-card, #242436)",
+                    color: "var(--theme-accent, #22d3ee)",
+                  }}
+                  className="px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 cursor-pointer"
                 >
                   <Cpu className="w-3.5 h-3.5 text-purple-400" />
                   <span>Gemini 1.5 Flash</span>
@@ -182,7 +234,11 @@ export default function CodexBottomComposer({
                 {showModelDropdown && (
                   <div 
                     ref={modelDropdownRef}
-                    className="absolute left-0 bottom-9 w-52 bg-[#0c0c14] border border-[#242436] rounded-xl shadow-2xl z-50 p-1 space-y-1 text-xs"
+                    style={{
+                      backgroundColor: "var(--theme-surface-card, #0c0c14)",
+                      borderColor: "var(--theme-border-card, #242436)",
+                    }}
+                    className="absolute left-0 bottom-9 w-52 border rounded-xl shadow-2xl z-50 p-1 space-y-1 text-xs"
                   >
                     <button
                       type="button"
@@ -190,7 +246,7 @@ export default function CodexBottomComposer({
                         onSelectModel("gemini", "gemini-1.5-flash");
                         setShowModelDropdown(false);
                       }}
-                      className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between hover:bg-[#141420] text-cyan-300 cursor-pointer font-bold"
+                      className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between hover:bg-white/5 text-cyan-300 cursor-pointer font-bold"
                     >
                       <span>✓ Gemini 1.5 Flash</span>
                       <span className="text-[9px] text-emerald-400">Connected</span>
@@ -201,7 +257,7 @@ export default function CodexBottomComposer({
                         onSelectModel("claude");
                         setShowModelDropdown(false);
                       }}
-                      className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between hover:bg-[#141420] text-zinc-400 cursor-pointer opacity-70"
+                      className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between hover:bg-white/5 text-zinc-400 cursor-pointer opacity-70"
                     >
                       <span>Claude</span>
                       <span className="text-[9px] text-zinc-500">Fallback</span>
@@ -212,7 +268,7 @@ export default function CodexBottomComposer({
                         onSelectModel("grok");
                         setShowModelDropdown(false);
                       }}
-                      className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between hover:bg-[#141420] text-zinc-400 cursor-pointer opacity-70"
+                      className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between hover:bg-white/5 text-zinc-400 cursor-pointer opacity-70"
                     >
                       <span>Grok</span>
                       <span className="text-[9px] text-zinc-500">Fallback</span>
@@ -226,7 +282,11 @@ export default function CodexBottomComposer({
             <button
               type="submit"
               disabled={!prompt.trim() || disabled}
-              className="px-4 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:hover:bg-cyan-600 text-white text-xs font-bold font-mono transition-all flex items-center gap-1.5 shadow-md shadow-cyan-950/50 cursor-pointer"
+              style={{
+                backgroundColor: "var(--theme-accent, #06b6d4)",
+                color: "#ffffff",
+              }}
+              className="px-4 py-1.5 rounded-xl hover:brightness-110 disabled:opacity-40 text-xs font-bold font-mono transition-all flex items-center gap-1.5 shadow-md cursor-pointer"
             >
               <span>Start Task</span>
               <Send className="w-3.5 h-3.5" />

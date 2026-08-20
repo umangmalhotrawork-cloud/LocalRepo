@@ -7,7 +7,10 @@ class GitManager {
     if (!workspacePath || typeof workspacePath !== 'string') {
       throw new Error('Invalid workspace path');
     }
-    return simpleGit({ baseDir: workspacePath, maxConcurrentProcesses: 4 });
+    return simpleGit({
+      baseDir: workspacePath,
+      maxConcurrentProcesses: 4,
+    });
   }
 
   async isRepo(workspacePath) {
@@ -239,10 +242,63 @@ class GitManager {
     return this.getStatus(workspacePath);
   }
 
+  formatPushError(rawErr) {
+    if (!rawErr) return 'Push failed.';
+    const lower = String(rawErr).toLowerCase();
+
+    if (
+      lower.includes('401') ||
+      lower.includes('invalid credentials') ||
+      lower.includes('authentication failed') ||
+      lower.includes('could not read username')
+    ) {
+      return 'Push authentication failed. Please reconnect your GitHub account.';
+    }
+    if (
+      lower.includes('404') ||
+      lower.includes('repository not found') ||
+      lower.includes('could not read from remote')
+    ) {
+      return 'Repository not found or access denied.';
+    }
+    if (
+      lower.includes('403') ||
+      lower.includes('permission to') ||
+      lower.includes('permission denied')
+    ) {
+      return 'Permission denied for repository.';
+    }
+    if (
+      lower.includes('rejected') ||
+      lower.includes('non-fast-forward') ||
+      lower.includes('fetch first') ||
+      lower.includes('behind')
+    ) {
+      return 'Push rejected (non-fast-forward). Remote contains work that you do not have locally.';
+    }
+    if (lower.includes('no remote') || lower.includes('does not appear to be a git repository')) {
+      return 'No remote repository configured.';
+    }
+
+    return String(rawErr).replace(/ghp_[a-zA-Z0-9]{36,40}|gho_[a-zA-Z0-9]{36,40}/g, 'gho_***');
+  }
+
   async push(workspacePath, remote = 'origin', branch) {
     try {
       const git = this.getGit(workspacePath);
-      const remotes = await git.getRemotes();
+      const { githubAuthManager } = require('./githubAuthManager');
+      const associatedRes = await githubAuthManager.getSelectedRepository(workspacePath).catch(() => ({ repo: null }));
+      const associatedRepo = associatedRes?.repo || null;
+      const token = githubAuthManager.authState?.token || null;
+
+      let remotes = await git.getRemotes(true).catch(() => []);
+      if (associatedRepo && remotes.length === 0) {
+        try {
+          await git.addRemote('origin', associatedRepo.cloneUrl || associatedRepo.htmlUrl);
+          remotes = await git.getRemotes(true);
+        } catch (e) {}
+      }
+
       if (!remotes || remotes.length === 0) {
         return {
           success: false,
@@ -259,10 +315,20 @@ class GitManager {
       }
 
       let pushResult;
-      try {
-        pushResult = await git.push(remote, targetBranch, ['--set-upstream']);
-      } catch (upstreamErr) {
-        pushResult = await git.push();
+      if (token) {
+        const basicAuth = Buffer.from(`x-access-token:${token}`).toString('base64');
+        const authConfig = `http.extraheader=Authorization: Basic ${basicAuth}`;
+        try {
+          pushResult = await git.raw(['-c', authConfig, 'push', '--set-upstream', remote, targetBranch]);
+        } catch (upstreamErr) {
+          pushResult = await git.raw(['-c', authConfig, 'push', remote, targetBranch]);
+        }
+      } else {
+        try {
+          pushResult = await git.push(remote, targetBranch, ['--set-upstream']);
+        } catch (upstreamErr) {
+          pushResult = await git.push(remote, targetBranch);
+        }
       }
 
       const status = await this.getStatus(workspacePath);
@@ -274,58 +340,179 @@ class GitManager {
       };
     } catch (err) {
       console.error('[GIT-MANAGER] push error:', err);
+      const formatted = this.formatPushError(err.message || String(err));
       return {
         success: false,
-        error: err.message || String(err),
-        message: `Push failed: ${err.message || String(err)}`,
+        error: formatted,
+        message: `Push failed: ${formatted}`,
         status: await this.getStatus(workspacePath),
       };
     }
   }
 
   async commitAndPush(workspacePath, message) {
+    if (!workspacePath || typeof workspacePath !== 'string') {
+      throw new Error('Invalid workspace path');
+    }
     if (!message || !message.trim()) {
       throw new Error('Commit message cannot be empty');
     }
 
     const git = this.getGit(workspacePath);
-    // 1. Stage all working tree & untracked changes
+    const initialStatus = await this.getStatus(workspacePath);
+
+    if (!initialStatus.isRepo) {
+      return {
+        success: false,
+        error: 'Not a git repository',
+        message: 'Folder is not a Git repository.',
+        status: initialStatus,
+      };
+    }
+
+    // 1. Check for detached HEAD
+    if (!initialStatus.currentBranch || initialStatus.currentBranch === 'HEAD') {
+      return {
+        success: false,
+        detachedHead: true,
+        committed: false,
+        pushed: false,
+        message: 'Cannot push from detached HEAD state. Please checkout or create a branch first.',
+        status: initialStatus,
+      };
+    }
+
+    // 2. Check for changes (staged, unstaged, untracked)
+    const hasChanges =
+      (initialStatus.staged && initialStatus.staged.length > 0) ||
+      (initialStatus.unstaged && initialStatus.unstaged.length > 0) ||
+      (initialStatus.untracked && initialStatus.untracked.length > 0);
+
+    if (!hasChanges) {
+      return {
+        success: false,
+        noChanges: true,
+        committed: false,
+        pushed: false,
+        message: 'No changes to commit. Working tree clean.',
+        status: initialStatus,
+      };
+    }
+
+    // 3. Stage all working tree & untracked changes
     await git.add('.');
 
-    // 2. Create commit
-    const commitResult = await git.commit(message.trim());
+    // 4. Create commit
+    let commitResult;
+    try {
+      commitResult = await git.commit(message.trim());
+    } catch (commitErr) {
+      return {
+        success: false,
+        committed: false,
+        pushed: false,
+        error: commitErr.message,
+        message: `Commit failed: ${commitErr.message}`,
+        status: await this.getStatus(workspacePath),
+      };
+    }
 
-    // 3. Attempt push if remotes exist
+    // 5. GitHub Repository Association & Remote Check
+    const currentBranch = initialStatus.currentBranch || 'main';
+    let targetRemote = 'origin';
     let pushSuccess = false;
     let pushError = null;
     let noRemote = false;
+    let remoteMismatch = false;
 
+    const { githubAuthManager } = require('./githubAuthManager');
+    const associatedRes = await githubAuthManager.getSelectedRepository(workspacePath).catch(() => ({ repo: null }));
+    const associatedRepo = associatedRes?.repo || null;
+    const token = githubAuthManager.authState?.token || null;
+
+    let existingRemotes = [];
     try {
-      const remotes = await git.getRemotes();
-      if (!remotes || remotes.length === 0) {
-        noRemote = true;
-      } else {
-        const st = await git.status();
-        const currentBranch = st.current || 'main';
-        try {
-          await git.push('origin', currentBranch, ['--set-upstream']);
-          pushSuccess = true;
-        } catch (pErr1) {
-          await git.push();
-          pushSuccess = true;
-        }
-      }
-    } catch (pushErr) {
-      pushError = pushErr.message || String(pushErr);
-      console.warn('[GIT-MANAGER] push warning during commitAndPush:', pushError);
+      existingRemotes = await git.getRemotes(true);
+    } catch (e) {
+      existingRemotes = [];
     }
 
-    const status = await this.getStatus(workspacePath);
+    if (associatedRepo && existingRemotes.length === 0) {
+      try {
+        await git.addRemote('origin', associatedRepo.cloneUrl || associatedRepo.htmlUrl);
+        existingRemotes = await git.getRemotes(true);
+      } catch (e) {
+        console.warn('[GIT-MANAGER] Failed to add origin for associated repo:', e.message);
+      }
+    }
+
+    if (!existingRemotes || existingRemotes.length === 0) {
+      noRemote = true;
+    } else {
+      const originRemote = existingRemotes.find((r) => r.name === 'origin') || existingRemotes[0];
+      targetRemote = originRemote.name;
+
+      if (associatedRepo && originRemote) {
+        const fetchUrl = (originRemote.refs?.fetch || '').toLowerCase();
+        const pushUrl = (originRemote.refs?.push || '').toLowerCase();
+        const targetFullName = (associatedRepo.fullName || '').toLowerCase();
+        const targetCloneUrl = (associatedRepo.cloneUrl || '').toLowerCase();
+        const targetHtmlUrl = (associatedRepo.htmlUrl || '').toLowerCase();
+
+        const matches =
+          fetchUrl.includes(targetFullName) ||
+          pushUrl.includes(targetFullName) ||
+          (targetCloneUrl && (fetchUrl.includes(targetCloneUrl) || pushUrl.includes(targetCloneUrl))) ||
+          (targetHtmlUrl && (fetchUrl.includes(targetHtmlUrl) || pushUrl.includes(targetHtmlUrl)));
+
+        if (!matches) {
+          remoteMismatch = true;
+          pushError = `Configured origin remote does not match associated repository "${associatedRepo.fullName}".`;
+        }
+      }
+
+      if (!remoteMismatch) {
+        if (token) {
+          const basicAuth = Buffer.from(`x-access-token:${token}`).toString('base64');
+          const authConfig = `http.extraheader=Authorization: Basic ${basicAuth}`;
+          try {
+            await git.raw(['-c', authConfig, 'push', '--set-upstream', targetRemote, currentBranch]);
+            pushSuccess = true;
+          } catch (pErr1) {
+            try {
+              await git.raw(['-c', authConfig, 'push', targetRemote, currentBranch]);
+              pushSuccess = true;
+            } catch (pErr2) {
+              const rawErr = pErr2.message || pErr1.message || String(pErr2);
+              pushError = this.formatPushError(rawErr);
+            }
+          }
+        } else {
+          try {
+            await git.push(targetRemote, currentBranch, ['--set-upstream']);
+            pushSuccess = true;
+          } catch (pErr1) {
+            try {
+              await git.push(targetRemote, currentBranch);
+              pushSuccess = true;
+            } catch (pErr2) {
+              const rawErr = pErr2.message || pErr1.message || String(pErr2);
+              pushError = this.formatPushError(rawErr);
+            }
+          }
+        }
+      }
+    }
+
+    const updatedStatus = await this.getStatus(workspacePath);
     let summaryMsg = 'Committed all changes.';
+
     if (pushSuccess) {
-      summaryMsg = 'Committed & pushed to remote successfully!';
+      summaryMsg = `Committed & pushed to ${targetRemote}/${currentBranch} successfully!`;
     } else if (noRemote) {
       summaryMsg = 'Committed locally (no remote repository configured).';
+    } else if (remoteMismatch) {
+      summaryMsg = `Committed locally. Remote mismatch notice: ${pushError}`;
     } else if (pushError) {
       summaryMsg = `Committed locally. Push notice: ${pushError}`;
     }
@@ -335,10 +522,11 @@ class GitManager {
       committed: true,
       pushed: pushSuccess,
       noRemote,
+      remoteMismatch,
       pushError,
       message: summaryMsg,
       commitResult,
-      status,
+      status: updatedStatus,
     };
   }
 

@@ -119,24 +119,40 @@ export default function TaskHome({
   const workspaceName = workspacePath ? workspacePath.split("/").pop() || "NEXUS" : "NEXUS";
 
   return (
-    <div className="flex-1 w-full h-full bg-[#07070a] text-zinc-100 flex flex-col items-center justify-between p-6 overflow-y-auto font-sans select-none relative">
+    <div 
+      style={{
+        backgroundColor: "var(--theme-background, #050505)",
+        color: "var(--theme-text, #f4f4f5)",
+      }}
+      className="flex-1 w-full h-full flex flex-col items-center justify-between p-6 overflow-y-auto font-sans select-none relative"
+    >
       
       {/* Background Aura */}
-      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[350px] bg-cyan-500/5 blur-[140px] rounded-full pointer-events-none" />
+      <div 
+        className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[350px] blur-[140px] rounded-full pointer-events-none opacity-20" 
+        style={{ backgroundColor: "var(--theme-accent, #22d3ee)" }}
+      />
 
       {/* Main Empty State Prompt Section */}
       <div className="w-full max-w-3xl my-auto flex flex-col items-center z-10 space-y-6 pt-6">
         <div className="text-center space-y-3">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-500/30 text-cyan-400 text-xs font-mono">
-            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+          <div 
+            className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono border"
+            style={{
+              backgroundColor: "var(--theme-accent-dim, rgba(34,211,238,0.15))",
+              borderColor: "var(--theme-border-card, rgba(34,211,238,0.3))",
+              color: "var(--theme-accent, #22d3ee)",
+            }}
+          >
+            <Sparkles className="w-3.5 h-3.5" style={{ color: "var(--theme-accent, #22d3ee)" }} />
             <span>NEXUS Coding Agent Engine</span>
           </div>
 
-          <h1 className="text-4xl font-heading font-extrabold tracking-tight text-white">
+          <h1 className="text-4xl font-heading font-extrabold tracking-tight" style={{ color: "var(--theme-text, #ffffff)" }}>
             What should we build in NEXUS?
           </h1>
 
-          <p className="text-sm text-zinc-400 max-w-lg mx-auto font-mono text-[12.5px]">
+          <p className="text-sm max-w-lg mx-auto font-mono text-[12.5px]" style={{ color: "var(--theme-text-muted, #a1a1aa)" }}>
             Describe a goal, bug, or refactoring. NEXUS will inspect dependencies, plan execution, and verify behavior safely.
           </p>
         </div>
@@ -146,7 +162,12 @@ export default function TaskHome({
           <div className="grid grid-cols-2 gap-2 font-mono text-xs">
             <button
               onClick={() => handlePresetClick("Find redundant code in this project and safely remove it.")}
-              className="p-2.5 rounded-xl bg-[#0b0b12] hover:bg-[#12121e] border border-[#1e1e2a] hover:border-cyan-500/40 text-left text-zinc-300 hover:text-white transition-all flex items-center gap-2.5 group cursor-pointer"
+              style={{
+                backgroundColor: "var(--theme-surface-panel, #0b0b12)",
+                borderColor: "var(--theme-border, #1e1e2a)",
+                color: "var(--theme-text, #f4f4f5)",
+              }}
+              className="p-2.5 rounded-xl border hover:border-cyan-500/40 text-left transition-all flex items-center gap-2.5 group cursor-pointer hover:brightness-110"
             >
               <Trash2 className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform shrink-0" />
               <div className="min-w-0">
@@ -157,7 +178,12 @@ export default function TaskHome({
 
             <button
               onClick={() => handlePresetClick("Explain the workspace architecture and core dependency flow.")}
-              className="p-2.5 rounded-xl bg-[#0b0b12] hover:bg-[#12121e] border border-[#1e1e2a] hover:border-cyan-500/40 text-left text-zinc-300 hover:text-white transition-all flex items-center gap-2.5 group cursor-pointer"
+              style={{
+                backgroundColor: "var(--theme-surface-panel, #0b0b12)",
+                borderColor: "var(--theme-border, #1e1e2a)",
+                color: "var(--theme-text, #f4f4f5)",
+              }}
+              className="p-2.5 rounded-xl border hover:border-cyan-500/40 text-left transition-all flex items-center gap-2.5 group cursor-pointer hover:brightness-110"
             >
               <Sparkles className="w-4 h-4 text-purple-400 group-hover:scale-110 transition-transform shrink-0" />
               <div className="min-w-0">
@@ -168,7 +194,12 @@ export default function TaskHome({
 
             <button
               onClick={() => handlePresetClick("Audit security vulnerabilities and hardcoded credentials.")}
-              className="p-2.5 rounded-xl bg-[#0b0b12] hover:bg-[#12121e] border border-[#1e1e2a] hover:border-cyan-500/40 text-left text-zinc-300 hover:text-white transition-all flex items-center gap-2.5 group cursor-pointer"
+              style={{
+                backgroundColor: "var(--theme-surface-panel, #0b0b12)",
+                borderColor: "var(--theme-border, #1e1e2a)",
+                color: "var(--theme-text, #f4f4f5)",
+              }}
+              className="p-2.5 rounded-xl border hover:border-cyan-500/40 text-left transition-all flex items-center gap-2.5 group cursor-pointer hover:brightness-110"
             >
               <ShieldAlert className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform shrink-0" />
               <div className="min-w-0">
@@ -179,7 +210,12 @@ export default function TaskHome({
 
             <button
               onClick={() => handlePresetClick("Fix all syntax, missing imports, and type errors.")}
-              className="p-2.5 rounded-xl bg-[#0b0b12] hover:bg-[#12121e] border border-[#1e1e2a] hover:border-cyan-500/40 text-left text-zinc-300 hover:text-white transition-all flex items-center gap-2.5 group cursor-pointer"
+              style={{
+                backgroundColor: "var(--theme-surface-panel, #0b0b12)",
+                borderColor: "var(--theme-border, #1e1e2a)",
+                color: "var(--theme-text, #f4f4f5)",
+              }}
+              className="p-2.5 rounded-xl border hover:border-cyan-500/40 text-left transition-all flex items-center gap-2.5 group cursor-pointer hover:brightness-110"
             >
               <CheckCircle2 className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform shrink-0" />
               <div className="min-w-0">
