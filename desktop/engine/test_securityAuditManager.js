@@ -119,7 +119,7 @@ subprocess.run("tar -czf backup.tar.gz /data", shell=True)
     // --- TEST 9: Markdown Export Validity ---
     const mdExport = securityAuditManager.exportReport(report, 'markdown');
     console.log(`[TEST 9] Markdown export: length=${mdExport.content.length}`);
-    if (!mdExport.success || !mdExport.content.includes('# Echo Nullity Security') || !mdExport.content.includes('## Findings')) {
+    if (!mdExport.success || (!mdExport.content.includes('# NEXUS Security') && !mdExport.content.includes('# Echo Nullity Security')) || !mdExport.content.includes('## Findings')) {
       throw new Error("Test 9 failed: Markdown export format invalid");
     }
 

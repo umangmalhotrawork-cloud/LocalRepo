@@ -79,15 +79,30 @@ function getCommitHistory(repoPath, maxCommits = DEFAULT_MAX_COMMITS, targetFile
  */
 function materializeCommitWorktree(repoPath, commitHash) {
   const tempDir = path.join(os.tmpdir(), `echonullity_prop_${commitHash.substring(0, 7)}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
+  fs.mkdirSync(tempDir, { recursive: true });
   try {
-    child_process.execFileSync('git', ['worktree', 'add', '--detach', tempDir, commitHash], {
+    const archiveData = child_process.execFileSync('git', ['archive', commitHash], {
       cwd: repoPath,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      maxBuffer: 50 * 1024 * 1024,
+      env: SAFE_GIT_ENV,
+    });
+    child_process.execFileSync('tar', ['-x', '-C', tempDir], {
+      input: archiveData,
       env: SAFE_GIT_ENV,
     });
     return tempDir;
-  } catch (err) {
-    throw new Error(`Failed to create isolated git worktree for ${commitHash}: ${err.message}`);
+  } catch (archiveErr) {
+    try {
+      child_process.execFileSync('git', ['worktree', 'add', '--detach', tempDir, commitHash], {
+        cwd: repoPath,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: SAFE_GIT_ENV,
+      });
+      return tempDir;
+    } catch (err) {
+      try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
+      throw new Error(`Failed to create isolated git worktree for ${commitHash}: ${err.message}`);
+    }
   }
 }
 
@@ -102,12 +117,13 @@ function cleanupCommitWorktree(repoPath, tempDir) {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: SAFE_GIT_ENV,
     });
-  } catch (err) {
-    try {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-      child_process.execFileSync('git', ['worktree', 'prune'], { cwd: repoPath, stdio: ['pipe', 'pipe', 'pipe'], env: SAFE_GIT_ENV });
-    } catch (e) {}
-  }
+  } catch (e) {}
+  try {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  } catch (e) {}
+  try {
+    child_process.execFileSync('git', ['worktree', 'prune'], { cwd: repoPath, stdio: ['pipe', 'pipe', 'pipe'], env: SAFE_GIT_ENV });
+  } catch (e) {}
 }
 
 /**

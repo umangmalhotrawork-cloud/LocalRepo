@@ -167,6 +167,16 @@ class AutonomousRepairEngine {
           modelId,
         });
       } catch (e) {
+        if (isCancelled) {
+          this.activeRepairs.delete(repairId);
+          return {
+            repairId,
+            status: 'CANCELLED',
+            reason: 'USER_CANCELLED',
+            iterations: [],
+            completed: false,
+          };
+        }
         this.activeRepairs.delete(repairId);
         return {
           repairId,

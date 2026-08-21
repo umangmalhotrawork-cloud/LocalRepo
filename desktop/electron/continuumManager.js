@@ -7,6 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 let app = null;
 try {
   app = require('electron').app;
