@@ -1,6 +1,15 @@
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { ChangeSet } = require('./harness/ChangeSet');
+const { transactionalPatchApplier } = require('./transactionalPatchApplier');
+let secretFilter = null;
+try {
+  secretFilter = require('../security/secretFilter');
+} catch (e) {
+  try {
+    secretFilter = require('./security/secretFilter');
+  } catch (e2) {}
+}
 
 const IGNORE_DIRS = new Set([
   'node_modules',
@@ -22,6 +31,54 @@ const BINARY_EXTENSIONS = new Set([
   '.exe', '.dll', '.dylib', '.so', '.bin', '.dat', '.db', '.sqlite',
   '.mp3', '.mp4', '.mov', '.avi', '.woff', '.woff2', '.ttf', '.eot',
 ]);
+
+function matchGlob(filePath, globPattern) {
+  if (!globPattern || !filePath) return false;
+  let pattern = typeof globPattern === 'string' ? globPattern.trim() : '';
+  if (!pattern) return false;
+
+  const normPath = filePath.replace(/\\/g, '/');
+  pattern = pattern.replace(/\\/g, '/');
+
+  // Handle negation
+  const isNegated = pattern.startsWith('!');
+  if (isNegated) pattern = pattern.slice(1);
+
+  // Convert glob to regex
+  let regexStr = pattern
+    .replace(/\./g, '\\.')
+    .replace(/\*\*/g, '§§')
+    .replace(/\*/g, '[^/]*')
+    .replace(/§§/g, '.*')
+    .replace(/\?/g, '.');
+
+  if (!regexStr.startsWith('.*') && !regexStr.startsWith('/')) {
+    regexStr = '(^|/)' + regexStr;
+  }
+  regexStr = '^' + regexStr + '$';
+
+  try {
+    const reg = new RegExp(regexStr, 'i');
+    const matches = reg.test(normPath) || reg.test(path.basename(normPath));
+    return isNegated ? !matches : matches;
+  } catch (e) {
+    return false;
+  }
+}
+
+function matchesAnyGlob(filePath, globList) {
+  if (!globList || globList.length === 0) return true;
+  const list = Array.isArray(globList) ? globList : String(globList).split(',').map((s) => s.trim()).filter(Boolean);
+  if (list.length === 0) return true;
+  return list.some((g) => matchGlob(filePath, g));
+}
+
+function isExcludedByGlobs(filePath, excludeList) {
+  if (!excludeList || excludeList.length === 0) return false;
+  const list = Array.isArray(excludeList) ? excludeList : String(excludeList).split(',').map((s) => s.trim()).filter(Boolean);
+  if (list.length === 0) return false;
+  return list.some((g) => matchGlob(filePath, g));
+}
 
 class SearchManager {
   constructor() {
@@ -49,16 +106,28 @@ class SearchManager {
       isCaseSensitive = false,
       isWholeWord = false,
       includeHidden = false,
+      includeGlobs = [],
+      excludeGlobs = [],
       maxResults = 5000,
     } = payload;
 
     const startTime = Date.now();
+    const searchId = `search_${startTime}_${Math.random().toString(36).substring(2, 8)}`;
 
     if (!workspacePath || !query) {
       return {
         success: true,
+        searchId,
+        query,
+        isRegex,
+        caseSensitive: isCaseSensitive,
+        wholeWord: isWholeWord,
+        includeGlobs,
+        excludeGlobs,
         results: [],
+        matches: [],
         totalFiles: 0,
+        affectedFiles: 0,
         totalMatches: 0,
         durationMs: 0,
       };
@@ -70,9 +139,12 @@ class SearchManager {
     } catch (err) {
       return {
         success: false,
+        searchId,
         error: `Invalid Regular Expression: ${err.message}`,
         results: [],
+        matches: [],
         totalFiles: 0,
+        affectedFiles: 0,
         totalMatches: 0,
         durationMs: 0,
       };
@@ -100,22 +172,30 @@ class SearchManager {
         }
 
         const fullPath = path.join(dir, name);
+        const relPath = path.relative(workspacePath, fullPath);
 
         if (entry.isDirectory()) {
-          if (!IGNORE_DIRS.has(name)) {
+          if (!IGNORE_DIRS.has(name) && !isExcludedByGlobs(relPath, excludeGlobs)) {
             scanDirectory(fullPath);
           }
         } else if (entry.isFile()) {
           const ext = path.extname(name).toLowerCase();
           if (BINARY_EXTENSIONS.has(ext)) continue;
 
+          // Check include/exclude globs
+          if (!matchesAnyGlob(relPath, includeGlobs)) continue;
+          if (isExcludedByGlobs(relPath, excludeGlobs)) continue;
+
           try {
             const stat = fs.statSync(fullPath);
             if (stat.size > 5 * 1024 * 1024) continue; // Skip files > 5MB
 
-            const content = fs.readFileSync(fullPath, 'utf8');
+            let content = fs.readFileSync(fullPath, 'utf8');
+            if (secretFilter && typeof secretFilter.sanitizeString === 'function') {
+              // Note: We search in raw file but ensure safe logging
+            }
+
             const lines = content.split(/\r?\n/);
-            const relPath = path.relative(workspacePath, fullPath);
 
             for (let i = 0; i < lines.length; i++) {
               if (results.length >= maxResults) break;
@@ -125,15 +205,20 @@ class SearchManager {
               let match;
 
               while ((match = regex.exec(lineText)) !== null) {
+                if (results.length >= maxResults) break;
                 const matchStart = match.index;
                 const matchEnd = match.index + match[0].length;
+                const matchId = `${relPath}:${i + 1}:${matchStart + 1}:${matchStart}`;
 
                 results.push({
+                  matchId,
                   file: relPath,
+                  filePath: relPath,
                   fullPath,
                   line: i + 1,
                   column: matchStart + 1,
                   text: lineText,
+                  lineText,
                   matchText: match[0],
                   matchStart,
                   matchEnd,
@@ -157,11 +242,274 @@ class SearchManager {
 
     return {
       success: true,
+      searchId,
+      query,
+      isRegex,
+      caseSensitive: isCaseSensitive,
+      wholeWord: isWholeWord,
+      includeGlobs,
+      excludeGlobs,
       results,
+      matches: results,
       totalFiles: matchedFilesSet.size,
+      affectedFiles: matchedFilesSet.size,
       totalMatches: results.length,
       durationMs: Date.now() - startTime,
     };
+  }
+
+  /**
+   * Generates a multi-file replacement preview model without mutating any files on disk.
+   */
+  async generateReplacementPreview(payload = {}) {
+    const {
+      workspacePath,
+      query = '',
+      replaceText = '',
+      isRegex = false,
+      isCaseSensitive = false,
+      isWholeWord = false,
+      includeHidden = false,
+      includeGlobs = [],
+      excludeGlobs = [],
+      selectedMatchIds = null, // null means all selected
+    } = payload;
+
+    const startTime = Date.now();
+    const searchRes = await this.runSearch({
+      workspacePath,
+      query,
+      isRegex,
+      isCaseSensitive,
+      isWholeWord,
+      includeHidden,
+      includeGlobs,
+      excludeGlobs,
+      maxResults: 20000,
+    });
+
+    if (!searchRes.success || searchRes.results.length === 0) {
+      return {
+        success: true,
+        previewId: `preview_${startTime}_empty`,
+        searchId: searchRes.searchId,
+        query,
+        replaceText,
+        files: [],
+        totalReplacements: 0,
+        totalFiles: 0,
+        durationMs: Date.now() - startTime,
+      };
+    }
+
+    const regex = this.buildSearchRegex(query, isRegex, isCaseSensitive, isWholeWord);
+    const fileGroups = new Map();
+
+    for (const match of searchRes.results) {
+      if (!fileGroups.has(match.filePath)) {
+        fileGroups.set(match.filePath, []);
+      }
+      fileGroups.get(match.filePath).push(match);
+    }
+
+    const previewFiles = [];
+    let totalSelectedReplacements = 0;
+    const selectedSet = selectedMatchIds ? new Set(selectedMatchIds) : null;
+
+    for (const [relPath, matches] of fileGroups.entries()) {
+      const fullPath = path.isAbsolute(relPath) ? relPath : path.join(workspacePath, relPath);
+      let originalContent = '';
+      try {
+        originalContent = fs.readFileSync(fullPath, 'utf8');
+      } catch (err) {
+        continue;
+      }
+
+      const lines = originalContent.split(/\r?\n/);
+      const fileMatches = [];
+      const selectedMatchesInFile = [];
+
+      // Group matches by line
+      const lineMatchMap = new Map();
+      for (const m of matches) {
+        const isSelected = selectedSet === null ? true : selectedSet.has(m.matchId);
+        const matchItem = {
+          matchId: m.matchId,
+          line: m.line,
+          column: m.column,
+          lineText: m.lineText,
+          matchText: m.matchText,
+          matchStart: m.matchStart,
+          matchEnd: m.matchEnd,
+          replacement: replaceText,
+          selected: isSelected,
+        };
+
+        fileMatches.push(matchItem);
+        if (isSelected) {
+          selectedMatchesInFile.push(m.matchId);
+          totalSelectedReplacements++;
+        }
+
+        if (!lineMatchMap.has(m.line)) {
+          lineMatchMap.set(m.line, []);
+        }
+        lineMatchMap.get(m.line).push(matchItem);
+      }
+
+      // Reconstruct proposed content line by line using only selected matches
+      const proposedLines = lines.map((originalLine, lineIdx) => {
+        const lineNum = lineIdx + 1;
+        const lineMatches = lineMatchMap.get(lineNum);
+        if (!lineMatches || lineMatches.length === 0) {
+          return originalLine;
+        }
+
+        // Sort matches descending by matchStart so replacing doesn't shift earlier offsets
+        const sortedMatches = [...lineMatches].sort((a, b) => b.matchStart - a.matchStart);
+        let updatedLine = originalLine;
+
+        for (const m of sortedMatches) {
+          if (!m.selected) continue;
+          const before = updatedLine.slice(0, m.matchStart);
+          const after = updatedLine.slice(m.matchEnd);
+          updatedLine = before + replaceText + after;
+        }
+
+        return updatedLine;
+      });
+
+      const proposedContent = proposedLines.join('\n');
+      const isFileSelected = selectedMatchesInFile.length > 0;
+
+      previewFiles.push({
+        filePath: relPath,
+        fullPath,
+        originalContent,
+        proposedContent,
+        matches: fileMatches,
+        selectedMatches: selectedMatchesInFile,
+        selected: isFileSelected,
+        changeType: proposedContent === originalContent ? 'UNCHANGED' : 'MODIFY',
+      });
+    }
+
+    return {
+      success: true,
+      previewId: `preview_${startTime}_${Math.random().toString(36).substring(2, 8)}`,
+      searchId: searchRes.searchId,
+      query,
+      replaceText,
+      files: previewFiles,
+      totalReplacements: totalSelectedReplacements,
+      totalFiles: previewFiles.filter((f) => f.selected).length,
+      durationMs: Date.now() - startTime,
+    };
+  }
+
+  /**
+   * Converts a replacement preview into a safety-evaluated ChangeSet instance.
+   */
+  async generateChangeSetFromPreview(payload = {}) {
+    const {
+      workspacePath,
+      preview,
+      threadId,
+      turnId,
+    } = payload;
+
+    if (!preview || !Array.isArray(preview.files)) {
+      throw new Error('Invalid preview model: files array is required');
+    }
+
+    const changeSet = new ChangeSet({
+      workspacePath: workspacePath || process.cwd(),
+      threadId: threadId || `search_replace_${Date.now()}`,
+      turnId: turnId || null,
+      intent: 'GLOBAL_SEARCH_REPLACE',
+      metadata: {
+        query: preview.query,
+        replaceText: preview.replaceText,
+        totalReplacements: preview.totalReplacements,
+      },
+    });
+
+    for (const file of preview.files) {
+      if (file.selected !== false && file.proposedContent !== file.originalContent) {
+        changeSet.addFile({
+          filePath: file.filePath,
+          original: file.originalContent,
+          replacement: file.proposedContent,
+          changeType: 'MUTATION',
+          metadata: {
+            selectedMatches: file.selectedMatches || [],
+          },
+        });
+      }
+    }
+
+    // Run multi-file safety analysis across ASTDiffEngine, ImpactAnalyzer, and Patch Firewall
+    const risk = await changeSet.evaluateSafety({ workspacePath });
+
+    return {
+      success: true,
+      changeSetId: changeSet.changeSetId,
+      changeSet,
+      risk,
+      filesCount: changeSet.files.length,
+    };
+  }
+
+  /**
+   * Applies the proposed replacements atomically via TransactionalPatchApplier.
+   * If any file write or validation fails, ALL file modifications are rolled back.
+   */
+  async applyReplacementChangeSet(payload = {}) {
+    const {
+      workspacePath = process.cwd(),
+      files = [],
+      changeSet = null,
+      force = false,
+    } = payload;
+
+    const edits = [];
+
+    if (changeSet && Array.isArray(changeSet.files)) {
+      for (const f of changeSet.files) {
+        edits.push({
+          filePath: f.filePath,
+          original: f.original,
+          replacement: f.replacement,
+        });
+      }
+    } else if (Array.isArray(files)) {
+      for (const f of files) {
+        if (f.selected !== false && f.proposedContent !== f.originalContent) {
+          edits.push({
+            filePath: f.filePath,
+            original: f.originalContent,
+            replacement: f.proposedContent,
+          });
+        }
+      }
+    }
+
+    if (edits.length === 0) {
+      return {
+        success: true,
+        message: 'No edits to apply.',
+        modifiedFiles: [],
+      };
+    }
+
+    const txResult = await transactionalPatchApplier.applyTransaction(edits, {
+      workspacePath,
+      force,
+      enforceFirewall: true,
+      verifySyntax: true,
+    });
+
+    return txResult;
   }
 
   async replaceSingle(payload = {}) {
@@ -179,8 +527,8 @@ class SearchManager {
       throw new Error(`File not found: ${file}`);
     }
 
-    const content = fs.readFileSync(fullPath, 'utf8');
-    const lines = content.split(/\r?\n/);
+    const originalContent = fs.readFileSync(fullPath, 'utf8');
+    const lines = originalContent.split(/\r?\n/);
 
     if (line < 1 || line > lines.length) {
       throw new Error(`Invalid line number: ${line}`);
@@ -194,20 +542,34 @@ class SearchManager {
     const after = targetLine.slice(colIdx + matchText.length);
 
     if (matchSlice !== matchText) {
-      // Fallback substring replace on line
       lines[line - 1] = targetLine.replace(matchText, replaceText);
     } else {
       lines[line - 1] = before + replaceText + after;
     }
 
-    const newContent = lines.join('\n');
-    fs.writeFileSync(fullPath, newContent, 'utf8');
+    const proposedContent = lines.join('\n');
+
+    // Route through transactionalPatchApplier for atomic safety & rollback protection
+    const txResult = await transactionalPatchApplier.applyTransaction([
+      {
+        filePath: file,
+        original: originalContent,
+        replacement: proposedContent,
+      },
+    ], {
+      workspacePath,
+      force: true,
+    });
+
+    if (!txResult.success) {
+      throw new Error(txResult.error || 'Failed to replace match');
+    }
 
     return {
       success: true,
       file,
       line,
-      newContent,
+      newContent: proposedContent,
     };
   }
 
@@ -222,56 +584,37 @@ class SearchManager {
       fileFilter = null,
     } = payload;
 
-    const regex = this.buildSearchRegex(query, isRegex, isCaseSensitive, isWholeWord);
-    let filesChanged = 0;
-    let replacementsCount = 0;
-
-    const searchRes = await this.runSearch({
+    const preview = await this.generateReplacementPreview({
       workspacePath,
       query,
+      replaceText,
       isRegex,
       isCaseSensitive,
       isWholeWord,
-      maxResults: 20000,
     });
 
-    if (!searchRes.success || searchRes.results.length === 0) {
+    if (!preview.success || preview.files.length === 0) {
       return { success: true, filesChanged: 0, replacementsCount: 0 };
     }
 
-    // Group matches by file
-    const fileMap = new Map();
-    for (const res of searchRes.results) {
-      if (fileFilter && res.file !== fileFilter) continue;
-      if (!fileMap.has(res.fullPath)) {
-        fileMap.set(res.fullPath, []);
-      }
-      fileMap.get(res.fullPath).push(res);
-    }
+    const filesToApply = fileFilter
+      ? preview.files.filter((f) => f.filePath === fileFilter)
+      : preview.files;
 
-    for (const [fullPath, matches] of fileMap.entries()) {
-      try {
-        const content = fs.readFileSync(fullPath, 'utf8');
-        let countInFile = 0;
-        const newContent = content.replace(regex, () => {
-          countInFile++;
-          return replaceText;
-        });
+    const txResult = await this.applyReplacementChangeSet({
+      workspacePath,
+      files: filesToApply,
+      force: true,
+    });
 
-        if (countInFile > 0) {
-          fs.writeFileSync(fullPath, newContent, 'utf8');
-          filesChanged++;
-          replacementsCount += countInFile;
-        }
-      } catch (err) {
-        console.error(`[SEARCH-MANAGER] replaceAll failed for ${fullPath}:`, err);
-      }
+    if (!txResult.success) {
+      throw new Error(txResult.error || 'Replace all transaction failed');
     }
 
     return {
       success: true,
-      filesChanged,
-      replacementsCount,
+      filesChanged: txResult.modifiedFiles ? txResult.modifiedFiles.length : filesToApply.length,
+      replacementsCount: preview.totalReplacements,
     };
   }
 
@@ -284,3 +627,4 @@ class SearchManager {
 
 const searchManager = new SearchManager();
 module.exports = searchManager;
+

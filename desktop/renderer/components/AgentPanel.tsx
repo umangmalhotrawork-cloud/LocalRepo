@@ -31,6 +31,7 @@ import { useOutsideClick } from "../hooks/useOutsideClick";
 import SwarmActivityPanel from "./SwarmActivityPanel";
 import ChangeConflictResolver, { ConflictItem } from "./ChangeConflictResolver";
 import { useSwarmActivity } from "../hooks/useSwarmActivity";
+import { TerminalDiagnostic } from "../utils/diagnosticParser";
 
 export type ProposedEdit = {
   filePath: string;
@@ -101,6 +102,9 @@ interface AgentPanelProps {
     startColumn?: number;
     endColumn?: number;
   } | null;
+  cursorPos?: { line: number; col: number } | null;
+  gitBranch?: string;
+  diagnostic?: TerminalDiagnostic | null;
   initialTask?: string;
   onPreviewDiff?: (edit: ProposedEdit) => void;
   onApplyStep?: (step: AgentStep) => Promise<boolean>;
@@ -127,6 +131,9 @@ export default function AgentPanel({
   activeSessionTitle,
   activeContinuumSnapshot,
   selectionInfo,
+  cursorPos,
+  gitBranch,
+  diagnostic,
   initialTask,
   onPreviewDiff,
   onApplyStep,
@@ -707,6 +714,15 @@ export default function AgentPanel({
           userInput: activeTask,
           workspacePath,
           activeFilePath,
+          selectionText: selectionInfo?.text,
+          selectionStartLine: selectionInfo?.startLineNumber,
+          selectionStartColumn: selectionInfo?.startColumn,
+          selectionEndLine: selectionInfo?.endLineNumber,
+          selectionEndColumn: selectionInfo?.endColumn,
+          cursorLine: cursorPos?.line,
+          cursorColumn: cursorPos?.col,
+          gitBranch: gitBranch,
+          diagnostic: diagnostic || null,
           intent: "MUTATION",
           providerId: aiConfig?.activeProvider,
           modelId: aiConfig?.activeModel,
@@ -1432,6 +1448,21 @@ export default function AgentPanel({
             await harness.resolveConflictHunk({
               conflictId,
               hunkId,
+              resolution,
+              customContent,
+              context: { threadId: activeSessionId },
+            });
+            if (harness.listChangeConflicts) {
+              const updated = await harness.listChangeConflicts();
+              if (Array.isArray(updated)) setActiveConflicts(updated);
+            }
+          }
+        }}
+        onResolveFile={async (conflictId, resolution, customContent) => {
+          const harness = (window as any).electronAPI?.harness;
+          if (harness?.resolveFileConflict) {
+            await harness.resolveFileConflict({
+              conflictId,
               resolution,
               customContent,
               context: { threadId: activeSessionId },

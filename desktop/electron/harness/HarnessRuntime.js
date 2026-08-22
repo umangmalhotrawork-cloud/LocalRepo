@@ -29,6 +29,7 @@ const { ProjectCapabilityLoader, projectCapabilityLoader } = require('./ProjectC
 const { ChangeConflictResolver } = require('./ChangeConflictResolver');
 const { RepositorySymbolIndex, repositorySymbolIndex } = require('./RepositorySymbolIndex');
 const { ImpactAnalyzer, impactAnalyzer } = require('./ImpactAnalyzer');
+const { LanguageIntelligence, languageIntelligence } = require('./LanguageIntelligence');
 const { RefactorPlan } = require('./RefactorPlan');
 const {
   THREAD_STATUS,
@@ -99,6 +100,11 @@ class HarnessRuntime {
         eventBus: this.eventBus,
         symbolIndex: this.symbolIndex,
       });
+      this.languageIntelligence = options.languageIntelligence || new LanguageIntelligence({
+        symbolIndex: this.symbolIndex,
+        impactAnalyzer: this.impactAnalyzer,
+        eventBus: this.eventBus,
+      });
 
     } else {
       this.eventBus = options.eventBus || harnessEventBus;
@@ -132,6 +138,7 @@ class HarnessRuntime {
       });
       this.symbolIndex = options.symbolIndex || repositorySymbolIndex;
       this.impactAnalyzer = options.impactAnalyzer || impactAnalyzer;
+      this.languageIntelligence = options.languageIntelligence || languageIntelligence;
     }
     this.refactorPlans = new Map();
   }
@@ -506,14 +513,15 @@ class HarnessRuntime {
       workspacePath: workspacePath || context.workspacePath,
     });
 
-    // 1. CONVERSATION PATH: Bypass AgentLoop and workspace scanning completely
+    // 1. CONVERSATION PATH: Direct AI provider call
     if (classification.mode === ROUTER_MODES.CONVERSATION) {
-      let assistantText = 'Hello! I am NEXUS AI Assistant. How can I help you today?';
+      let assistantText = '';
+      let isSuccess = true;
       let executionMeta = {
         providerId: providerId || 'groq',
-        modelId: modelId || 'llama-3.3-70b-versatile',
+        modelId: modelId || 'openai/gpt-oss-120b',
         requestedProviderId: providerId || 'groq',
-        requestedModelId: modelId || 'llama-3.3-70b-versatile',
+        requestedModelId: modelId || 'openai/gpt-oss-120b',
         isFallback: false,
       };
 
@@ -528,6 +536,7 @@ class HarnessRuntime {
             isFallback: Boolean(resolved.isFallback),
           };
         }
+
         if (aiProviderRouter) {
           const providerRes = await aiProviderRouter.generateAgentPlan({
             task: userInput,
@@ -540,17 +549,22 @@ class HarnessRuntime {
             providerId,
             modelId,
           });
+
           if (providerRes && providerRes.summary) {
             assistantText = providerRes.summary;
             executionMeta = providerRes.execution || executionMeta;
+          } else {
+            assistantText = 'I am ready to help. What would you like to inspect or build?';
           }
         }
       } catch (err) {
         console.warn('[HARNESS-ROUTER] Conversational provider call failed:', err.message);
+        isSuccess = false;
+        assistantText = `Error from ${executionMeta.providerId || 'AI provider'}: ${err.message}`;
       }
 
       return {
-        success: true,
+        success: isSuccess,
         mode: ROUTER_MODES.CONVERSATION,
         codingIntent: null,
         route: classification,
@@ -585,8 +599,25 @@ class HarnessRuntime {
       modelHandler: payload.modelHandler,
       continuumSnapshot,
       handoffState: payload.handoffState,
+      diagnostic: payload.diagnostic,
+      selectionText: payload.selectionText,
+      selectionStartLine: payload.selectionStartLine,
+      selectionEndLine: payload.selectionEndLine,
+      cursorLine: payload.cursorLine,
+      cursorColumn: payload.cursorColumn,
+      gitBranch: payload.gitBranch,
     });
 
+
+    const resolved = aiProviderRouter ? aiProviderRouter.resolveProviderAndModel(providerId, modelId) : null;
+    const summaryText = turnOutcome.finalResponse || turnOutcome.summary || turnOutcome.error || (turnOutcome.success ? 'Task completed successfully.' : 'Task encountered an error.');
+    const executionMeta = {
+      providerId: resolved?.provider?.getId() || providerId || 'groq',
+      modelId: resolved?.modelId || modelId || 'openai/gpt-oss-120b',
+      requestedProviderId: providerId || 'groq',
+      requestedModelId: modelId || 'openai/gpt-oss-120b',
+      isFallback: Boolean(resolved?.isFallback),
+    };
 
     return {
       ...turnOutcome,
@@ -594,6 +625,9 @@ class HarnessRuntime {
       codingIntent: classification.codingIntent,
       route: classification,
       threadId,
+      summary: summaryText,
+      response: summaryText,
+      execution: turnOutcome.execution || executionMeta,
     };
   }
 
@@ -1035,7 +1069,8 @@ class HarnessRuntime {
       items.push(...this.itemStore.getItemsByTurn(turn.turnId));
     }
 
-    return this.persistenceAdapter.saveThread(thread, turns, items, workspacePath);
+    const conflicts = this.changeConflictResolver.listConflicts().map((c) => c.toJSON());
+    return this.persistenceAdapter.saveThread(thread, turns, items, workspacePath, { conflicts });
   }
 
   /**
@@ -1069,6 +1104,9 @@ class HarnessRuntime {
       this.workspaceIsolationManager.restoreWorkspace(res.workspace);
     }
 
+    if (Array.isArray(res.conflicts) && res.conflicts.length > 0) {
+      this.changeConflictResolver.restoreConflicts(res.conflicts);
+    }
 
     return {
       success: true,
@@ -1083,6 +1121,62 @@ class HarnessRuntime {
    */
   listPersistedThreads(workspacePath = '') {
     return this.persistenceAdapter.listPersistedThreads(workspacePath);
+  }
+
+  // ==========================================
+  // LANGUAGE INTELLIGENCE & PROBLEMS METHODS (Milestone 31)
+  // ==========================================
+
+  async getDefinition(query = {}) {
+    return this.languageIntelligence.getDefinition(query);
+  }
+
+  async findReferences(query = {}) {
+    return this.languageIntelligence.findReferences(query);
+  }
+
+  async getHover(query = {}) {
+    return this.languageIntelligence.getHover(query);
+  }
+
+  async prepareRename(query = {}) {
+    return this.languageIntelligence.prepareRename(query);
+  }
+
+  async applyRename(options = {}) {
+    return this.languageIntelligence.applyRename(options);
+  }
+
+  async getDocumentOutline(query = {}) {
+    return this.languageIntelligence.getDocumentOutline(query);
+  }
+
+  async getSymbolAtPosition(query = {}) {
+    return this.languageIntelligence.getSymbolAtPosition(query);
+  }
+
+  async getBreadcrumbs(query = {}) {
+    return this.languageIntelligence.getBreadcrumbs(query);
+  }
+
+  parseDiagnostics(rawText = '', options = {}) {
+    return this.languageIntelligence.parseDiagnostics(rawText, options);
+  }
+
+  getProblems(filter = {}) {
+    return this.languageIntelligence.getProblems(filter);
+  }
+
+  addProblems(problemList = [], source = null) {
+    return this.languageIntelligence.addProblems(problemList, source);
+  }
+
+  clearProblems(filter = {}) {
+    return this.languageIntelligence.clearProblems(filter);
+  }
+
+  getProblemsSummary() {
+    return this.languageIntelligence.getProblemsSummary();
   }
 
   // ==========================================
@@ -1257,6 +1351,10 @@ class HarnessRuntime {
 
   resolveChangeConflictHunk(conflictId, hunkId, resolution, customContent, context) {
     return this.changeConflictResolver.resolveHunk(conflictId, hunkId, resolution, customContent, context);
+  }
+
+  resolveChangeConflictFile(conflictId, resolution, customContent, context) {
+    return this.changeConflictResolver.resolveFile(conflictId, resolution, customContent, context);
   }
 
   createParentChangeSetFromConflicts(options) {

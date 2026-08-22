@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { 
   Command, Search, FolderOpen, Play, Sparkles, RotateCcw, 
   Sidebar, Terminal, FileText, X, Zap, ShieldAlert, Camera, History,
-  Network, Copy, Compass
+  Network, Copy, Compass, GitBranch, Bug, Settings, Sliders
 } from "lucide-react";
 import { useOutsideClick } from "../hooks/useOutsideClick";
 
@@ -50,6 +50,26 @@ interface CommandPaletteProps {
   onOpenFingerprint?: () => void;
   onOpenFirewall?: () => void;
   onOpenIntentRadar?: () => void;
+  onNewTerminalTab?: () => void;
+  onSplitTerminalVertical?: () => void;
+  onSplitTerminalHorizontal?: () => void;
+  onClearTerminalOutput?: () => void;
+  onSplitEditorRight?: () => void;
+  onSplitEditorDown?: () => void;
+  onCloseEditorGroup?: () => void;
+  onMoveTabToOtherGroup?: () => void;
+  onToggleOutline?: () => void;
+  onRevertCurrentHunk?: () => void;
+  onRefreshGitGutter?: () => void;
+  onStartDebugging?: () => void;
+  onStopDebugging?: () => void;
+  onStepOver?: () => void;
+  onStepInto?: () => void;
+  onStepOut?: () => void;
+  onToggleBreakpoint?: () => void;
+  onDebugTestSelected?: () => void;
+  onOpenSettings?: () => void;
+  onOpenKeybindings?: () => void;
   openTabs: { path: string; name: string }[];
   onSelectTab: (path: string) => void;
 }
@@ -87,6 +107,26 @@ export default function CommandPalette({
   onOpenFingerprint,
   onOpenFirewall,
   onOpenIntentRadar,
+  onNewTerminalTab,
+  onSplitTerminalVertical,
+  onSplitTerminalHorizontal,
+  onClearTerminalOutput,
+  onSplitEditorRight,
+  onSplitEditorDown,
+  onCloseEditorGroup,
+  onMoveTabToOtherGroup,
+  onToggleOutline,
+  onRevertCurrentHunk,
+  onRefreshGitGutter,
+  onStartDebugging,
+  onStopDebugging,
+  onStepOver,
+  onStepInto,
+  onStepOut,
+  onToggleBreakpoint,
+  onDebugTestSelected,
+  onOpenSettings,
+  onOpenKeybindings,
   openTabs,
   onSelectTab,
 }: CommandPaletteProps) {
@@ -320,6 +360,158 @@ export default function CommandPalette({
       category: "View Options",
       icon: Terminal,
       action: () => { onToggleConsole(); onClose(); },
+    },
+    {
+      id: "terminal-new-tab",
+      title: "Terminal: New Terminal Tab",
+      category: "Terminal",
+      icon: Terminal,
+      shortcut: "⌘⇧`",
+      action: () => { if (onNewTerminalTab) onNewTerminalTab(); onClose(); },
+    },
+    {
+      id: "terminal-split-vertical",
+      title: "Terminal: Split Terminal (Vertical)",
+      category: "Terminal",
+      icon: Terminal,
+      shortcut: "⌘\\",
+      action: () => { if (onSplitTerminalVertical) onSplitTerminalVertical(); onClose(); },
+    },
+    {
+      id: "terminal-split-horizontal",
+      title: "Terminal: Split Terminal (Horizontal)",
+      category: "Terminal",
+      icon: Terminal,
+      shortcut: "⌘⇧\\",
+      action: () => { if (onSplitTerminalHorizontal) onSplitTerminalHorizontal(); onClose(); },
+    },
+    {
+      id: "terminal-clear",
+      title: "Terminal: Clear Terminal Output",
+      category: "Terminal",
+      icon: Terminal,
+      action: () => { if (onClearTerminalOutput) onClearTerminalOutput(); onClose(); },
+    },
+    {
+      id: "editor-split-right",
+      title: "View: Split Editor Right",
+      category: "View Options",
+      icon: Sidebar,
+      shortcut: "⌘\\",
+      action: () => { if (onSplitEditorRight) onSplitEditorRight(); onClose(); },
+    },
+    {
+      id: "editor-split-down",
+      title: "View: Split Editor Down",
+      category: "View Options",
+      icon: Sidebar,
+      shortcut: "⌘K ⌘\\",
+      action: () => { if (onSplitEditorDown) onSplitEditorDown(); onClose(); },
+    },
+    {
+      id: "editor-close-group",
+      title: "View: Close Editor Group",
+      category: "View Options",
+      icon: X,
+      action: () => { if (onCloseEditorGroup) onCloseEditorGroup(); onClose(); },
+    },
+    {
+      id: "editor-move-tab-other-group",
+      title: "View: Move Editor Tab to Other Group",
+      category: "View Options",
+      icon: FileText,
+      action: () => { if (onMoveTabToOtherGroup) onMoveTabToOtherGroup(); onClose(); },
+    },
+    {
+      id: "toggle-document-outline",
+      title: "View: Toggle Document Outline",
+      category: "View Options",
+      icon: FileText,
+      action: () => { if (onToggleOutline) onToggleOutline(); onClose(); },
+    },
+    {
+      id: "git-revert-current-hunk",
+      title: "Git: Revert Current Hunk",
+      category: "Git",
+      icon: RotateCcw,
+      action: () => { if (onRevertCurrentHunk) onRevertCurrentHunk(); onClose(); },
+    },
+    {
+      id: "git-refresh-gutter",
+      title: "Git: Refresh Gutter Annotations",
+      category: "Git",
+      icon: GitBranch,
+      action: () => { if (onRefreshGitGutter) onRefreshGitGutter(); onClose(); },
+    },
+    {
+      id: "debug-start",
+      title: "Debug: Start Debugging",
+      category: "Debug",
+      icon: Bug,
+      shortcut: "F5",
+      action: () => { if (onStartDebugging) onStartDebugging(); onClose(); },
+    },
+    {
+      id: "debug-stop",
+      title: "Debug: Stop Debugging",
+      category: "Debug",
+      icon: Bug,
+      shortcut: "⇧F5",
+      action: () => { if (onStopDebugging) onStopDebugging(); onClose(); },
+    },
+    {
+      id: "debug-step-over",
+      title: "Debug: Step Over",
+      category: "Debug",
+      icon: Bug,
+      shortcut: "F10",
+      action: () => { if (onStepOver) onStepOver(); onClose(); },
+    },
+    {
+      id: "debug-step-into",
+      title: "Debug: Step Into",
+      category: "Debug",
+      icon: Bug,
+      shortcut: "F11",
+      action: () => { if (onStepInto) onStepInto(); onClose(); },
+    },
+    {
+      id: "debug-step-out",
+      title: "Debug: Step Out",
+      category: "Debug",
+      icon: Bug,
+      shortcut: "⇧F11",
+      action: () => { if (onStepOut) onStepOut(); onClose(); },
+    },
+    {
+      id: "debug-toggle-breakpoint",
+      title: "Debug: Toggle Breakpoint",
+      category: "Debug",
+      icon: Bug,
+      shortcut: "F9",
+      action: () => { if (onToggleBreakpoint) onToggleBreakpoint(); onClose(); },
+    },
+    {
+      id: "test-debug-selected",
+      title: "Test: Debug Selected Test",
+      category: "Testing",
+      icon: Bug,
+      action: () => { if (onDebugTestSelected) onDebugTestSelected(); onClose(); },
+    },
+    {
+      id: "preferences-open-settings",
+      title: "Preferences: Open Settings",
+      category: "Preferences",
+      icon: Settings,
+      shortcut: "Cmd+,",
+      action: () => { if (onOpenSettings) onOpenSettings(); onClose(); },
+    },
+    {
+      id: "preferences-open-keybindings",
+      title: "Preferences: Open Keyboard Shortcuts",
+      category: "Preferences",
+      icon: Sliders,
+      action: () => { if (onOpenKeybindings) onOpenKeybindings(); onClose(); },
     },
     ...openTabs.map((t) => ({
       id: `tab-${t.path}`,

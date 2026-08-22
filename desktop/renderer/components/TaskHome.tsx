@@ -27,6 +27,7 @@ interface ChatMessage {
   role: "user" | "agent";
   content: string;
   timestamp: number;
+  isStreaming?: boolean;
   execution?: {
     providerId: string;
     modelId: string;
@@ -127,7 +128,7 @@ export default function TaskHome({
   const [recentSessions, setRecentSessions] = useState<ContinuumSnapshot[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [activeProvider, setActiveProvider] = useState("groq");
-  const [activeModel, setActiveModel] = useState("llama-3.3-70b-versatile");
+  const [activeModel, setActiveModel] = useState("openai/gpt-oss-120b");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -229,7 +230,7 @@ export default function TaskHome({
       return;
     }
 
-    // 2. Handle CONVERSATION in-place without opening files or switching to workbench
+    // 2. Handle CONVERSATION in-place with progressive delta streaming
     const now = Date.now();
     const userMsg: ChatMessage = {
       id: `user_${now}`,
@@ -238,11 +239,60 @@ export default function TaskHome({
       timestamp: now,
     };
 
+    const agentMsgId = `agent_${now + 1}`;
     setChatMessages((prev) => [...prev, userMsg]);
     setChatLoading(true);
 
+    let unsubscribeHarness: (() => void) | null = null;
+
     try {
       if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.handleRequest) {
+        if ((window as any).electronAPI?.harness?.onEvent) {
+          unsubscribeHarness = (window as any).electronAPI.harness.onEvent((event: any) => {
+            if (!event) return;
+            const { type, payload } = event;
+            const item = payload?.item || {};
+
+            if (item.type === "AGENT_MESSAGE" || type.startsWith("ITEM_")) {
+              const textContent = item.payload?.text || payload?.text || item.payload?.summary || "";
+              if (type === "ITEM_STARTED" || type === "ITEM_UPDATED") {
+                setChatMessages((prev) => {
+                  const exists = prev.some((m) => m.id === agentMsgId);
+                  if (!exists) {
+                    return [
+                      ...prev,
+                      {
+                        id: agentMsgId,
+                        role: "agent",
+                        content: textContent,
+                        timestamp: Date.now(),
+                        isStreaming: true,
+                        execution: {
+                          providerId: activeProvider,
+                          modelId: activeModel,
+                        },
+                      },
+                    ];
+                  }
+                  return prev.map((m) =>
+                    m.id === agentMsgId
+                      ? { ...m, content: textContent || m.content, isStreaming: true }
+                      : m
+                  );
+                });
+              } else if (type === "ITEM_COMPLETED") {
+                setChatMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === agentMsgId
+                      ? { ...m, content: textContent || m.content, isStreaming: false }
+                      : m
+                  )
+                );
+              }
+            }
+          });
+        }
+
         const res = await (window as any).electronAPI.harness.handleRequest({
           userInput: promptText.trim(),
           workspacePath,
@@ -251,14 +301,33 @@ export default function TaskHome({
           modelId: activeModel,
         });
 
-        const agentMsg: ChatMessage = {
-          id: `agent_${Date.now()}`,
-          role: "agent",
-          content: res?.response || res?.summary || "Hello! I am NEXUS AI Assistant. How can I assist you with your project?",
-          timestamp: Date.now(),
-          execution: res?.execution,
-        };
-        setChatMessages((prev) => [...prev, agentMsg]);
+        const finalContent = res?.response || res?.summary || (res?.error ? `Error: ${res.error}` : (res?.success === false ? "AI provider request failed." : "No response generated."));
+        setChatMessages((prev) => {
+          const exists = prev.some((m) => m.id === agentMsgId);
+          if (exists) {
+            return prev.map((m) =>
+              m.id === agentMsgId
+                ? {
+                    ...m,
+                    content: m.content ? m.content : finalContent,
+                    isStreaming: false,
+                    execution: res?.execution || m.execution,
+                  }
+                : m
+            );
+          }
+          return [
+            ...prev,
+            {
+              id: agentMsgId,
+              role: "agent",
+              content: finalContent,
+              timestamp: Date.now(),
+              isStreaming: false,
+              execution: res?.execution,
+            },
+          ];
+        });
       } else if (typeof window !== "undefined" && (window as any).electronAPI?.agent?.run) {
         const res = await (window as any).electronAPI.agent.run({
           task: promptText.trim(),
@@ -270,19 +339,21 @@ export default function TaskHome({
         });
 
         const agentMsg: ChatMessage = {
-          id: `agent_${Date.now()}`,
+          id: agentMsgId,
           role: "agent",
-          content: res?.summary || "Hello! I am NEXUS AI Assistant. How can I assist you with your project?",
+          content: res?.summary || res?.response || (res?.error ? `Error: ${res.error}` : "Task completed."),
           timestamp: Date.now(),
+          isStreaming: false,
           execution: res?.execution,
         };
         setChatMessages((prev) => [...prev, agentMsg]);
       } else {
         const agentMsg: ChatMessage = {
-          id: `agent_${Date.now()}`,
+          id: agentMsgId,
           role: "agent",
           content: "Hello! I am NEXUS AI Assistant. Ask me anything about this repository or describe a coding task to get started.",
           timestamp: Date.now(),
+          isStreaming: false,
         };
         setChatMessages((prev) => [...prev, agentMsg]);
       }
@@ -292,9 +363,15 @@ export default function TaskHome({
         role: "agent",
         content: `Error: ${e.message || "Failed to process request"}`,
         timestamp: Date.now(),
+        isStreaming: false,
       };
       setChatMessages((prev) => [...prev, errMsg]);
     } finally {
+      if (unsubscribeHarness) {
+        try {
+          unsubscribeHarness();
+        } catch (e) {}
+      }
       setChatLoading(false);
     }
   };

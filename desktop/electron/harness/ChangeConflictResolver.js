@@ -98,6 +98,7 @@ function perform3WayLineMerge(baseText, parentText, incomingText) {
   if (parentText === baseText && incomingText === baseText) {
     return {
       status: CONFLICT_STATUS.AUTO_RESOLVED,
+      hasConflict: false,
       resolvedContent: baseText,
       hunks: [
         {
@@ -119,6 +120,7 @@ function perform3WayLineMerge(baseText, parentText, incomingText) {
   if (parentText === baseText && incomingText !== baseText) {
     return {
       status: CONFLICT_STATUS.AUTO_RESOLVED,
+      hasConflict: false,
       resolvedContent: incomingText,
       hunks: [
         {
@@ -140,6 +142,7 @@ function perform3WayLineMerge(baseText, parentText, incomingText) {
   if (incomingText === baseText && parentText !== baseText) {
     return {
       status: CONFLICT_STATUS.AUTO_RESOLVED,
+      hasConflict: false,
       resolvedContent: parentText,
       hunks: [
         {
@@ -161,6 +164,7 @@ function perform3WayLineMerge(baseText, parentText, incomingText) {
   if (parentText === incomingText) {
     return {
       status: CONFLICT_STATUS.AUTO_RESOLVED,
+      hasConflict: false,
       resolvedContent: parentText,
       hunks: [
         {
@@ -183,20 +187,13 @@ function perform3WayLineMerge(baseText, parentText, incomingText) {
   const parentLines = parentText === '' ? [] : parentText.split('\n');
   const incomingLines = incomingText === '' ? [] : incomingText.split('\n');
 
-  const diffParent = computeLineDiff(baseText, parentText);
-  const diffIncoming = computeLineDiff(baseText, incomingText);
-
-  // Group diffs by common base anchor points
   const hunks = [];
-  let baseIdx = 0;
-  let pDiffIdx = 0;
-  let iDiffIdx = 0;
+  const segments = [];
   let hunkCounter = 0;
 
-  // Handle common single-block conflict vs clean disjoint edits
-  // If base was empty (two creations of different content):
+  // Handle empty base (two creations of different content):
   if (baseLines.length === 0) {
-    hunks.push({
+    const hunk = {
       hunkId: `hunk_${hunkCounter++}`,
       startLine: 1,
       endLine: Math.max(parentLines.length, incomingLines.length),
@@ -206,46 +203,273 @@ function perform3WayLineMerge(baseText, parentText, incomingText) {
       status: parentText === incomingText ? HUNK_STATUS.AUTO_MERGED : HUNK_STATUS.CONFLICT,
       resolution: parentText === incomingText ? HUNK_RESOLUTION.KEEP_PARENT : null,
       resolvedContent: parentText === incomingText ? parentText : null,
-    });
+    };
+    hunks.push(hunk);
+    segments.push({ type: 'DIFF', hunk });
   } else {
-    // Walk through base lines and identify regions modified by parent vs incoming
-    let currentBaseBlock = [];
-    let currentParentBlock = [];
-    let currentIncomingBlock = [];
-    let hunkStartLine = 1;
-
     // Check if parent and incoming touch separate sections or the same section
     const parentChanged = parentText !== baseText;
     const incomingChanged = incomingText !== baseText;
 
-    if (parentChanged && incomingChanged) {
-      // Direct overlapping hunk comparison
-      hunks.push({
+    if (parentChanged && !incomingChanged) {
+      const hunk = {
         hunkId: `hunk_${hunkCounter++}`,
         startLine: 1,
-        endLine: baseLines.length,
+        endLine: parentLines.length,
         base: baseText,
         parent: parentText,
         incoming: incomingText,
-        status: HUNK_STATUS.CONFLICT,
-        resolution: null,
-        resolvedContent: null,
-      });
+        status: HUNK_STATUS.PARENT_ONLY,
+        resolution: HUNK_RESOLUTION.KEEP_PARENT,
+        resolvedContent: parentText,
+      };
+      hunks.push(hunk);
+      segments.push({ type: 'DIFF', hunk });
+    } else if (!parentChanged && incomingChanged) {
+      const hunk = {
+        hunkId: `hunk_${hunkCounter++}`,
+        startLine: 1,
+        endLine: incomingLines.length,
+        base: baseText,
+        parent: parentText,
+        incoming: incomingText,
+        status: HUNK_STATUS.INCOMING_ONLY,
+        resolution: HUNK_RESOLUTION.KEEP_INCOMING,
+        resolvedContent: incomingText,
+      };
+      hunks.push(hunk);
+      segments.push({ type: 'DIFF', hunk });
+    } else if (parentText === incomingText) {
+      const hunk = {
+        hunkId: `hunk_${hunkCounter++}`,
+        startLine: 1,
+        endLine: parentLines.length,
+        base: baseText,
+        parent: parentText,
+        incoming: incomingText,
+        status: HUNK_STATUS.AUTO_MERGED,
+        resolution: HUNK_RESOLUTION.KEEP_PARENT,
+        resolvedContent: parentText,
+      };
+      hunks.push(hunk);
+      segments.push({ type: 'DIFF', hunk });
+    } else {
+      // Both parent and incoming changed differently.
+      // Try to find common anchor lines in base that were untouched by both parent and incoming
+      const isAnchor = (bLine) => parentLines.includes(bLine) && incomingLines.includes(bLine);
+      const anchorIndices = [];
+      for (let i = 0; i < baseLines.length; i++) {
+        if (baseLines[i].trim().length > 0 && isAnchor(baseLines[i])) {
+          anchorIndices.push(i);
+        }
+      }
+
+      if (anchorIndices.length > 0) {
+        let lastBaseIdx = 0;
+        let lastParentIdx = 0;
+        let lastIncomingIdx = 0;
+
+        for (const anchorIdx of anchorIndices) {
+          const anchorLine = baseLines[anchorIdx];
+          const pAnchorIdx = parentLines.indexOf(anchorLine, lastParentIdx);
+          const iAnchorIdx = incomingLines.indexOf(anchorLine, lastIncomingIdx);
+
+          if (pAnchorIdx >= lastParentIdx && iAnchorIdx >= lastIncomingIdx) {
+            const bChunk = baseLines.slice(lastBaseIdx, anchorIdx).join('\n');
+            const pChunk = parentLines.slice(lastParentIdx, pAnchorIdx).join('\n');
+            const iChunk = incomingLines.slice(lastIncomingIdx, iAnchorIdx).join('\n');
+
+            if (bChunk || pChunk || iChunk) {
+              const pSame = pChunk === bChunk;
+              const iSame = iChunk === bChunk;
+              const pEqualsI = pChunk === iChunk;
+
+              let hunkStatus = HUNK_STATUS.CONFLICT;
+              let hunkRes = null;
+              let hunkResolved = null;
+
+              if (pSame && iSame) {
+                hunkStatus = HUNK_STATUS.UNCHANGED;
+                hunkRes = HUNK_RESOLUTION.KEEP_PARENT;
+                hunkResolved = bChunk;
+              } else if (pSame && !iSame) {
+                hunkStatus = HUNK_STATUS.INCOMING_ONLY;
+                hunkRes = HUNK_RESOLUTION.KEEP_INCOMING;
+                hunkResolved = iChunk;
+              } else if (!pSame && iSame) {
+                hunkStatus = HUNK_STATUS.PARENT_ONLY;
+                hunkRes = HUNK_RESOLUTION.KEEP_PARENT;
+                hunkResolved = pChunk;
+              } else if (pEqualsI) {
+                hunkStatus = HUNK_STATUS.AUTO_MERGED;
+                hunkRes = HUNK_RESOLUTION.KEEP_PARENT;
+                hunkResolved = pChunk;
+              }
+
+              const hunk = {
+                hunkId: `hunk_${hunkCounter++}`,
+                startLine: lastBaseIdx + 1,
+                endLine: anchorIdx,
+                base: bChunk,
+                parent: pChunk,
+                incoming: iChunk,
+                status: hunkStatus,
+                resolution: hunkRes,
+                resolvedContent: hunkResolved,
+              };
+              hunks.push(hunk);
+              segments.push({ type: 'DIFF', hunk });
+            }
+
+            segments.push({ type: 'ANCHOR', text: anchorLine });
+            lastBaseIdx = anchorIdx + 1;
+            lastParentIdx = pAnchorIdx + 1;
+            lastIncomingIdx = iAnchorIdx + 1;
+          }
+        }
+
+        const bRem = baseLines.slice(lastBaseIdx).join('\n');
+        const pRem = parentLines.slice(lastParentIdx).join('\n');
+        const iRem = incomingLines.slice(lastIncomingIdx).join('\n');
+
+        if (bRem || pRem || iRem) {
+          const pSame = pRem === bRem;
+          const iSame = iRem === bRem;
+          const pEqualsI = pRem === iRem;
+
+          let hunkStatus = HUNK_STATUS.CONFLICT;
+          let hunkRes = null;
+          let hunkResolved = null;
+
+          if (pSame && iSame) {
+            hunkStatus = HUNK_STATUS.UNCHANGED;
+            hunkRes = HUNK_RESOLUTION.KEEP_PARENT;
+            hunkResolved = bRem;
+          } else if (pSame && !iSame) {
+            hunkStatus = HUNK_STATUS.INCOMING_ONLY;
+            hunkRes = HUNK_RESOLUTION.KEEP_INCOMING;
+            hunkResolved = iRem;
+          } else if (!pSame && iSame) {
+            hunkStatus = HUNK_STATUS.PARENT_ONLY;
+            hunkRes = HUNK_RESOLUTION.KEEP_PARENT;
+            hunkResolved = pRem;
+          } else if (pEqualsI) {
+            hunkStatus = HUNK_STATUS.AUTO_MERGED;
+            hunkRes = HUNK_RESOLUTION.KEEP_PARENT;
+            hunkResolved = pRem;
+          }
+
+          const hunk = {
+            hunkId: `hunk_${hunkCounter++}`,
+            startLine: lastBaseIdx + 1,
+            endLine: baseLines.length,
+            base: bRem,
+            parent: pRem,
+            incoming: iRem,
+            status: hunkStatus,
+            resolution: hunkRes,
+            resolvedContent: hunkResolved,
+          };
+          hunks.push(hunk);
+          segments.push({ type: 'DIFF', hunk });
+        }
+      } else if (baseLines.length === parentLines.length && baseLines.length === incomingLines.length) {
+        for (let i = 0; i < baseLines.length; i++) {
+          const b = baseLines[i];
+          const p = parentLines[i];
+          const inc = incomingLines[i];
+
+          const pSame = p === b;
+          const iSame = inc === b;
+          const pEqualsI = p === inc;
+
+          let hunkStatus = HUNK_STATUS.CONFLICT;
+          let hunkRes = null;
+          let hunkResolved = null;
+
+          if (pSame && iSame) {
+            hunkStatus = HUNK_STATUS.UNCHANGED;
+            hunkRes = HUNK_RESOLUTION.KEEP_PARENT;
+            hunkResolved = b;
+          } else if (pSame && !iSame) {
+            hunkStatus = HUNK_STATUS.INCOMING_ONLY;
+            hunkRes = HUNK_RESOLUTION.KEEP_INCOMING;
+            hunkResolved = inc;
+          } else if (!pSame && iSame) {
+            hunkStatus = HUNK_STATUS.PARENT_ONLY;
+            hunkRes = HUNK_RESOLUTION.KEEP_PARENT;
+            hunkResolved = p;
+          } else if (pEqualsI) {
+            hunkStatus = HUNK_STATUS.AUTO_MERGED;
+            hunkRes = HUNK_RESOLUTION.KEEP_PARENT;
+            hunkResolved = p;
+          }
+
+          if (hunkStatus !== HUNK_STATUS.UNCHANGED) {
+            const hunk = {
+              hunkId: `hunk_${hunkCounter++}`,
+              startLine: i + 1,
+              endLine: i + 1,
+              base: b,
+              parent: p,
+              incoming: inc,
+              status: hunkStatus,
+              resolution: hunkRes,
+              resolvedContent: hunkResolved,
+            };
+            hunks.push(hunk);
+            segments.push({ type: 'DIFF', hunk });
+          } else {
+            segments.push({ type: 'ANCHOR', text: b });
+          }
+        }
+      } else {
+        const hunk = {
+          hunkId: `hunk_${hunkCounter++}`,
+          startLine: 1,
+          endLine: baseLines.length,
+          base: baseText,
+          parent: parentText,
+          incoming: incomingText,
+          status: HUNK_STATUS.CONFLICT,
+          resolution: null,
+          resolvedContent: null,
+        };
+        hunks.push(hunk);
+        segments.push({ type: 'DIFF', hunk });
+      }
     }
   }
 
-  const hasConflictHunk = hunks.some((h) => h.status === HUNK_STATUS.CONFLICT);
+  // If no hunks were produced, whole file is unchanged
+  if (hunks.length === 0) {
+    hunks.push({
+      hunkId: 'hunk_0',
+      startLine: 1,
+      endLine: baseLines.length,
+      base: baseText,
+      parent: parentText,
+      incoming: incomingText,
+      status: HUNK_STATUS.UNCHANGED,
+      resolution: HUNK_RESOLUTION.KEEP_PARENT,
+      resolvedContent: baseText,
+    });
+  }
+
+  const hasConflictHunk = hunks.some((h) => h.status === HUNK_STATUS.CONFLICT && !h.resolvedContent);
   const status = hasConflictHunk ? CONFLICT_STATUS.MANUAL_REQUIRED : CONFLICT_STATUS.AUTO_RESOLVED;
 
   let resolvedContent = null;
   if (!hasConflictHunk) {
-    resolvedContent = hunks.map((h) => h.resolvedContent || '').join('\n');
+    resolvedContent = segments.map((s) => (s.type === 'ANCHOR' ? s.text : (s.hunk.resolvedContent || ''))).join('\n');
   }
 
   return {
     status,
+    hasConflict: hasConflictHunk,
     resolvedContent,
     hunks,
+    segments,
   };
 }
 
@@ -267,6 +491,9 @@ class ChangeConflict {
     this.resolution = options.resolution || null;
     this.resolvedContent = options.resolvedContent || null;
     this.hunks = Array.isArray(options.hunks) ? options.hunks : [];
+    this.segments = Array.isArray(options.segments) ? options.segments : [];
+    this.astAnalysis = options.astAnalysis || null;
+    this.impactAnalysis = options.impactAnalysis || null;
     this.metadata = secretFilter.sanitizeObject(options.metadata || {});
     this.createdAt = options.createdAt || Date.now();
     this.updatedAt = options.updatedAt || Date.now();
@@ -280,6 +507,7 @@ class ChangeConflict {
     this.status = mergeResult.status;
     this.resolvedContent = mergeResult.resolvedContent;
     this.hunks = mergeResult.hunks;
+    this.segments = mergeResult.segments || [];
 
     try {
       this.astAnalysis = astDiffEngine.compare3Way({
@@ -290,6 +518,44 @@ class ChangeConflict {
       });
     } catch (e) {
       this.astAnalysis = { fallback: true, mode: 'TEXT_DIFF_ONLY', error: e.message };
+    }
+
+    try {
+      const { repositorySymbolIndex } = require('./RepositorySymbolIndex');
+      if (repositorySymbolIndex) {
+        const callers = repositorySymbolIndex.getCallers(path.basename(this.filePath));
+        this.impactAnalysis = {
+          callersCount: callers.length,
+          callers: callers.slice(0, 10),
+          riskLevel: this.astAnalysis?.riskLevel || 'LOW',
+          warnings: this.astAnalysis?.overlappingFunctions?.length > 0
+            ? [`Overlapping function modifications detected in ${this.astAnalysis.overlappingFunctions.join(', ')}`]
+            : [],
+        };
+      }
+    } catch (e) {
+      this.impactAnalysis = { callersCount: 0, callers: [], riskLevel: 'LOW', warnings: [] };
+    }
+
+    this.updatedAt = Date.now();
+    return this;
+  }
+
+  /**
+   * Resolves the entire conflicted file directly (e.g. from direct Monaco merged result editing).
+   * @param {'KEEP_PARENT'|'KEEP_INCOMING'|'KEEP_BOTH'|'EDIT_RESULT'} [resolution]
+   * @param {string} [customContent]
+   */
+  resolveFile(resolution = HUNK_RESOLUTION.EDIT_RESULT, customContent = '') {
+    this.resolution = resolution;
+    this.resolvedContent = typeof customContent === 'string' ? customContent : '';
+    this.status = CONFLICT_STATUS.RESOLVED;
+    this.segments = [];
+
+    // Mark all hunks resolved
+    for (const hunk of this.hunks) {
+      hunk.resolution = resolution;
+      hunk.resolvedContent = typeof customContent === 'string' ? customContent : hunk.resolvedContent;
     }
 
     this.updatedAt = Date.now();
@@ -343,12 +609,56 @@ class ChangeConflict {
     // Check if all hunks in this conflict are resolved
     const allResolved = this.hunks.every((h) => h.resolvedContent !== null && h.resolvedContent !== undefined);
     if (allResolved) {
-      this.resolvedContent = this.hunks.map((h) => h.resolvedContent).join('\n');
       this.status = CONFLICT_STATUS.RESOLVED;
       this.resolution = resolution;
+      if (this.hunks.length === 1 && resolution === HUNK_RESOLUTION.EDIT_RESULT) {
+        this.resolvedContent = customContent;
+      } else if (this.segments && this.segments.length > 0) {
+        this.resolvedContent = this.segments
+          .map((s) => (s.type === 'ANCHOR' ? s.text : (s.hunk.resolvedContent !== null && s.hunk.resolvedContent !== undefined ? s.hunk.resolvedContent : '')))
+          .join('\n');
+      } else {
+        this.resolvedContent = this.hunks.map((h) => h.resolvedContent || '').join('\n');
+      }
+    } else {
+      this.resolvedContent = null;
+      this.status = CONFLICT_STATUS.MANUAL_REQUIRED;
     }
 
     return hunk;
+  }
+
+  /**
+   * Checks if this conflict is fully resolved.
+   * @returns {boolean}
+   */
+  isResolved() {
+    if (this.status === CONFLICT_STATUS.RESOLVED || this.status === CONFLICT_STATUS.AUTO_RESOLVED) {
+      return true;
+    }
+    return this.hunks.length > 0 && this.hunks.every((h) => h.resolvedContent !== null && h.resolvedContent !== undefined);
+  }
+
+  /**
+   * Returns the final resolved string content of this file.
+   * @returns {string|null}
+   */
+  getResolvedContent() {
+    if (typeof this.resolvedContent === 'string') {
+      return this.resolvedContent;
+    }
+    if (this.segments && this.segments.length > 0) {
+      const allResolved = this.hunks.every((h) => h.resolvedContent !== null && h.resolvedContent !== undefined);
+      if (allResolved) {
+        return this.segments
+          .map((s) => (s.type === 'ANCHOR' ? s.text : (s.hunk.resolvedContent !== null && s.hunk.resolvedContent !== undefined ? s.hunk.resolvedContent : '')))
+          .join('\n');
+      }
+    }
+    if (this.hunks.length > 0 && this.hunks.every((h) => h.resolvedContent !== null && h.resolvedContent !== undefined)) {
+      return this.hunks.map((h) => h.resolvedContent || '').join('\n');
+    }
+    return null;
   }
 
   /**
@@ -369,6 +679,8 @@ class ChangeConflict {
       resolution: this.resolution,
       resolvedContent: this.resolvedContent,
       hunks: this.hunks,
+      astAnalysis: this.astAnalysis,
+      impactAnalysis: this.impactAnalysis,
       metadata: this.metadata,
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,
@@ -379,7 +691,10 @@ class ChangeConflict {
    * Deserializes conflict from JSON.
    */
   static fromJSON(data = {}) {
-    return new ChangeConflict(data);
+    const conflict = new ChangeConflict(data);
+    if (data.astAnalysis) conflict.astAnalysis = data.astAnalysis;
+    if (data.impactAnalysis) conflict.impactAnalysis = data.impactAnalysis;
+    return conflict;
   }
 }
 
@@ -406,6 +721,69 @@ class ChangeConflictResolver {
         console.warn(`[CHANGE-CONFLICT-RESOLVER] Failed to emit event ${eventType}:`, e.message);
       }
     }
+  }
+
+  /**
+   * Evaluates merge between two ChangeSets (or an array of ChangeSets).
+   * Identifies file/hunk collisions, creates ChangeConflict objects for overlapping changes,
+   * registers them in this resolver, and returns { hasConflict, conflicts }.
+   * @param {ChangeSet|Array<ChangeSet>} changeSetA
+   * @param {ChangeSet} [changeSetB]
+   * @param {Object} [options]
+   * @returns {{ hasConflict: boolean, conflicts: Array<ChangeConflict> }}
+   */
+  evaluateMerge(changeSetA, changeSetB, options = {}) {
+    const list = Array.isArray(changeSetA) ? changeSetA : (changeSetB ? [changeSetA, changeSetB] : [changeSetA]);
+    if (list.length < 2) {
+      return { hasConflict: false, conflicts: [] };
+    }
+
+    const conflicts = [];
+    const cs1 = list[0];
+    const cs2 = list[1];
+
+    const edits1 = cs1.files || cs1.edits || cs1.patches || [];
+    const edits2 = cs2.files || cs2.edits || cs2.patches || [];
+
+    const files1 = new Map();
+    for (const e of edits1) {
+      const p = e.filePath || e.file || e.relPath;
+      if (p) files1.set(p, e);
+    }
+
+    for (const e2 of edits2) {
+      const filePath = e2.filePath || e2.file || e2.relPath;
+      const e1 = files1.get(filePath);
+      if (e1) {
+        // Both modify the same file!
+        const baseContent = e1.original || e1.originalContent || e2.original || e2.originalContent || '';
+        const parentContent = e1.replacement || e1.content || '';
+        const incomingContent = e2.replacement || e2.content || '';
+
+        const mergeResult = perform3WayLineMerge(baseContent, parentContent, incomingContent);
+        if (mergeResult.hasConflict || mergeResult.status === CONFLICT_STATUS.MANUAL_REQUIRED) {
+          const conflict = this.createConflict({
+            changeSetIdA: cs1.changeSetId,
+            changeSetIdB: cs2.changeSetId,
+            sourceChangeSets: [cs1.changeSetId, cs2.changeSetId],
+            filePath,
+            baseContent,
+            parentContent,
+            incomingContent,
+            conflictType: CONFLICT_TYPE.FILE_CONFLICT,
+            threadId: options.threadId || cs1.threadId || cs2.threadId,
+            turnId: options.turnId,
+            hunks: mergeResult.hunks,
+          });
+          conflicts.push(conflict);
+        }
+      }
+    }
+
+    return {
+      hasConflict: conflicts.length > 0,
+      conflicts,
+    };
   }
 
   /**
@@ -527,6 +905,61 @@ class ChangeConflictResolver {
   }
 
   /**
+   * Resolves an entire conflict file directly (e.g. from direct Monaco code editor).
+   * @param {string} conflictId
+   * @param {'KEEP_PARENT'|'KEEP_INCOMING'|'KEEP_BOTH'|'EDIT_RESULT'} [resolution]
+   * @param {string} [customContent]
+   * @param {Object} [context]
+   * @returns {Object} Outcome
+   */
+  resolveFile(conflictId, resolution = HUNK_RESOLUTION.EDIT_RESULT, customContent = '', context = {}) {
+    const conflict = this.getConflict(conflictId);
+    if (!conflict) {
+      throw new Error(`[CHANGE-CONFLICT-RESOLVER] Conflict "${conflictId}" not found`);
+    }
+
+    this._emit(EVENT_TYPES.CHANGE_CONFLICT_RESOLUTION_STARTED, {
+      conflictId,
+      threadId: context.threadId,
+      turnId: context.turnId,
+    });
+
+    conflict.resolveFile(resolution, customContent);
+
+    this._emit(EVENT_TYPES.CHANGE_CONFLICT_HUNK_RESOLVED, {
+      conflictId,
+      resolution,
+      conflictStatus: conflict.status,
+      threadId: context.threadId,
+      turnId: context.turnId,
+    });
+
+    if (evidenceGraphInstance && context.threadId) {
+      try {
+        evidenceGraphInstance.addNode({
+          sessionId: context.threadId,
+          type: 'USER_APPROVAL',
+          statement: `Resolved conflict file ${conflict.filePath} using ${resolution}`,
+          provenanceClass: 'USER_APPROVED',
+          verificationLevel: 'USER_VERIFIED',
+          metadata: {
+            conflictId,
+            resolution,
+          },
+        });
+      } catch (e) {}
+    }
+
+    return {
+      success: true,
+      conflictId,
+      resolution,
+      conflictStatus: conflict.status,
+      resolvedContent: conflict.resolvedContent,
+    };
+  }
+
+  /**
    * Creates ONE authoritative parent ChangeSet when all conflicts are resolved.
    * Throws if any conflict remains unresolved.
    * @param {Object} options
@@ -537,11 +970,8 @@ class ChangeConflictResolver {
    * @returns {ChangeSet}
    */
   createParentChangeSet(options = {}) {
-    const { workspacePath, threadId, turnId, conflictIds } = options;
-
-    if (!workspacePath) {
-      throw new Error('[CHANGE-CONFLICT-RESOLVER] workspacePath is required to create parent ChangeSet');
-    }
+    const { threadId, turnId, conflictIds } = options;
+    const workspacePath = options.workspacePath || this.harnessRuntime?.workspacePath || this.harnessRuntime?.baseDir || process.cwd();
 
     const targetConflicts = conflictIds
       ? conflictIds.map((id) => this.getConflict(id)).filter(Boolean)
@@ -564,17 +994,29 @@ class ChangeConflictResolver {
     }
 
     // Build edits for authoritative parent ChangeSet
-    const edits = targetConflicts.map((c) => ({
-      filePath: c.filePath,
-      original: c.parentContent,
-      replacement: c.resolvedContent,
-      changeType: 'MODIFY',
-      metadata: {
-        conflictId: c.conflictId,
-        sourceChangeSets: c.sourceChangeSets,
-        resolution: c.resolution,
-      },
-    }));
+    const edits = targetConflicts.map((c) => {
+      let currentOriginal = c.parentContent;
+      if (workspacePath) {
+        try {
+          const absPath = path.isAbsolute(c.filePath) ? c.filePath : path.join(workspacePath, c.filePath);
+          if (fs.existsSync(absPath)) {
+            currentOriginal = fs.readFileSync(absPath, 'utf-8');
+          }
+        } catch (_) {}
+      }
+
+      return {
+        filePath: c.filePath,
+        original: currentOriginal,
+        replacement: c.resolvedContent,
+        changeType: 'MODIFY',
+        metadata: {
+          conflictId: c.conflictId,
+          sourceChangeSets: c.sourceChangeSets,
+          resolution: c.resolution,
+        },
+      };
+    });
 
     const parentChangeSet = new ChangeSet({
       workspacePath,

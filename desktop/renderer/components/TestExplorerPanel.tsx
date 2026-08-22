@@ -21,6 +21,7 @@ import {
   Sparkles,
   ArrowRight,
   FlaskConical,
+  Bug,
 } from "lucide-react";
 import {
   useTests,
@@ -35,12 +36,23 @@ import CoveragePanel from "./CoveragePanel";
 interface TestExplorerPanelProps {
   workspacePath: string;
   onOpenTestFile: (filePath: string, line?: number) => void;
+  onRepairWithAI?: (repairContext: {
+    testName: string;
+    filePath: string;
+    line?: number;
+    errorSummary: string;
+    stackTrace: string;
+    command: string;
+  }) => void;
+  onDebugTest?: (test: TestCase) => void;
   testsHook: ReturnType<typeof useTests>;
 }
 
 export default function TestExplorerPanel({
   workspacePath,
   onOpenTestFile,
+  onRepairWithAI,
+  onDebugTest,
   testsHook,
 }: TestExplorerPanelProps) {
   const {
@@ -275,6 +287,18 @@ export default function TestExplorerPanel({
                                         >
                                           <Play className="w-2.5 h-2.5" />
                                         </button>
+                                        {onDebugTest && (
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              onDebugTest(test);
+                                            }}
+                                            className="p-1 rounded hover:bg-[#20202c] text-zinc-400 hover:text-cyan-400 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+                                            title="Debug this test"
+                                          >
+                                            <Bug className="w-2.5 h-2.5" />
+                                          </button>
+                                        )}
                                       </div>
                                     </div>
                                   ))}
@@ -315,6 +339,18 @@ export default function TestExplorerPanel({
                               >
                                 <Play className="w-2.5 h-2.5" />
                               </button>
+                              {onDebugTest && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDebugTest(child as TestCase);
+                                  }}
+                                  className="p-1 rounded hover:bg-[#20202c] text-zinc-400 hover:text-cyan-400 opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+                                  title="Debug this test"
+                                >
+                                  <Bug className="w-2.5 h-2.5" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         );
@@ -376,21 +412,66 @@ export default function TestExplorerPanel({
                 {activeOutput.stdout && <div>{activeOutput.stdout}</div>}
                 {activeOutput.stderr && <div className="text-rose-400">{activeOutput.stderr}</div>}
 
-                {/* Failure Line Navigation Button */}
-                {activeOutput.failureLine && (
-                  <div className="pt-1">
-                    <button
-                      onClick={() =>
-                        onOpenTestFile(
-                          activeOutput.command.split(" ")[1] || "",
-                          activeOutput.failureLine
-                        )
-                      }
-                      className="px-2 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 border border-rose-500/40 text-rose-300 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                    >
-                      <ArrowRight className="w-3 h-3" />
-                      <span>Jump to Failure (Line {activeOutput.failureLine})</span>
-                    </button>
+                {/* Failure Action Buttons */}
+                {activeOutput.status === "failed" && (
+                  <div className="pt-2 flex items-center gap-2 flex-wrap">
+                    {onRepairWithAI && (
+                      <button
+                        onClick={() => {
+                          const errText = activeOutput.stderr || activeOutput.stdout || "Test failed";
+                          onRepairWithAI({
+                            testName: activeOutput.command,
+                            filePath: activeOutput.command.split(" ")[1] || "",
+                            line: activeOutput.failureLine,
+                            errorSummary: errText.slice(0, 300),
+                            stackTrace: errText,
+                            command: activeOutput.command,
+                          });
+                        }}
+                        className="px-2.5 py-1 rounded bg-purple-950/90 hover:bg-purple-900 border border-purple-500/50 text-purple-200 text-[10.5px] font-bold flex items-center gap-1.5 cursor-pointer shadow-[0_0_8px_rgba(168,85,247,0.3)] transition-all"
+                        title="Dispatch autonomous repair for this failure"
+                      >
+                        <Sparkles className="w-3 h-3 text-purple-400" />
+                        <span>Repair with AI</span>
+                      </button>
+                    )}
+
+                    {onDebugTest && (
+                      <button
+                        onClick={() => {
+                          const testTarget = activeOutput.command.split(" ")[1] || "";
+                          onDebugTest({
+                            id: `test_fail_${Date.now()}`,
+                            name: activeOutput.command,
+                            filePath: testTarget,
+                            line: activeOutput.failureLine || 1,
+                            type: "test",
+                            framework: testTarget.endsWith(".py") ? "pytest" : "jest",
+                            status: "failed",
+                          });
+                        }}
+                        className="px-2.5 py-1 rounded bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-500/50 text-cyan-200 text-[10.5px] font-bold flex items-center gap-1.5 cursor-pointer shadow-[0_0_8px_rgba(6,182,212,0.3)] transition-all"
+                        title="Start debug session on this failing test"
+                      >
+                        <Bug className="w-3 h-3 text-cyan-400" />
+                        <span>Debug Test</span>
+                      </button>
+                    )}
+
+                    {activeOutput.failureLine && (
+                      <button
+                        onClick={() =>
+                          onOpenTestFile(
+                            activeOutput.command.split(" ")[1] || "",
+                            activeOutput.failureLine
+                          )
+                        }
+                        className="px-2 py-1 rounded bg-rose-950/80 hover:bg-rose-900 border border-rose-500/40 text-rose-300 text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <ArrowRight className="w-3 h-3" />
+                        <span>Jump to Failure (Line {activeOutput.failureLine})</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

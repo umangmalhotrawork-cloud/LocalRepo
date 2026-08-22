@@ -38,6 +38,23 @@ export default function CodexAIControlPopover({
     triggerRef,
   });
 
+  const [diagnostics, setDiagnostics] = useState<any>(null);
+  const [loadingDiag, setLoadingDiag] = useState(false);
+
+  const fetchDiagnostics = async (pId: string) => {
+    if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getDiagnostics) {
+      setLoadingDiag(true);
+      try {
+        const diag = await (window as any).electronAPI.ai.getDiagnostics(pId);
+        setDiagnostics(diag);
+      } catch (e) {
+        console.error("[CODEX-AI-POPOVER] Diagnostics error:", e);
+      } finally {
+        setLoadingDiag(false);
+      }
+    }
+  };
+
   const fetchConfig = async () => {
     if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getConfig) {
       try {
@@ -46,6 +63,7 @@ export default function CodexAIControlPopover({
           setAiConfig(config);
           if (config.activeProvider) {
             setSelectedProviderTab(config.activeProvider);
+            fetchDiagnostics(config.activeProvider);
           }
         }
       } catch (e) {
@@ -58,6 +76,7 @@ export default function CodexAIControlPopover({
     if (isOpen) {
       fetchConfig();
       setSelectedProviderTab(activeProvider);
+      fetchDiagnostics(activeProvider);
     }
   }, [isOpen, activeProvider]);
 
@@ -65,7 +84,7 @@ export default function CodexAIControlPopover({
 
   const providers = aiConfig?.providers || [
     { id: "gemini", name: "Gemini", models: [{ id: "gemini-1.5-flash", name: "Gemini 1.5 Flash" }], isConfigured: true },
-    { id: "groq", name: "Groq", models: [{ id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B" }], isConfigured: false },
+    { id: "groq", name: "Groq", models: [{ id: "llama-3.1-8b-instant", name: "Llama 3.1 8B Instant" }, { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B" }], isConfigured: false },
     { id: "openai", name: "OpenAI", models: [{ id: "gpt-4o", name: "GPT-4o" }], isConfigured: false },
     { id: "claude", name: "Claude", models: [{ id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet" }], isConfigured: false },
     { id: "deepseek", name: "DeepSeek", models: [{ id: "deepseek-coder", name: "DeepSeek Coder" }], isConfigured: false },
@@ -74,6 +93,7 @@ export default function CodexAIControlPopover({
 
   const currentProvider = providers.find((p: any) => p.id === selectedProviderTab) || providers[0];
   const isCurrentActive = activeProvider === currentProvider?.id;
+  const availableModelList = (diagnostics?.models && diagnostics.models.length > 0) ? diagnostics.models : (currentProvider.models || []);
 
   return (
     <div ref={popoverRef} className="absolute top-11 right-3 w-96 bg-[#0a0a0f] border border-[#1f1f2e] rounded-2xl shadow-2xl z-50 p-3.5 space-y-3 font-mono text-xs text-zinc-200 animate-fade-in select-none">
@@ -106,7 +126,10 @@ export default function CodexAIControlPopover({
             return (
               <button
                 key={p.id}
-                onClick={() => setSelectedProviderTab(p.id)}
+                onClick={() => {
+                  setSelectedProviderTab(p.id);
+                  fetchDiagnostics(p.id);
+                }}
                 className={`px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-between border transition-all cursor-pointer ${
                   isTab
                     ? "bg-[#181826] border-cyan-500/60 text-white shadow-sm"
@@ -139,21 +162,51 @@ export default function CodexAIControlPopover({
                 </span>
               </div>
 
-              <button
-                onClick={() => onOpenApiKeyModal(currentProvider.id)}
-                className="px-2 py-0.5 rounded bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/30 text-cyan-300 text-[9.5px] font-bold flex items-center gap-1 cursor-pointer"
-              >
-                <Key className="w-2.5 h-2.5" />
-                <span>{currentProvider.isConfigured ? "Update Key" : "Set Key"}</span>
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => fetchDiagnostics(currentProvider.id)}
+                  disabled={loadingDiag}
+                  className="px-2 py-0.5 rounded bg-[#161622] hover:bg-[#202030] border border-zinc-700 text-zinc-300 text-[9.5px] font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <Activity className="w-2.5 h-2.5 text-purple-400" />
+                  <span>{loadingDiag ? "Checking..." : "Diagnose"}</span>
+                </button>
+                <button
+                  onClick={() => onOpenApiKeyModal(currentProvider.id)}
+                  className="px-2 py-0.5 rounded bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/30 text-cyan-300 text-[9.5px] font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <Key className="w-2.5 h-2.5" />
+                  <span>{currentProvider.isConfigured ? "Update Key" : "Set Key"}</span>
+                </button>
+              </div>
             </div>
+
+            {/* Diagnostics Summary Card */}
+            {diagnostics && (
+              <div className="p-2 rounded-lg bg-[#07070c] border border-[#161622] space-y-1 text-[9.5px]">
+                <div className="flex items-center justify-between text-zinc-400 font-bold">
+                  <span>API Reachable: <strong className={diagnostics.reachable ? "text-emerald-400" : "text-rose-400"}>{diagnostics.reachable ? "Yes" : "No"}</strong></span>
+                  <span>Auth: <strong className={diagnostics.authenticated ? "text-emerald-400" : "text-rose-400"}>{diagnostics.authenticated ? "Valid" : "Invalid/Missing"}</strong></span>
+                  <span>Models: <strong className="text-cyan-400">{diagnostics.models?.length || 0}</strong></span>
+                </div>
+                {diagnostics.error && (
+                  <div className="text-rose-400 text-[9px] truncate">{diagnostics.error}</div>
+                )}
+              </div>
+            )}
 
             {/* Model Selector for current provider */}
             <div className="space-y-1">
-              <div className="text-[9.5px] text-zinc-400 font-semibold">Select Model:</div>
-              <div className="space-y-1 max-h-28 overflow-y-auto pr-1">
-                {(currentProvider.models || []).map((m: any) => {
+              <div className="text-[9.5px] text-zinc-400 font-semibold flex items-center justify-between">
+                <span>Select Model:</span>
+                {diagnostics?.totalModels && (
+                  <span className="text-zinc-500 text-[9px]">{diagnostics.totalModels} available from provider</span>
+                )}
+              </div>
+              <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+                {availableModelList.map((m: any) => {
                   const isCurrentModel = isCurrentActive && activeModel === m.id;
+                  const isAvailable = m.active !== false;
 
                   return (
                     <button
@@ -168,8 +221,14 @@ export default function CodexAIControlPopover({
                           : "bg-[#08080d] border-[#181822] text-zinc-300 hover:bg-[#12121a]"
                       }`}
                     >
-                      <span className="truncate">{m.name || m.id}</span>
-                      {isCurrentModel && <Check className="w-3 h-3 text-cyan-400 shrink-0" />}
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isAvailable ? "bg-emerald-400" : "bg-amber-400"}`} />
+                        <span className="truncate">{m.name || m.id}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[8px] text-zinc-500">{isAvailable ? "Available" : "Restricted"}</span>
+                        {isCurrentModel && <Check className="w-3 h-3 text-cyan-400 shrink-0" />}
+                      </div>
                     </button>
                   );
                 })}

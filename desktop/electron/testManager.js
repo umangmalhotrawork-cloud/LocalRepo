@@ -505,6 +505,14 @@ class TestManager {
       files: coverageFiles,
     };
   }
+
+  /**
+   * Milestone 34: Debug specific test case
+   */
+  async debugTest(workspacePath, testPayload = {}) {
+    const debugManager = require('./debugManager');
+    return debugManager.debugTest(workspacePath, testPayload);
+  }
 }
 
 const testManager = new TestManager();
@@ -517,4 +525,5 @@ module.exports = {
   runFile: (p) => testManager.runFile(p),
   runAll: (p) => testManager.runAll(p),
   getCoverage: (p) => testManager.getCoverage(p),
+  debugTest: (ws, p) => testManager.debugTest(ws, p),
 };

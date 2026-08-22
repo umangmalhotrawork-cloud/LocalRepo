@@ -132,7 +132,7 @@ class AIRoleRouter {
     }
 
     const resolvedProvider = providerId || PROVIDER_IDS.GROQ;
-    const resolvedModel = modelId || DEFAULT_MODELS[resolvedProvider] || 'llama-3.3-70b-versatile';
+    const resolvedModel = modelId || DEFAULT_MODELS[resolvedProvider] || 'llama-3.1-8b-instant';
 
     this.globalRoleConfig.set(norm, {
       roleId: norm,
@@ -201,7 +201,7 @@ class AIRoleRouter {
       return {
         roleId: norm,
         providerId: sessionConfig.aiState.provider,
-        modelId: sessionConfig.aiState.modelName || DEFAULT_MODELS[sessionConfig.aiState.provider] || 'llama-3.3-70b-versatile',
+        modelId: sessionConfig.aiState.modelName || DEFAULT_MODELS[sessionConfig.aiState.provider] || 'llama-3.1-8b-instant',
         enabled: true,
         precedence: 'session_aistate',
       };

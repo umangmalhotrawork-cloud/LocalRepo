@@ -31,6 +31,16 @@ const SearchWorkspaceTool = {
         type: 'string',
         description: 'Optional subfolder path within workspace to limit the search scope',
       },
+      includeGlobs: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional glob patterns to include (e.g. ["*.ts", "src/**"])',
+      },
+      excludeGlobs: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional glob patterns to exclude (e.g. ["*.test.js", "dist/**"])',
+      },
     },
     required: ['query'],
   },
@@ -65,6 +75,8 @@ const SearchWorkspaceTool = {
         query: query.trim(),
         isRegex: Boolean(args.isRegex),
         isCaseSensitive: Boolean(args.isCaseSensitive),
+        includeGlobs: args.includeGlobs || [],
+        excludeGlobs: args.excludeGlobs || [],
         maxResults: 200,
       });
 

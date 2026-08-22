@@ -155,6 +155,15 @@ class ASTDiffEngine {
       } else if (ts.isClassDeclaration(node)) {
         type = 'ClassDeclaration';
         name = node.name ? node.name.getText(sourceFile) : 'AnonymousClass';
+      } else if (ts.isInterfaceDeclaration(node)) {
+        type = 'InterfaceDeclaration';
+        name = node.name ? node.name.getText(sourceFile) : 'AnonymousInterface';
+      } else if (ts.isTypeAliasDeclaration(node)) {
+        type = 'TypeAliasDeclaration';
+        name = node.name ? node.name.getText(sourceFile) : 'AnonymousType';
+      } else if (ts.isEnumDeclaration(node)) {
+        type = 'EnumDeclaration';
+        name = node.name ? node.name.getText(sourceFile) : 'AnonymousEnum';
       } else if (ts.isImportDeclaration(node)) {
         type = 'ImportDeclaration';
         name = node.moduleSpecifier ? node.moduleSpecifier.getText(sourceFile) : '';
@@ -261,14 +270,27 @@ class ASTDiffEngine {
       if (classMatch) {
         const indent = classMatch[1].length;
         const name = classMatch[2];
+
+        // Find class end based on indentation
+        let endLine = lineNum;
+        for (let j = i + 1; j < lines.length; j++) {
+          const nextTrim = lines[j].trim();
+          if (!nextTrim || nextTrim.startsWith('#')) continue;
+          const nextIndent = lines[j].search(/\S/);
+          if (nextIndent !== -1 && nextIndent <= indent) {
+            break;
+          }
+          endLine = j + 1;
+        }
+
         nodes.push({
           nodeId: `py_node_${++nodeIdSeq}`,
           type: 'ClassDeclaration',
           name,
           startLine: lineNum,
           startColumn: indent + 1,
-          endLine: lineNum,
-          endColumn: rawLine.length + 1,
+          endLine,
+          endColumn: (lines[endLine - 1] || '').length + 1,
           rawText: trimmed,
         });
         continue;

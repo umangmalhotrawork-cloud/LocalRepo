@@ -25,7 +25,20 @@ class OpenAICompatibleProvider extends AIProvider {
     return this.staticModels;
   }
 
-  request(endpoint, method = 'GET', apiKey = '', body = null, headers = {}, timeoutMs = 25000) {
+  async request(endpoint, method = 'GET', apiKey = '', body = null, headers = {}, timeoutMs = 25000, retryCount = 0) {
+    try {
+      return await this._rawRequest(endpoint, method, apiKey, body, headers, timeoutMs);
+    } catch (err) {
+      if (err.statusCode === 429 && retryCount < 2) {
+        console.warn(`[${this.name}] Rate limit 429 hit, retrying in ${(retryCount + 1) * 2000}ms...`);
+        await new Promise((r) => setTimeout(r, (retryCount + 1) * 2000));
+        return this.request(endpoint, method, apiKey, body, headers, timeoutMs, retryCount + 1);
+      }
+      throw err;
+    }
+  }
+
+  _rawRequest(endpoint, method = 'GET', apiKey = '', body = null, headers = {}, timeoutMs = 25000) {
     const fullUrl = endpoint.startsWith('http') ? endpoint : `${this.baseUrl}${endpoint}`;
     const parsed = new URL(fullUrl);
     const transport = parsed.protocol === 'http:' ? http : https;
@@ -271,55 +284,119 @@ class OpenAICompatibleProvider extends AIProvider {
     }
   }
 
+  async getAvailableModels(apiKey, configuredModel = null) {
+    if (!this.isConfigured(apiKey)) {
+      return {
+        authenticated: false,
+        reachable: false,
+        error: `${this.name} API key is missing or not configured`,
+        models: [],
+        configuredModel: configuredModel || this.getDefaultModel(),
+        configuredModelAvailable: false,
+      };
+    }
+
+    try {
+      const res = await this.request('/models', 'GET', apiKey, null, {}, 15000);
+      const rawList = res.data?.data || (Array.isArray(res.data) ? res.data : []);
+
+      const normalized = rawList
+        .filter((m) => {
+          const id = (m.id || '').toLowerCase();
+          if (
+            id.includes('embed') ||
+            id.includes('whisper') ||
+            id.includes('tts') ||
+            id.includes('dall-e') ||
+            id.includes('audio') ||
+            id.includes('moderation') ||
+            id.includes('guard')
+          ) {
+            return false;
+          }
+          return true;
+        })
+        .map((m) => ({
+          id: m.id,
+          name: m.id,
+          active: m.active !== false,
+          contextWindow: m.context_window || m.contextWindow || 8192,
+          ownedBy: m.owned_by || m.ownedBy || this.name,
+          capabilities: {
+            chat: true,
+            tools: true,
+            vision: Boolean(m.id && (m.id.includes('vision') || m.id.includes('4o') || m.id.includes('vl'))),
+          },
+        }));
+
+      this.lastDiscoveryAt = Date.now();
+      if (normalized.length > 0) {
+        this.dynamicModels = normalized;
+      }
+
+      const activeTarget = configuredModel || this.getDefaultModel();
+      const isAvailable = normalized.some((m) => m.id === activeTarget);
+
+      return {
+        authenticated: true,
+        reachable: true,
+        models: normalized,
+        configuredModel: activeTarget,
+        configuredModelAvailable: isAvailable,
+        totalModels: normalized.length,
+        lastDiscoveryAt: this.lastDiscoveryAt,
+      };
+    } catch (err) {
+      const statusCode = err.statusCode || 0;
+      const isAuthError = statusCode === 401 || statusCode === 403 || (err.message && (err.message.includes('auth') || err.message.includes('key')));
+      return {
+        authenticated: !isAuthError && statusCode !== 0,
+        reachable: statusCode > 0,
+        error: isAuthError ? `Authentication/permission failed for ${this.name} (HTTP ${statusCode}): ${err.message}` : `Connection failed: ${err.message}`,
+        statusCode,
+        models: [],
+        configuredModel: configuredModel || this.getDefaultModel(),
+        configuredModelAvailable: false,
+      };
+    }
+  }
+
+  async validateModelAvailability(apiKey, modelId) {
+    const diag = await this.getAvailableModels(apiKey, modelId);
+    if (!diag.reachable && !diag.authenticated) {
+      if (diag.statusCode === 401 || diag.statusCode === 403) {
+        throw new Error(`Authentication/permission failed for ${this.name} (HTTP ${diag.statusCode}). Please check your API key.`);
+      }
+      throw new Error(`Unable to reach ${this.name} API: ${diag.error || 'Connection failed'}`);
+    }
+
+    if (diag.models && diag.models.length > 0) {
+      const exists = diag.models.some((m) => m.id === modelId);
+      if (!exists) {
+        const availableIds = diag.models.map((m) => m.id).join(', ');
+        throw new Error(
+          `Selected model "${modelId}" is unavailable for this API key. Available models: [${availableIds}]. Please select an available model from the model selector.`
+        );
+      }
+    }
+    return true;
+  }
+
   async validateKey(apiKey) {
     if (!this.isConfigured(apiKey)) {
       return { valid: false, error: `${this.name} API key is missing or empty` };
     }
 
-    try {
-      const res = await this.request('/models', 'GET', apiKey, null, {}, 12000);
-      const rawModels = res.data?.data || (Array.isArray(res.data) ? res.data : []);
-
-      if (Array.isArray(rawModels) && rawModels.length > 0) {
-        // Filter and map relevant models
-        const mapped = rawModels
-          .filter((m) => {
-            const id = (m.id || '').toLowerCase();
-            // Filter out non-chat / whisper / embedding models if possible
-            if (id.includes('embed') || id.includes('whisper') || id.includes('tts') || id.includes('dall-e') || id.includes('audio') || id.includes('moderation') || id.includes('guard')) {
-              return false;
-            }
-            return true;
-          })
-          .map((m) => ({
-            id: m.id,
-            name: m.name || m.id,
-          }));
-
-        if (mapped.length > 0) {
-          // Prepend default model if present in static list
-          const combinedMap = new Map();
-          for (const sm of this.staticModels) combinedMap.set(sm.id, sm);
-          for (const dm of mapped) {
-            if (!combinedMap.has(dm.id)) {
-              combinedMap.set(dm.id, dm);
-            }
-          }
-          this.dynamicModels = Array.from(combinedMap.values());
-        }
-      }
-
+    const diag = await this.getAvailableModels(apiKey);
+    if (diag.authenticated && diag.reachable) {
       return { valid: true, models: this.getModels() };
-    } catch (err) {
-      const code = err.statusCode;
-      let userFriendly = err.message;
-      if (code === 401 || userFriendly.toLowerCase().includes('invalid') || userFriendly.toLowerCase().includes('auth')) {
-        userFriendly = `Invalid ${this.name} API key. Please verify your credentials.`;
-      } else if (code === 429) {
-        userFriendly = `${this.name} rate limit or quota exceeded.`;
-      }
-      return { valid: false, error: userFriendly, statusCode: code };
     }
+
+    return {
+      valid: false,
+      error: diag.error || `Invalid ${this.name} API key or connection failed.`,
+      statusCode: diag.statusCode,
+    };
   }
 
   async generateAgentPlan(apiKey, model, payload = {}) {
@@ -400,6 +477,8 @@ Respond ONLY with a valid JSON object strictly matching this schema:
   ]
 }`;
     }
+
+    await this.validateModelAvailability(apiKey, selectedModel);
 
     const requestBody = {
       model: selectedModel,
@@ -501,6 +580,8 @@ For "tests": Generate comprehensive unit tests (e.g. pytest for Python, Jest for
 For "docs": Generate standard docstrings/JSDoc comments.
 
 If your response proposes replacement code for the selection, ensure the replacement is enclosed in a markdown code block.`;
+
+    await this.validateModelAvailability(apiKey, selectedModel);
 
     const requestBody = {
       model: selectedModel,

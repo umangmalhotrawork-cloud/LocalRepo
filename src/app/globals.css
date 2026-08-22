@@ -692,3 +692,80 @@
 .resizer-row:hover, .resizer-row:active {
   background: #22d3ee;
 }
+
+/* Milestone 33: Monaco Git Gutter Annotations & Hunk Revert */
+.git-gutter-added {
+  background-color: #22c55e !important;
+  width: 3.5px !important;
+  margin-left: 2px;
+  border-radius: 1px;
+}
+
+.git-gutter-modified {
+  background-color: #38bdf8 !important;
+  width: 3.5px !important;
+  margin-left: 2px;
+  border-radius: 1px;
+}
+
+.git-gutter-deleted {
+  background-color: #ef4444 !important;
+  width: 3.5px !important;
+  margin-left: 2px;
+  border-bottom: 2px solid #ef4444 !important;
+  border-radius: 1px;
+}
+
+.git-gutter-line-added {
+  background-color: rgba(34, 197, 94, 0.07) !important;
+}
+
+.git-gutter-line-modified {
+  background-color: rgba(56, 189, 248, 0.07) !important;
+}
+
+.git-gutter-line-deleted {
+  background-color: rgba(239, 68, 68, 0.07) !important;
+}
+
+/* Milestone 34: Unified Debugger & Test Explorer Monaco Gutter Decorations */
+.debug-breakpoint-glyph {
+  background-color: #ef4444 !important;
+  width: 10px !important;
+  height: 10px !important;
+  border-radius: 50% !important;
+  margin-left: 5px !important;
+  margin-top: 4px !important;
+  cursor: pointer !important;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
+}
+
+.debug-breakpoint-glyph-disabled {
+  background-color: #71717a !important;
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 50% !important;
+  margin-left: 6px !important;
+  margin-top: 5px !important;
+  cursor: pointer !important;
+  opacity: 0.7;
+}
+
+.debug-current-line-highlight {
+  background-color: rgba(6, 182, 212, 0.18) !important;
+  border-left: 3px solid #22d3ee !important;
+}
+
+.debug-current-line-glyph {
+  color: #22d3ee !important;
+  font-weight: bold !important;
+  margin-left: 3px !important;
+}
+
+.test-gutter-action-glyph {
+  color: #10b981 !important;
+  cursor: pointer !important;
+  font-size: 11px !important;
+  margin-left: 4px !important;
+}
+

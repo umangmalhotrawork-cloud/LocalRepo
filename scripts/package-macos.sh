@@ -9,15 +9,26 @@ echo "=================================================="
 echo "[1/5] Running next build (static export)..."
 npm run build
 
-# 2. Package Electron App Structure
-echo "[2/5] Creating macOS .app bundle directory structure..."
+# 2. Package Electron App Structure from Prebuilt Binary
+echo "[2/5] Creating macOS .app bundle from Electron runtime..."
 APP_DIR="dist/mac/NEXUS.app"
 CONTENTS_DIR="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_APP_DIR="${CONTENTS_DIR}/Resources/app"
 
 rm -rf "dist/mac"
-mkdir -p "${MACOS_DIR}"
+mkdir -p "dist/mac"
+
+if [ -d "node_modules/electron/dist/Electron.app" ]; then
+  cp -R "node_modules/electron/dist/Electron.app" "${APP_DIR}"
+  if [ -f "${MACOS_DIR}/Electron" ]; then
+    mv "${MACOS_DIR}/Electron" "${MACOS_DIR}/NEXUS"
+  fi
+else
+  echo "Error: node_modules/electron/dist/Electron.app not found!"
+  exit 1
+fi
+
 mkdir -p "${RESOURCES_APP_DIR}"
 
 # 3. Create Info.plist
@@ -57,28 +68,23 @@ cp package.json "${RESOURCES_APP_DIR}/"
 cp -R out "${RESOURCES_APP_DIR}/"
 cp -R desktop "${RESOURCES_APP_DIR}/"
 
+# Exclude test suites and test fixtures from production bundle
+find "${RESOURCES_APP_DIR}/desktop" -name "test_*.js" -delete
+find "${RESOURCES_APP_DIR}/desktop" -name "*.test.js" -delete
+find "${RESOURCES_APP_DIR}/desktop" -name "*.test.ts" -delete
+find "${RESOURCES_APP_DIR}/desktop" -name "*.test.tsx" -delete
+
 # Copy package-lock.json if available
 if [ -f "package-lock.json" ]; then
   cp package-lock.json "${RESOURCES_APP_DIR}/"
 fi
 
-# Ensure native spawn-helper binaries have executable permissions
-find node_modules/node-pty -name "spawn-helper" -exec chmod 0755 {} + 2>/dev/null || true
+# Copy full production runtime dependency closure (including all transitive dependencies)
+echo "[4/5b] Packaging production node_modules closure..."
+node scripts/copy-production-dependencies.js "${RESOURCES_APP_DIR}"
 
-# Create executable launcher script
-cat << 'LAUNCHER' > "${MACOS_DIR}/NEXUS"
-#!/usr/bin/env bash
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_PATH="$(cd "${DIR}/../Resources/app" && pwd)"
-export NODE_ENV=production
-if command -v electron >/dev/null 2>&1; then
-  exec electron "${APP_PATH}" "$@"
-elif [ -f "${APP_PATH}/node_modules/.bin/electron" ]; then
-  exec "${APP_PATH}/node_modules/.bin/electron" "${APP_PATH}" "$@"
-else
-  exec node "${APP_PATH}/desktop/electron/main.js" "$@"
-fi
-LAUNCHER
+# Ensure native spawn-helper binaries have executable permissions
+find "${APP_DIR}" -name "spawn-helper" -exec chmod 0755 {} + 2>/dev/null || true
 chmod 0755 "${MACOS_DIR}/NEXUS"
 
 # 5. Generate Release Metadata & Archive

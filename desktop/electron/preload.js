@@ -6,6 +6,37 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readDir: (dirPath) => ipcRenderer.invoke('fs:read-dir', dirPath),
   readFile: (filePath) => ipcRenderer.invoke('fs:read-file', filePath),
   writeFile: (filePath, content) => ipcRenderer.invoke('fs:write-file', filePath, content),
+  createFile: (filePath, content, workspacePath, overwrite) => ipcRenderer.invoke('fs:create-file', { filePath, content, workspacePath, overwrite }),
+  createDir: (dirPath, workspacePath) => ipcRenderer.invoke('fs:create-dir', { dirPath, workspacePath }),
+  deleteFile: (targetPath, workspacePath, recursive) => ipcRenderer.invoke('fs:delete-file', { targetPath, workspacePath, recursive }),
+  renameFile: (oldPath, newPath, workspacePath, overwrite) => ipcRenderer.invoke('fs:rename-file', { oldPath, newPath, workspacePath, overwrite }),
+  revealInFinder: (targetPath) => ipcRenderer.invoke('fs:reveal-in-finder', targetPath),
+  watchWorkspace: (workspacePath) => ipcRenderer.invoke('fs:watch-workspace', workspacePath),
+  onFsChanged: (callback) => {
+    const listener = (_, arg) => callback(arg);
+    ipcRenderer.on('fs:changed', listener);
+    return () => ipcRenderer.removeListener('fs:changed', listener);
+  },
+  fs: {
+    readDir: (dirPath) => ipcRenderer.invoke('fs:read-dir', dirPath),
+    readFile: (filePath) => ipcRenderer.invoke('fs:read-file', filePath),
+    writeFile: (filePath, content) => ipcRenderer.invoke('fs:write-file', filePath, content),
+    createFile: (filePath, content, workspacePath, overwrite) => ipcRenderer.invoke('fs:create-file', { filePath, content, workspacePath, overwrite }),
+    createDir: (dirPath, workspacePath) => ipcRenderer.invoke('fs:create-dir', { dirPath, workspacePath }),
+    deleteFile: (targetPath, workspacePath, recursive) => ipcRenderer.invoke('fs:delete-file', { targetPath, workspacePath, recursive }),
+    renameFile: (oldPath, newPath, workspacePath, overwrite) => ipcRenderer.invoke('fs:rename-file', { oldPath, newPath, workspacePath, overwrite }),
+    revealInFinder: (targetPath) => ipcRenderer.invoke('fs:reveal-in-finder', targetPath),
+    watchWorkspace: (workspacePath) => ipcRenderer.invoke('fs:watch-workspace', workspacePath),
+    onFsChanged: (callback) => {
+      const listener = (_, arg) => callback(arg);
+      ipcRenderer.on('fs:changed', listener);
+      return () => ipcRenderer.removeListener('fs:changed', listener);
+    },
+  },
+  parseDiagnostics: (payload) => ipcRenderer.invoke('diagnostics:parse', payload),
+  diagnostics: {
+    parse: (payload) => ipcRenderer.invoke('diagnostics:parse', payload),
+  },
   fileExists: (filePath) => ipcRenderer.invoke('fs:file-exists', filePath),
   analyzeFile: (payload) => ipcRenderer.invoke('engine:analyze', payload),
   previewSafeRemove: (filePath) => ipcRenderer.invoke('engine:preview-safe-remove', filePath),
@@ -63,6 +94,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     kill: (id) => ipcRenderer.invoke('terminal:kill', id),
     restart: (id) => ipcRenderer.invoke('terminal:restart', id),
     list: () => ipcRenderer.invoke('terminal:list'),
+    rename: (id, name) => ipcRenderer.invoke('terminal:rename', { id, name }),
+    getBuffer: (id) => ipcRenderer.invoke('terminal:getBuffer', id),
+    clear: (id) => ipcRenderer.invoke('terminal:clear', id),
     onData: (callback) => {
       const listener = (event, arg) => callback(arg);
       ipcRenderer.on('terminal:data', listener);
@@ -72,6 +106,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const listener = (event, arg) => callback(arg);
       ipcRenderer.on('terminal:exit', listener);
       return () => ipcRenderer.removeListener('terminal:exit', listener);
+    },
+    onStatus: (callback) => {
+      const listener = (event, arg) => callback(arg);
+      ipcRenderer.on('terminal:status', listener);
+      return () => ipcRenderer.removeListener('terminal:status', listener);
     },
   },
   git: {
@@ -86,9 +125,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
     commitAndPush: (workspacePath, message) => ipcRenderer.invoke('git:commitAndPush', { workspacePath, message }),
     suggestCommitMessage: (workspacePath) => ipcRenderer.invoke('git:suggestCommitMessage', workspacePath),
     branches: (workspacePath) => ipcRenderer.invoke('git:branches', workspacePath),
-    checkout: (workspacePath, branch) => ipcRenderer.invoke('git:checkout', { workspacePath, branch }),
-    createBranch: (workspacePath, branch) => ipcRenderer.invoke('git:createBranch', { workspacePath, branch }),
+    checkout: (workspacePath, branch, options) => ipcRenderer.invoke('git:checkout', { workspacePath, branch, ...(typeof options === 'object' ? options : { force: Boolean(options) }) }),
+    createBranch: (workspacePath, branch, checkout) => ipcRenderer.invoke('git:createBranch', { workspacePath, branch, checkout }),
+    validateBranchName: (name) => ipcRenderer.invoke('git:validateBranchName', { name }),
+    stashes: (workspacePath) => ipcRenderer.invoke('git:stashes', workspacePath),
+    stashSave: (workspacePath, options) => ipcRenderer.invoke('git:stashSave', { workspacePath, ...(typeof options === 'string' ? { message: options } : (options || {})) }),
+    stashApply: (workspacePath, stashId) => ipcRenderer.invoke('git:stashApply', { workspacePath, stashId }),
+    stashPop: (workspacePath, stashId) => ipcRenderer.invoke('git:stashPop', { workspacePath, stashId }),
+    stashDrop: (workspacePath, stashId) => ipcRenderer.invoke('git:stashDrop', { workspacePath, stashId }),
+    stashClear: (workspacePath) => ipcRenderer.invoke('git:stashClear', workspacePath),
+    history: (workspacePath, options) => ipcRenderer.invoke('git:history', { workspacePath, options }),
+    commitDetails: (workspacePath, hash) => ipcRenderer.invoke('git:commitDetails', { workspacePath, hash }),
+    commitDiff: (workspacePath, hash, file, parentIndex) => ipcRenderer.invoke('git:commitDiff', { workspacePath, hash, file, parentIndex }),
+    fileHistory: (workspacePath, filePath, options) => ipcRenderer.invoke('git:fileHistory', { workspacePath, filePath, options }),
     discard: (workspacePath, file) => ipcRenderer.invoke('git:discard', { workspacePath, file }),
+    // Milestone 33: Git Gutter & Hunk Revert
+    getFileHunks: (workspacePath, filePath) => ipcRenderer.invoke('git:getFileHunks', { workspacePath, filePath }),
+    revertHunk: (workspacePath, payload) => ipcRenderer.invoke('git:revertHunk', { workspacePath, payload }),
   },
   github: {
     configStatus: () => ipcRenderer.invoke('github:configStatus'),
@@ -101,6 +154,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   search: {
     run: (payload) => ipcRenderer.invoke('search:run', payload),
+    previewReplace: (payload) => ipcRenderer.invoke('search:previewReplace', payload),
+    generateChangeSet: (payload) => ipcRenderer.invoke('search:generateChangeSet', payload),
+    applyReplace: (payload) => ipcRenderer.invoke('search:applyReplace', payload),
     replace: (payload) => ipcRenderer.invoke('search:replace', payload),
     replaceAll: (payload) => ipcRenderer.invoke('search:replaceAll', payload),
     cancel: (id) => ipcRenderer.invoke('search:cancel', id),
@@ -112,6 +168,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setApiKey: (providerId, apiKey) => ipcRenderer.invoke('ai:set-api-key', { providerId, apiKey }),
     removeApiKey: (providerId) => ipcRenderer.invoke('ai:remove-api-key', providerId),
     validateKey: (providerId, apiKey) => ipcRenderer.invoke('ai:validate-key', { providerId, apiKey }),
+    getDiagnostics: (providerId) => ipcRenderer.invoke('ai:get-diagnostics', providerId),
+    discoverModels: (providerId) => ipcRenderer.invoke('ai:discover-models', providerId),
+    hasProviderApiKey: (providerId) => ipcRenderer.invoke('ai:has-api-key', providerId),
+    setProviderApiKey: (providerId, apiKey) => ipcRenderer.invoke('ai:set-api-key', { providerId, apiKey }),
+    removeProviderApiKey: (providerId) => ipcRenderer.invoke('ai:remove-api-key', providerId),
+    discoverProviderModels: (providerId) => ipcRenderer.invoke('ai:discover-models', providerId),
+    getProviderDiagnostics: (providerId) => ipcRenderer.invoke('ai:get-diagnostics', providerId),
+    setActiveProviderModel: (providerId, modelId) => ipcRenderer.invoke('ai:set-config', { providerId, modelId }),
     roles: {
       getConfig: () => ipcRenderer.invoke('ai:roles:get-config'),
       setConfig: (roleId, providerId, modelId) => ipcRenderer.invoke('ai:roles:set-config', { roleId, providerId, modelId }),
@@ -191,9 +255,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listChangeConflicts: () => ipcRenderer.invoke('harness:list-change-conflicts'),
     getChangeConflict: (conflictId) => ipcRenderer.invoke('harness:get-change-conflict', conflictId),
     resolveConflictHunk: (payload) => ipcRenderer.invoke('harness:resolve-conflict-hunk', payload),
+    resolveFileConflict: (payload) => ipcRenderer.invoke('harness:resolve-file-conflict', payload),
     createParentChangeSetFromConflicts: (payload) => ipcRenderer.invoke('harness:create-parent-changeset-from-conflicts', payload),
     applyResolvedConflicts: (payload) => ipcRenderer.invoke('harness:apply-resolved-conflicts', payload),
     cancelConflictResolution: (payload) => ipcRenderer.invoke('harness:cancel-conflict-resolution', payload),
+    // Language Intelligence & Problems (Milestone 31 & 32)
+    getDefinition: (query) => ipcRenderer.invoke('harness:get-definition', query),
+    findReferences: (query) => ipcRenderer.invoke('harness:find-references', query),
+    getHover: (query) => ipcRenderer.invoke('harness:get-hover', query),
+    prepareRename: (query) => ipcRenderer.invoke('harness:prepare-rename', query),
+    applyRename: (options) => ipcRenderer.invoke('harness:apply-rename', options),
+    getDocumentOutline: (query) => ipcRenderer.invoke('harness:get-document-outline', query),
+    getSymbolAtPosition: (query) => ipcRenderer.invoke('harness:get-symbol-at-position', query),
+    getBreadcrumbs: (query) => ipcRenderer.invoke('harness:get-breadcrumbs', query),
+    parseDiagnostics: (payload) => ipcRenderer.invoke('harness:parse-diagnostics', payload),
+    getProblems: (filter) => ipcRenderer.invoke('harness:get-problems', filter),
+    addProblems: (payload) => ipcRenderer.invoke('harness:add-problems', payload),
+    clearProblems: (filter) => ipcRenderer.invoke('harness:clear-problems', filter),
+    getProblemsSummary: () => ipcRenderer.invoke('harness:get-problems-summary'),
     onEvent: (callback) => {
       const listener = (_, event) => callback(event);
       ipcRenderer.on('harness:event', listener);
@@ -221,6 +300,37 @@ contextBridge.exposeInMainWorld('electronAPI', {
     runFile: (payload) => ipcRenderer.invoke('test:run-file', payload),
     runAll: (payload) => ipcRenderer.invoke('test:run-all', payload),
     coverage: (payload) => ipcRenderer.invoke('test:coverage', payload),
+    debugTest: (payload) => ipcRenderer.invoke('test:debug', payload),
+  },
+  debug: {
+    createSession: (options) => ipcRenderer.invoke('debug:createSession', options),
+    getSession: (sessionId) => ipcRenderer.invoke('debug:getSession', sessionId),
+    launch: (payload) => ipcRenderer.invoke('debug:launch', payload),
+    pause: (sessionId) => ipcRenderer.invoke('debug:pause', sessionId),
+    continue: (sessionId) => ipcRenderer.invoke('debug:continue', sessionId),
+    stepOver: (sessionId) => ipcRenderer.invoke('debug:stepOver', sessionId),
+    stepInto: (sessionId) => ipcRenderer.invoke('debug:stepInto', sessionId),
+    stepOut: (sessionId) => ipcRenderer.invoke('debug:stepOut', sessionId),
+    stop: (sessionId) => ipcRenderer.invoke('debug:stop', sessionId),
+    setBreakpoints: (payload) => ipcRenderer.invoke('debug:setBreakpoints', payload),
+    getBreakpoints: (payload) => ipcRenderer.invoke('debug:getBreakpoints', payload),
+    addWatchExpression: (payload) => ipcRenderer.invoke('debug:addWatchExpression', payload),
+    removeWatchExpression: (payload) => ipcRenderer.invoke('debug:removeWatchExpression', payload),
+    evaluate: (payload) => ipcRenderer.invoke('debug:evaluate', payload),
+    debugTest: (payload) => ipcRenderer.invoke('debug:debugTest', payload),
+  },
+  settings: {
+    get: (workspacePath) => ipcRenderer.invoke('settings:get', workspacePath),
+    update: (payload) => ipcRenderer.invoke('settings:update', payload),
+    reset: (payload) => ipcRenderer.invoke('settings:reset', payload),
+    resetAll: (payload) => ipcRenderer.invoke('settings:resetAll', payload),
+  },
+  keybindings: {
+    get: () => ipcRenderer.invoke('keybindings:get'),
+    update: (payload) => ipcRenderer.invoke('keybindings:update', payload),
+    reset: (payload) => ipcRenderer.invoke('keybindings:reset', payload),
+    resetAll: () => ipcRenderer.invoke('keybindings:resetAll'),
+    detectConflicts: (list) => ipcRenderer.invoke('keybindings:detectConflicts', list),
   },
   profiler: {
     python: (payload) => ipcRenderer.invoke('profiler:python', payload),

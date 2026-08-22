@@ -139,9 +139,9 @@ async function runLazyApiKeyTestSuite() {
 
   // TEST 11: Model switch uses same credential without re-prompting
   await routerRestarted.setApiKey('groq', testGroqKey);
-  const switch1 = routerRestarted.setConfig('groq', 'llama-3.1-8b-instant');
+  const switch1 = routerRestarted.setConfig('groq', 'openai/gpt-oss-20b');
   assert.strictEqual(switch1.success, true);
-  assert.strictEqual(routerRestarted.getActiveModel(), 'llama-3.1-8b-instant');
+  assert.strictEqual(routerRestarted.getActiveModel(), 'openai/gpt-oss-20b');
   const switchConfig = routerRestarted.getConfig();
   assert.strictEqual(switchConfig.providers.find((p) => p.id === 'groq').isConfigured, true);
   console.log('[TEST 11 PASSED] Model switch preserves configured credential without re-prompting');

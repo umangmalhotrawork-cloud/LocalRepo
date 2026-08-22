@@ -36,48 +36,65 @@ class AIProviderRouter {
   }
 
   getVaultFilePath() {
+    const candidates = [];
     if (appModule && typeof appModule.getPath === 'function') {
       try {
         const userData = appModule.getPath('userData');
-        if (userData) {
-          return path.join(userData, 'nexus_ai_vault.json');
-        }
+        if (userData) candidates.push(path.join(userData, 'nexus_ai_vault.json'));
       } catch (e) {}
     }
-    return path.join(process.cwd(), '.nexus-recovery', 'nexus_ai_vault.json');
+    const os = require('os');
+    candidates.push(path.join(os.homedir(), 'Library', 'Application Support', 'NEXUS', 'nexus_ai_vault.json'));
+    candidates.push(path.join(os.homedir(), '.config', 'NEXUS', 'nexus_ai_vault.json'));
+    candidates.push(path.join(process.cwd(), '.nexus-recovery', 'nexus_ai_vault.json'));
+
+    const existing = candidates.find((p) => fs.existsSync(p));
+    return existing || candidates[0];
   }
 
   saveKeyToVault(providerId, apiKey) {
-    const vaultPath = this.getVaultFilePath();
-    if (!vaultPath) return;
-    try {
-      const dir = path.dirname(vaultPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
+    const candidatePaths = [
+      this.getVaultFilePath(),
+      path.join(process.cwd(), '.nexus-recovery', 'nexus_ai_vault.json'),
+    ];
 
-      let vault = {};
-      if (fs.existsSync(vaultPath)) {
-        try {
-          vault = JSON.parse(fs.readFileSync(vaultPath, 'utf8')) || {};
-        } catch (e) {
-          vault = {};
+    let saved = false;
+    for (const vaultPath of candidatePaths) {
+      if (!vaultPath) continue;
+      try {
+        const dir = path.dirname(vaultPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
         }
-      }
 
-      if (apiKey) {
-        if (safeStorageModule && typeof safeStorageModule.isEncryptionAvailable === 'function' && safeStorageModule.isEncryptionAvailable()) {
-          vault[providerId] = { enc: safeStorageModule.encryptString(apiKey).toString('hex') };
+        let vault = {};
+        if (fs.existsSync(vaultPath)) {
+          try {
+            vault = JSON.parse(fs.readFileSync(vaultPath, 'utf8')) || {};
+          } catch (e) {
+            vault = {};
+          }
+        }
+
+        if (apiKey) {
+          if (safeStorageModule && typeof safeStorageModule.isEncryptionAvailable === 'function' && safeStorageModule.isEncryptionAvailable()) {
+            vault[providerId] = { enc: safeStorageModule.encryptString(apiKey).toString('hex') };
+          } else {
+            vault[providerId] = { b64: Buffer.from(apiKey, 'utf8').toString('base64') };
+          }
         } else {
-          vault[providerId] = { b64: Buffer.from(apiKey, 'utf8').toString('base64') };
+          delete vault[providerId];
         }
-      } else {
-        delete vault[providerId];
-      }
 
-      fs.writeFileSync(vaultPath, JSON.stringify(vault, null, 2), 'utf8');
-    } catch (e) {
-      console.warn('[AI-VAULT] Failed to persist key to vault:', e.message);
+        fs.writeFileSync(vaultPath, JSON.stringify(vault, null, 2), 'utf8');
+        saved = true;
+        break;
+      } catch (e) {
+        // Try next candidate
+      }
+    }
+    if (!saved) {
+      console.warn('[AI-VAULT] Could not write vault to any candidate path');
     }
   }
 
@@ -157,13 +174,61 @@ class AIProviderRouter {
     // 3. Align activeProviderId to configured provider if present
     if (this.apiKeys.has(PROVIDER_IDS.GROQ)) {
       this.activeProviderId = PROVIDER_IDS.GROQ;
-      this.activeModelId = DEFAULT_MODELS[PROVIDER_IDS.GROQ];
+      this.activeModelId = DEFAULT_MODELS[PROVIDER_IDS.GROQ] || 'openai/gpt-oss-120b';
     } else {
       const firstConnected = Array.from(this.apiKeys.keys())[0];
       if (firstConnected && this.providers.has(firstConnected)) {
         this.activeProviderId = firstConnected;
         this.activeModelId = this.providers.get(firstConnected).getDefaultModel();
       }
+    }
+
+    // 4. Load persisted active provider and model selection if available
+    this.loadActiveSelection();
+  }
+
+  saveActiveSelection(providerId, modelId) {
+    const candidateDirs = [];
+    const vaultPath = this.getVaultFilePath();
+    if (vaultPath) candidateDirs.push(path.dirname(vaultPath));
+    candidateDirs.push(path.join(process.cwd(), '.nexus-recovery'));
+
+    for (const dir of candidateDirs) {
+      try {
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        const configPath = path.join(dir, 'nexus_ai_selection.json');
+        fs.writeFileSync(configPath, JSON.stringify({ activeProvider: providerId, activeModel: modelId }, null, 2), 'utf8');
+        break;
+      } catch (e) {
+        // Try next directory
+      }
+    }
+  }
+
+  loadActiveSelection() {
+    const candidatePaths = [
+      path.join(path.dirname(this.getVaultFilePath() || ''), 'nexus_ai_selection.json'),
+      path.join(process.cwd(), '.nexus-recovery', 'nexus_ai_selection.json'),
+    ];
+
+    for (const configPath of candidatePaths) {
+      try {
+        if (fs.existsSync(configPath)) {
+          const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+          if (data && data.activeProvider && this.providers.has(data.activeProvider)) {
+            this.activeProviderId = data.activeProvider;
+            const provider = this.providers.get(data.activeProvider);
+            const validModels = provider.getModels().map((m) => (typeof m === 'string' ? m : m.id));
+            if (data.activeModel && validModels.includes(data.activeModel)) {
+              this.activeModelId = data.activeModel;
+            } else {
+              this.activeModelId = provider.getDefaultModel();
+              this.saveActiveSelection(this.activeProviderId, this.activeModelId);
+            }
+            break;
+          }
+        }
+      } catch (e) {}
     }
   }
 
@@ -172,7 +237,7 @@ class AIProviderRouter {
   }
 
   getActiveModel() {
-    return this.activeModelId || DEFAULT_MODELS[this.activeProviderId] || 'llama-3.3-70b-versatile';
+    return this.activeModelId || DEFAULT_MODELS[this.activeProviderId] || 'openai/gpt-oss-120b';
   }
 
   getMaskedKey(providerId) {
@@ -193,21 +258,32 @@ class AIProviderRouter {
     return this.keyValidationStatus.get(providerId) || PROVIDER_STATUS.CONNECTED;
   }
 
+  hasApiKey(providerId) {
+    const key = this.apiKeys.get(providerId);
+    return Boolean(key && typeof key === 'string' && key.trim().length > 0);
+  }
+
   getConfig() {
     const providersList = Array.from(this.providers.values()).map((p) => {
       const pId = p.getId();
       const status = this.getProviderStatus(pId);
       const meta = PROVIDER_METADATA[pId] || {};
+      const isConfigured = status === PROVIDER_STATUS.CONNECTED;
       return {
         id: pId,
+        providerId: pId,
         name: p.getName(),
+        authenticated: isConfigured,
+        keyConfigured: this.apiKeys.has(pId),
         models: p.getModels(),
         defaultModel: p.getDefaultModel(),
+        selectedModelId: pId === this.activeProviderId ? this.activeModelId : p.getDefaultModel(),
         status,
         maskedKey: this.getMaskedKey(pId),
-        isConfigured: status === PROVIDER_STATUS.CONNECTED,
+        isConfigured,
         keyPlaceholder: meta.keyPlaceholder || 'Enter API key...',
         helpUrl: meta.helpUrl || '',
+        lastDiscoveryAt: p.lastDiscoveryAt || 0,
       };
     });
 
@@ -222,13 +298,17 @@ class AIProviderRouter {
     if (this.providers.has(providerId)) {
       this.activeProviderId = providerId;
       const provider = this.providers.get(providerId);
-      const validModels = provider.getModels().map((m) => m.id);
+      const rawModels = (typeof provider.getModels === 'function' ? provider.getModels() : provider.models) || [];
+      const validModels = rawModels.map((m) => (typeof m === 'string' ? m : m?.id || ''));
 
-      if (modelId && validModels.includes(modelId)) {
+      if (modelId && (validModels.includes(modelId) || validModels.length === 0)) {
         this.activeModelId = modelId;
-      } else {
+      } else if (typeof provider.getDefaultModel === 'function') {
         this.activeModelId = provider.getDefaultModel();
+      } else {
+        this.activeModelId = modelId || validModels[0] || '';
       }
+      this.saveActiveSelection(this.activeProviderId, this.activeModelId);
       return { success: true, activeProvider: this.activeProviderId, activeModel: this.activeModelId };
     }
     return { success: false, error: `Unsupported provider: ${providerId}` };
@@ -289,6 +369,45 @@ class AIProviderRouter {
     return provider.validateKey(apiKey);
   }
 
+  async getProviderDiagnostics(providerId = 'groq') {
+    const provider = this.providers.get(providerId);
+    if (!provider) {
+      return {
+        authenticated: false,
+        reachable: false,
+        error: `Unknown provider: ${providerId}`,
+        models: [],
+        configuredModel: this.activeModelId,
+        configuredModelAvailable: false,
+      };
+    }
+
+    const apiKey = this.apiKeys.get(providerId);
+    if (!apiKey || !apiKey.trim()) {
+      return {
+        authenticated: false,
+        reachable: false,
+        error: `No API key configured for ${provider.getName()}`,
+        models: [],
+        configuredModel: this.activeModelId,
+        configuredModelAvailable: false,
+      };
+    }
+
+    if (typeof provider.getAvailableModels === 'function') {
+      const diag = await provider.getAvailableModels(apiKey, this.activeModelId);
+      return diag;
+    }
+
+    return {
+      authenticated: true,
+      reachable: true,
+      models: provider.getModels(),
+      configuredModel: this.activeModelId,
+      configuredModelAvailable: true,
+    };
+  }
+
   /**
    * Resolves target provider, model, and isolated key.
    * GUARANTEE: Never sends one provider's key to another provider.
@@ -302,8 +421,10 @@ class AIProviderRouter {
     let apiKey = provider ? this.apiKeys.get(pId) : null;
 
     if (provider && provider.isConfigured(apiKey)) {
-      const validModels = provider.getModels().map((m) => m.id);
-      const targetModel = mId && validModels.includes(mId) ? mId : provider.getDefaultModel();
+      const rawModels = (typeof provider.getModels === 'function' ? provider.getModels() : provider.models) || [];
+      const validModels = rawModels.map((m) => (typeof m === 'string' ? m : m?.id || ''));
+      const defaultMod = typeof provider.getDefaultModel === 'function' ? provider.getDefaultModel() : (validModels[0] || '');
+      const targetModel = mId && (validModels.includes(mId) || validModels.length === 0) ? mId : defaultMod;
       return {
         provider,
         apiKey,

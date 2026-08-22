@@ -84,14 +84,16 @@ class ChangeSet {
 
     // Normalize file entries
     this.files = [];
-    const initialFiles = options.files || options.edits || [];
+    const initialFiles = options.files || options.edits || options.patches || [];
     if (Array.isArray(initialFiles)) {
       for (const f of initialFiles) {
         this.addFile(f);
       }
     }
+  }
 
-
+  get patches() {
+    return this.files;
   }
 
   /**
@@ -125,13 +127,17 @@ class ChangeSet {
       throw new Error('[CHANGESET] fileEntry must be an object');
     }
 
-    const filePath = (fileEntry.filePath || fileEntry.relPath || '').trim();
+    const filePath = (fileEntry.filePath || fileEntry.relPath || fileEntry.file || '').trim();
     if (!filePath) {
       throw new Error('[CHANGESET] fileEntry missing valid filePath');
     }
 
-    const original = typeof fileEntry.original === 'string' ? fileEntry.original : '';
-    const replacement = typeof fileEntry.replacement === 'string' ? fileEntry.replacement : '';
+    const original = typeof fileEntry.original === 'string'
+      ? fileEntry.original
+      : (typeof fileEntry.originalContent === 'string' ? fileEntry.originalContent : '');
+    const replacement = typeof fileEntry.replacement === 'string'
+      ? fileEntry.replacement
+      : (typeof fileEntry.content === 'string' ? fileEntry.content : '');
     const changeType = fileEntry.changeType || (original ? 'MODIFY' : (replacement ? 'CREATE' : 'DELETE'));
 
     const originalContentHash = fileEntry.originalContentHash ||
@@ -146,6 +152,8 @@ class ChangeSet {
       originalContentHash,
       original,
       replacement,
+      content: replacement,
+      originalContent: original,
       proposedDiff: secretFilter.sanitizeString(proposedDiff),
       firewallResult: fileEntry.firewallResult || null,
       intentDriftResult: fileEntry.intentDriftResult || null,

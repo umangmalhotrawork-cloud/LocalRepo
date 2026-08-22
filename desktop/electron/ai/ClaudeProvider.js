@@ -95,50 +95,83 @@ class ClaudeProvider extends AIProvider {
     });
   }
 
-  async validateKey(apiKey) {
+  async getAvailableModels(apiKey, configuredModel = null) {
     if (!this.isConfigured(apiKey)) {
-      return { valid: false, error: 'Claude API key is missing or empty' };
+      return {
+        authenticated: false,
+        reachable: false,
+        error: 'Claude API key is missing or empty',
+        models: [],
+        configuredModel: configuredModel || this.getDefaultModel(),
+        configuredModelAvailable: false,
+      };
     }
 
     try {
       const res = await this.request('/models', 'GET', apiKey, null, 12000);
       const rawModels = res.data?.data || (Array.isArray(res.data) ? res.data : []);
 
-      if (Array.isArray(rawModels) && rawModels.length > 0) {
-        const mapped = rawModels
-          .filter((m) => m.id && typeof m.id === 'string' && m.id.includes('claude'))
-          .map((m) => ({
-            id: m.id,
-            name: m.display_name || m.id,
-          }));
+      const mapped = rawModels
+        .filter((m) => m.id && typeof m.id === 'string' && m.id.includes('claude'))
+        .map((m) => ({
+          id: m.id,
+          name: m.display_name || m.id,
+          active: true,
+          ownedBy: 'Anthropic',
+          contextWindow: 200000,
+          capabilities: { chat: true, tools: true, vision: true },
+        }));
 
-        if (mapped.length > 0) {
-          const combinedMap = new Map();
-          for (const sm of this.models) combinedMap.set(sm.id, sm);
-          for (const dm of mapped) {
-            if (!combinedMap.has(dm.id)) combinedMap.set(dm.id, dm);
-          }
-          this.dynamicModels = Array.from(combinedMap.values());
-        }
+      this.lastDiscoveryAt = Date.now();
+      if (mapped.length > 0) {
+        this.dynamicModels = mapped;
       }
 
-      return { valid: true, models: this.getModels() };
+      const activeTarget = configuredModel || this.getDefaultModel();
+      const isAvailable = (mapped.length > 0 ? mapped : this.getModels()).some((m) => m.id === activeTarget);
+
+      return {
+        authenticated: true,
+        reachable: true,
+        models: mapped.length > 0 ? mapped : this.getModels(),
+        configuredModel: activeTarget,
+        configuredModelAvailable: isAvailable,
+        totalModels: (mapped.length > 0 ? mapped : this.getModels()).length,
+        lastDiscoveryAt: this.lastDiscoveryAt,
+      };
     } catch (err) {
-      const code = err.statusCode;
-      let userFriendly = err.message;
-      if (code === 401 || userFriendly.toLowerCase().includes('auth') || userFriendly.toLowerCase().includes('invalid')) {
-        userFriendly = 'Invalid Claude API key. Please verify your credentials.';
-      } else if (code === 429) {
-        userFriendly = 'Claude rate limit or quota exceeded.';
-      }
-      return { valid: false, error: userFriendly, statusCode: code };
+      const code = err.statusCode || 0;
+      const isAuthError = code === 401 || (err.message && (err.message.includes('auth') || err.message.includes('invalid') || err.message.includes('key')));
+      return {
+        authenticated: !isAuthError && code !== 0,
+        reachable: code > 0,
+        error: isAuthError ? `Authentication failed (HTTP ${code}): ${err.message}` : `Connection failed: ${err.message}`,
+        statusCode: code,
+        models: [],
+        configuredModel: configuredModel || this.getDefaultModel(),
+        configuredModelAvailable: false,
+      };
     }
+  }
+
+  async validateKey(apiKey) {
+    if (!this.isConfigured(apiKey)) {
+      return { valid: false, error: 'Claude API key is missing or empty' };
+    }
+    const diag = await this.getAvailableModels(apiKey);
+    if (diag.authenticated && diag.reachable) {
+      return { valid: true, models: this.getModels() };
+    }
+    return { valid: false, error: diag.error || 'Claude key validation failed', statusCode: diag.statusCode };
   }
 
   async generateAgentPlan(apiKey, model, payload = {}) {
     if (!this.isConfigured(apiKey)) {
       throw new Error('Claude API key is not configured');
     }
+
+    const selectedModel = model || this.getDefaultModel();
+    await this.validateModelAvailability(apiKey, selectedModel);
 
     const {
       task = '',
@@ -151,7 +184,6 @@ class ClaudeProvider extends AIProvider {
       intent = 'MUTATION',
     } = payload;
 
-    const selectedModel = model || this.getDefaultModel();
     const relativeTarget = targetFile ? (path.relative(workspacePath, targetFile) || path.basename(targetFile)) : 'workspace';
     const orderedFiles = targetFile ? [targetFile, ...files.filter((f) => path.resolve(f) !== path.resolve(targetFile))] : files;
 
@@ -284,6 +316,7 @@ Respond ONLY with a valid JSON object strictly matching this schema (no markdown
     } = payload;
 
     const selectedModel = model || this.getDefaultModel();
+    await this.validateModelAvailability(apiKey, selectedModel);
     const contextPrefix = continuumContextText ? `${continuumContextText}\n\n---\n\n` : '';
 
     const systemPrompt = `${contextPrefix}You are an expert AI code assistant integrated into NEXUS Workbench powered by Claude.

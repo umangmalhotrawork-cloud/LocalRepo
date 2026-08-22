@@ -1,8 +1,7 @@
-"use client";
-
-import React, { useState } from "react";
-import { Terminal as TerminalIcon, AlertTriangle, FileCode, ShieldCheck, GitBranch, Bot, ChevronDown, X, Minus } from "lucide-react";
+import React, { useState, useMemo } from "react";
+import { Terminal as TerminalIcon, AlertTriangle, AlertCircle, Info, FileCode, FileText, ChevronRight, ShieldCheck, GitBranch, Bot, ChevronDown, X, Minus } from "lucide-react";
 import TerminalPanel from "./TerminalPanel";
+import { ProblemItem } from "../utils/diagnosticParser";
 
 export type BottomPanelTab = "terminal" | "problems" | "output" | "verification" | "git" | "agent_logs";
 
@@ -18,10 +17,18 @@ interface BottomPanelProps {
     tabs: any[];
     activeTabId: string | null;
     onSelectTab: (id: string) => void;
-    onCreateTab: () => void;
+    onCreateTab: (shell?: string, name?: string) => void;
     onCloseTab: (id: string) => void;
     onRestartTab: (id: string) => void;
     onSendInput: (id: string, input: string) => void;
+    onRenameTab?: (id: string, newName: string) => void;
+    onClearTabOutput?: (id: string) => void;
+    splitLayout?: any;
+    splitTabIds?: string[];
+    focusedPaneId?: string;
+    onSplitTab?: (direction: "vertical" | "horizontal", targetTabId?: string) => void;
+    onUnsplit?: () => void;
+    onFocusPane?: (id: string) => void;
     logs: string[];
     onClearLogs: () => void;
     debugLogs: string[];
@@ -29,9 +36,12 @@ interface BottomPanelProps {
     onClearDebugLogs: () => void;
     activeMode: "terminal" | "output" | "debug" | "logs" | "python";
     onModeChange: (mode: any) => void;
+    onAskAiAboutDiagnostic?: (diagnostic: any) => void;
+    onOpenLocation?: (filePath: string, line?: number, column?: number) => void;
+    onSendSelectionToAi?: (selectedText: string) => void;
   };
   // Extra tabs data
-  problems?: Array<{ file: string; line: number; message: string; severity: "error" | "warning" }>;
+  problems?: ProblemItem[] | Array<{ file?: string; filePath?: string; line?: number; column?: number; message: string; severity: "error" | "warning" | "info"; code?: string; source?: string }>;
   verificationSummary?: { firewallStatus?: string; driftStatus?: string; riskLevel?: string };
   agentLogs?: string[];
   gitSummary?: { branch?: string; stagedCount?: number; unstagedCount?: number };
@@ -50,6 +60,9 @@ export default function BottomPanel({
   agentLogs = [],
   gitSummary,
 }: BottomPanelProps) {
+  const errorCount = useMemo(() => problems.filter((p) => p.severity === "error").length, [problems]);
+  const warningCount = useMemo(() => problems.filter((p) => p.severity === "warning").length, [problems]);
+
   if (!isOpen) return null;
 
   return (
@@ -88,8 +101,22 @@ export default function BottomPanel({
                 : "text-zinc-400 hover:text-zinc-200 hover:bg-[#12121a]"
             }`}
           >
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-            <span>Problems ({problems.length})</span>
+            <AlertTriangle className={`w-3.5 h-3.5 ${errorCount > 0 ? "text-rose-400" : warningCount > 0 ? "text-amber-400" : "text-zinc-400"}`} />
+            <span>Problems</span>
+            {problems.length > 0 && (
+              <span className="flex items-center gap-1 ml-0.5">
+                {errorCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-rose-500/20 text-rose-300 font-bold border border-rose-500/30">
+                    {errorCount}
+                  </span>
+                )}
+                {warningCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
+                    {warningCount}
+                  </span>
+                )}
+              </span>
+            )}
           </button>
 
           {/* Output Tab */}
@@ -175,6 +202,14 @@ export default function BottomPanel({
             onCloseTab={terminalProps.onCloseTab}
             onRestartTab={terminalProps.onRestartTab}
             onSendInput={terminalProps.onSendInput}
+            onRenameTab={terminalProps.onRenameTab}
+            onClearTabOutput={terminalProps.onClearTabOutput}
+            splitLayout={terminalProps.splitLayout}
+            splitTabIds={terminalProps.splitTabIds}
+            focusedPaneId={terminalProps.focusedPaneId}
+            onSplitTab={terminalProps.onSplitTab}
+            onUnsplit={terminalProps.onUnsplit}
+            onFocusPane={terminalProps.onFocusPane}
             logs={terminalProps.logs}
             onClearLogs={terminalProps.onClearLogs}
             debugLogs={terminalProps.debugLogs}
@@ -183,26 +218,107 @@ export default function BottomPanel({
             activeMode={terminalProps.activeMode === "output" || terminalProps.activeMode === "debug" ? terminalProps.activeMode : "terminal"}
             onModeChange={terminalProps.onModeChange}
             onClosePanel={onClose}
+            onAskAiAboutDiagnostic={terminalProps.onAskAiAboutDiagnostic}
+            onOpenLocation={terminalProps.onOpenLocation}
+            onSendSelectionToAi={terminalProps.onSendSelectionToAi}
           />
         )}
 
         {activeTab === "problems" && (
-          <div className="p-3 overflow-y-auto h-full space-y-1.5 text-xs font-mono">
-            {problems.length === 0 ? (
-              <div className="text-zinc-500 italic text-[11px] py-4 text-center">
-                No syntax or type errors detected in active workspace.
+          <div className="flex flex-col h-full bg-[#07070a] font-mono text-xs">
+            {/* Header summary bar */}
+            <div className="px-3 py-1.5 bg-[#0d0d14] border-b border-[#181822] flex items-center justify-between text-[11px] shrink-0">
+              <div className="flex items-center gap-3 text-zinc-400">
+                <span className="flex items-center gap-1.5 font-bold text-zinc-300">
+                  <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                  <span>{errorCount} {errorCount === 1 ? "Error" : "Errors"}</span>
+                </span>
+                <span className="flex items-center gap-1.5 font-bold text-zinc-300">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{warningCount} {warningCount === 1 ? "Warning" : "Warnings"}</span>
+                </span>
               </div>
-            ) : (
-              problems.map((prob, idx) => (
-                <div key={idx} className="p-2 rounded bg-[#121218] border border-[#1f1f2a] flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span className="text-zinc-200 font-medium">{prob.message}</span>
-                  </div>
-                  <span className="text-zinc-500 text-[10px]">{prob.file}:{prob.line}</span>
+              <span className="text-[10px] text-zinc-500 font-mono">
+                {problems.length} total {problems.length === 1 ? "issue" : "issues"}
+              </span>
+            </div>
+
+            {/* List grouped by file */}
+            <div className="p-2 overflow-y-auto flex-1 space-y-2">
+              {problems.length === 0 ? (
+                <div className="text-zinc-500 italic text-[11px] py-8 text-center flex flex-col items-center gap-1.5">
+                  <ShieldCheck className="w-6 h-6 text-emerald-500/40" />
+                  <span>No syntax, type, or runtime errors detected in active workspace.</span>
                 </div>
-              ))
-            )}
+              ) : (
+                (() => {
+                  const groups: Record<string, any[]> = {};
+                  for (const p of problems) {
+                    const f = (p as any).filePath || (p as any).file || "workspace";
+                    if (!groups[f]) groups[f] = [];
+                    groups[f].push(p);
+                  }
+                  return Object.entries(groups).map(([fileName, items]) => (
+                    <div key={fileName} className="rounded border border-[#1b1b26] bg-[#0c0c12] overflow-hidden">
+                      <div className="px-2.5 py-1 bg-[#12121a] border-b border-[#1b1b26] flex items-center justify-between text-[11px] font-bold text-zinc-300">
+                        <div className="flex items-center gap-1.5">
+                          <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                          <span className="truncate">{fileName}</span>
+                        </div>
+                        <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#1a1a26] text-zinc-400 font-mono">
+                          {items.length}
+                        </span>
+                      </div>
+                      <div className="divide-y divide-[#161622]">
+                        {items.map((prob: any, idx: number) => {
+                          const isErr = prob.severity === "error";
+                          const isWarn = prob.severity === "warning";
+                          return (
+                            <div
+                              key={idx}
+                              onClick={() => {
+                                if (terminalProps.onOpenLocation) {
+                                  terminalProps.onOpenLocation(fileName, prob.line, prob.column);
+                                }
+                              }}
+                              className="p-2 hover:bg-[#151520] transition-colors cursor-pointer flex items-start justify-between gap-3 text-[11px]"
+                            >
+                              <div className="flex items-start gap-2 min-w-0">
+                                {isErr ? (
+                                  <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                                ) : isWarn ? (
+                                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                                ) : (
+                                  <Info className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
+                                )}
+                                <div className="min-w-0 space-y-0.5">
+                                  <div className="text-zinc-200 leading-tight">
+                                    {prob.message}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 text-[10px] text-zinc-500">
+                                    {prob.code && (
+                                      <span className="px-1 py-0.2 rounded bg-[#181824] text-cyan-300 font-mono">
+                                        {prob.code}
+                                      </span>
+                                    )}
+                                    {prob.source && (
+                                      <span className="text-zinc-400">[{prob.source}]</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              <span className="text-zinc-500 text-[10px] shrink-0 font-mono">
+                                {prob.line ? `line ${prob.line}${prob.column ? `:${prob.column}` : ""}` : ""}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ));
+                })()
+              )}
+            </div>
           </div>
         )}
 

@@ -31,9 +31,16 @@ class GeminiProvider extends AIProvider {
     return this.models;
   }
 
-  async validateKey(apiKey) {
+  async getAvailableModels(apiKey, configuredModel = null) {
     if (!this.isConfigured(apiKey)) {
-      return { valid: false, error: 'Gemini API key is missing or empty' };
+      return {
+        authenticated: false,
+        reachable: false,
+        error: 'Gemini API key is missing or empty',
+        models: [],
+        configuredModel: configuredModel || this.getDefaultModel(),
+        configuredModelAvailable: false,
+      };
     }
 
     try {
@@ -46,9 +53,13 @@ class GeminiProvider extends AIProvider {
             if (res.statusCode >= 200 && res.statusCode < 300) {
               resolve(data);
             } else if (res.statusCode === 400 || res.statusCode === 403) {
-              reject(new Error('Invalid Gemini API key. Please check your credentials at Google AI Studio.'));
+              const err = new Error('Invalid Gemini API key. Please check your credentials at Google AI Studio.');
+              err.statusCode = res.statusCode;
+              reject(err);
             } else {
-              reject(new Error(`API returned status ${res.statusCode}`));
+              const err = new Error(`Gemini API returned status ${res.statusCode}`);
+              err.statusCode = res.statusCode;
+              reject(err);
             }
           });
         });
@@ -60,42 +71,76 @@ class GeminiProvider extends AIProvider {
       });
 
       const parsed = JSON.parse(responseText);
-      if (Array.isArray(parsed.models) && parsed.models.length > 0) {
-        const mapped = parsed.models
-          .filter((m) => {
-            const name = (m.name || '').replace(/^models\//, '');
-            const methods = Array.isArray(m.supportedGenerationMethods) ? m.supportedGenerationMethods : [];
-            return methods.includes('generateContent') || name.includes('gemini');
-          })
-          .map((m) => {
-            const cleanId = (m.name || '').replace(/^models\//, '');
-            return {
-              id: cleanId,
-              name: m.displayName || cleanId,
-            };
-          });
+      const rawModels = Array.isArray(parsed.models) ? parsed.models : [];
 
-        if (mapped.length > 0) {
-          const combinedMap = new Map();
-          for (const sm of this.models) combinedMap.set(sm.id, sm);
-          for (const dm of mapped) {
-            if (!combinedMap.has(dm.id)) combinedMap.set(dm.id, dm);
-          }
-          this.dynamicModels = Array.from(combinedMap.values());
-        }
+      const mapped = rawModels
+        .filter((m) => {
+          const name = (m.name || '').replace(/^models\//, '');
+          const methods = Array.isArray(m.supportedGenerationMethods) ? m.supportedGenerationMethods : [];
+          return methods.includes('generateContent') || name.includes('gemini');
+        })
+        .map((m) => {
+          const cleanId = (m.name || '').replace(/^models\//, '');
+          return {
+            id: cleanId,
+            name: m.displayName || cleanId,
+            active: true,
+            ownedBy: 'Google',
+            contextWindow: m.inputTokenLimit || 1048576,
+            capabilities: { chat: true, tools: true, vision: true },
+          };
+        });
 
-        return { valid: true, models: this.getModels() };
+      this.lastDiscoveryAt = Date.now();
+      if (mapped.length > 0) {
+        this.dynamicModels = mapped;
       }
-      return { valid: false, error: 'Invalid response from Gemini API' };
+
+      const activeTarget = configuredModel || this.getDefaultModel();
+      const isAvailable = mapped.some((m) => m.id === activeTarget);
+
+      return {
+        authenticated: true,
+        reachable: true,
+        models: mapped,
+        configuredModel: activeTarget,
+        configuredModelAvailable: isAvailable,
+        totalModels: mapped.length,
+        lastDiscoveryAt: this.lastDiscoveryAt,
+      };
     } catch (err) {
-      return { valid: false, error: err.message || 'Gemini key validation failed' };
+      const statusCode = err.statusCode || 0;
+      const isAuthError = statusCode === 400 || statusCode === 403 || (err.message && err.message.includes('Invalid Gemini'));
+      return {
+        authenticated: !isAuthError && statusCode !== 0,
+        reachable: statusCode > 0,
+        error: isAuthError ? `Authentication failed (HTTP ${statusCode}): ${err.message}` : `Connection failed: ${err.message}`,
+        statusCode,
+        models: [],
+        configuredModel: configuredModel || this.getDefaultModel(),
+        configuredModelAvailable: false,
+      };
     }
+  }
+
+  async validateKey(apiKey) {
+    if (!this.isConfigured(apiKey)) {
+      return { valid: false, error: 'Gemini API key is missing or empty' };
+    }
+    const diag = await this.getAvailableModels(apiKey);
+    if (diag.authenticated && diag.reachable) {
+      return { valid: true, models: this.getModels() };
+    }
+    return { valid: false, error: diag.error || 'Gemini key validation failed', statusCode: diag.statusCode };
   }
 
   async generateAgentPlan(apiKey, model, payload = {}) {
     if (!this.isConfigured(apiKey)) {
       throw new Error('Gemini API key is not configured');
     }
+
+    const selectedModel = model || this.getDefaultModel();
+    await this.validateModelAvailability(apiKey, selectedModel);
 
     const {
       task = '',
@@ -108,7 +153,6 @@ class GeminiProvider extends AIProvider {
       intent = 'MUTATION',
     } = payload;
 
-    const selectedModel = model || this.getDefaultModel();
     const relativeTarget = targetFile ? (path.relative(workspacePath, targetFile) || path.basename(targetFile)) : 'workspace';
     const orderedFiles = targetFile ? [targetFile, ...files.filter((file) => path.resolve(file) !== path.resolve(targetFile))] : files;
 
@@ -281,6 +325,7 @@ Format strictly as JSON:
     } = payload;
 
     const selectedModel = model || this.getDefaultModel();
+    await this.validateModelAvailability(apiKey, selectedModel);
     const cleanModelName = selectedModel.replace(/^models\//, '');
     const contextPrefix = continuumContextText ? `${continuumContextText}\n\n---\n\n` : '';
     const systemPrompt = `${contextPrefix}You are an expert AI code assistant integrated into NEXUS Workbench.

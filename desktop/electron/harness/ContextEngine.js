@@ -404,6 +404,10 @@ class ContextEngine {
   }
 
 
+  compileContext(params = {}) {
+    return this.buildContext(params);
+  }
+
   /**
    * Compiles complete provider-neutral model context with budgeting & compaction.
    * @param {Object} params
@@ -431,6 +435,15 @@ class ContextEngine {
       handoffState = null,
       workspacePath = process.cwd(),
       activeFilePath = null,
+      selectionText = null,
+      selectionStartLine = null,
+      selectionStartColumn = null,
+      selectionEndLine = null,
+      selectionEndColumn = null,
+      cursorLine = null,
+      cursorColumn = null,
+      gitBranch = null,
+      diagnostic = null,
       intent = 'MUTATION',
       decisions = [],
       verification = null,
@@ -518,10 +531,153 @@ class ContextEngine {
     }
     sections.handoffTokens = this.estimateTokens(handoffText);
 
+    // 2b. Active Editor Context & Selection Bridge (Milestone 24)
+    let editorContextText = '';
+    const resolvedSelectionText = selectionText || turn?.metadata?.selectionText || null;
+    const resolvedSelectionStartLine = selectionStartLine ?? turn?.metadata?.selectionStartLine ?? null;
+    const resolvedSelectionEndLine = selectionEndLine ?? turn?.metadata?.selectionEndLine ?? null;
+    const resolvedSelectionStartCol = selectionStartColumn ?? turn?.metadata?.selectionStartColumn ?? null;
+    const resolvedSelectionEndCol = selectionEndColumn ?? turn?.metadata?.selectionEndColumn ?? null;
+    const resolvedCursorLine = cursorLine ?? turn?.metadata?.cursorLine ?? null;
+    const resolvedCursorCol = cursorColumn ?? turn?.metadata?.cursorColumn ?? null;
+
+    if (activeFilePath || resolvedCursorLine !== null || resolvedSelectionText) {
+      const editorLines = ['## ACTIVE EDITOR CONTEXT'];
+      if (activeFilePath) {
+        editorLines.push(`- Active File: ${activeFilePath}`);
+      }
+      if (resolvedCursorLine !== null) {
+        const colPart = resolvedCursorCol !== null ? `, column ${resolvedCursorCol}` : '';
+        editorLines.push(`- Cursor: line ${resolvedCursorLine}${colPart}`);
+      }
+      if (resolvedSelectionText && typeof resolvedSelectionText === 'string' && resolvedSelectionText.trim().length > 0) {
+        let rangeLabel = 'selected code';
+        if (resolvedSelectionStartLine !== null && resolvedSelectionEndLine !== null) {
+          rangeLabel = resolvedSelectionStartLine === resolvedSelectionEndLine
+            ? `line ${resolvedSelectionStartLine}`
+            : `lines ${resolvedSelectionStartLine}–${resolvedSelectionEndLine}`;
+        }
+        let boundedSelection = secretFilter.sanitizeString(resolvedSelectionText.trim());
+        if (boundedSelection.length > 1500) {
+          boundedSelection = boundedSelection.slice(0, 1500) + '\n... [TRUNCATED]';
+          truncatedSections.push('selection');
+        }
+        editorLines.push(`- Selection (${rangeLabel}):\n\`\`\`\n${boundedSelection}\n\`\`\``);
+      }
+      editorContextText = editorLines.join('\n');
+    }
+    sections.editorContextTokens = this.estimateTokens(editorContextText);
+
+    // 2c. Active Git Context (Milestone 24)
+    let gitContextText = '';
+    const resolvedGitBranch = gitBranch || turn?.metadata?.gitBranch || null;
+    if (resolvedGitBranch && typeof resolvedGitBranch === 'string' && resolvedGitBranch.trim().length > 0) {
+      const cleanBranch = secretFilter.sanitizeString(resolvedGitBranch.trim());
+      if (cleanBranch) {
+        gitContextText = `## CURRENT GIT CONTEXT\n- Active Branch: ${cleanBranch}`;
+      }
+    }
+    sections.gitContextTokens = this.estimateTokens(gitContextText);
+
+    // 2d. Active Debugging Context (Milestone 25)
+    let debuggingContextText = '';
+    const resolvedDiagnostic = diagnostic || turn?.metadata?.diagnostic || null;
+    if (resolvedDiagnostic && typeof resolvedDiagnostic === 'object') {
+      const debugLines = ['## CURRENT DEBUGGING CONTEXT'];
+      if (resolvedDiagnostic.command) {
+        debugLines.push(`Command:\n${resolvedDiagnostic.command}`);
+      }
+      if (resolvedDiagnostic.exitCode !== undefined && resolvedDiagnostic.exitCode !== null) {
+        debugLines.push(`Exit Code:\n${resolvedDiagnostic.exitCode}`);
+      }
+      if (resolvedDiagnostic.filePath) {
+        debugLines.push(`File:\n${resolvedDiagnostic.filePath}`);
+      }
+      if (resolvedDiagnostic.line) {
+        const colStr = resolvedDiagnostic.column ? `:${resolvedDiagnostic.column}` : '';
+        debugLines.push(`Line:\n${resolvedDiagnostic.line}${colStr}`);
+      }
+      const errSummary = resolvedDiagnostic.summary || resolvedDiagnostic.error || resolvedDiagnostic.message || resolvedDiagnostic.friendlyExplanation;
+      if (errSummary) {
+        debugLines.push(`Error:\n${secretFilter.sanitizeString(errSummary)}`);
+      }
+      const rawTrace = resolvedDiagnostic.stackTrace || resolvedDiagnostic.traceback || resolvedDiagnostic.stderr;
+      if (rawTrace && typeof rawTrace === 'string' && rawTrace.trim().length > 0) {
+        let boundedTrace = secretFilter.sanitizeString(rawTrace.trim());
+        if (boundedTrace.length > 2000) {
+          boundedTrace = boundedTrace.slice(0, 2000) + '\n... [TRUNCATED]';
+          truncatedSections.push('diagnosticTrace');
+        }
+        debugLines.push(`Trace:\n\`\`\`\n${boundedTrace}\n\`\`\``);
+      }
+      debuggingContextText = debugLines.join('\n\n');
+    }
+    sections.debuggingTokens = this.estimateTokens(debuggingContextText);
+
+    // 2e. Active Debug Session Context (Milestone 34)
+    let debugSessionText = '';
+    const resolvedDebugSession = params.activeDebugSession || params.debugSession || options.activeDebugSession || options.debugSession || turn?.metadata?.activeDebugSession || null;
+    if (resolvedDebugSession && typeof resolvedDebugSession === 'object') {
+      const dLines = ['## ACTIVE DEBUG SESSION'];
+      if (resolvedDebugSession.runtime) {
+        dLines.push(`- Runtime: ${resolvedDebugSession.runtime}`);
+      }
+      if (resolvedDebugSession.status) {
+        dLines.push(`- Status: ${resolvedDebugSession.status}`);
+      }
+      if (resolvedDebugSession.currentFile) {
+        dLines.push(`- Current File: ${resolvedDebugSession.currentFile}`);
+      }
+      if (resolvedDebugSession.currentLine !== null && resolvedDebugSession.currentLine !== undefined) {
+        dLines.push(`- Current Line: ${resolvedDebugSession.currentLine}`);
+      }
+      if (Array.isArray(resolvedDebugSession.callStack) && resolvedDebugSession.callStack.length > 0) {
+        dLines.push('- Call Stack:');
+        for (const frame of resolvedDebugSession.callStack.slice(0, 5)) {
+          const loc = frame.file ? `${frame.file}:${frame.line || 1}` : `line ${frame.line || 1}`;
+          dLines.push(`  - #${frame.order || 0} ${frame.name || '<anonymous>'} (${loc})`);
+        }
+      }
+      if (resolvedDebugSession.variables && typeof resolvedDebugSession.variables === 'object') {
+        const varEntries = Object.entries(resolvedDebugSession.variables).slice(0, 10);
+        if (varEntries.length > 0) {
+          dLines.push('- Variables:');
+          for (const [k, v] of varEntries) {
+            const valStr = typeof v === 'object' && v !== null ? (v.value || JSON.stringify(v)) : String(v);
+            const safeVal = secretFilter.sanitizeString(String(valStr));
+            dLines.push(`  - ${k}: ${safeVal.slice(0, 100)}`);
+          }
+        }
+      }
+      if (resolvedDebugSession.exception) {
+        const exMsg = typeof resolvedDebugSession.exception === 'string'
+          ? resolvedDebugSession.exception
+          : resolvedDebugSession.exception.message || 'Exception occurred';
+        dLines.push(`- Exception: ${secretFilter.sanitizeString(exMsg)}`);
+      }
+      debugSessionText = dLines.join('\n');
+    }
+    sections.debugSessionTokens = this.estimateTokens(debugSessionText);
+
     // 3. Workspace & Code State Context
+    const activeGroup = params.activeGroupId || options.activeGroupId || null;
+    const activeSymbol = params.activeSymbolName || params.symbolName || options.activeSymbolName || null;
+    const rawBreadcrumbs = params.breadcrumbs || options.breadcrumbs || null;
+    let breadcrumbStr = null;
+    if (rawBreadcrumbs) {
+      breadcrumbStr = Array.isArray(rawBreadcrumbs)
+        ? rawBreadcrumbs.map((b) => (typeof b === 'string' ? b : b.label || b.name)).filter(Boolean).join(' > ')
+        : String(rawBreadcrumbs);
+    }
+
     const workspaceLines = [
       `Workspace Root: "${workspacePath || process.cwd()}"`,
       activeFilePath ? `Active Editor File: "${activeFilePath}"` : null,
+      activeGroup ? `Active Editor Group: "${activeGroup}"` : null,
+      activeSymbol ? `Enclosing Symbol: "${activeSymbol}"` : null,
+      breadcrumbStr ? `Breadcrumbs: ${breadcrumbStr}` : null,
+      cursorLine ? `Cursor Position: Line ${cursorLine}${cursorColumn ? ', Col ' + cursorColumn : ''}` : null,
+      selectionText ? `Active Selection:\n\`\`\`\n${selectionText.slice(0, 300)}\n\`\`\`` : null,
       `Operational Intent: ${intent}`,
     ].filter(Boolean);
 
@@ -566,6 +722,62 @@ class ContextEngine {
       verificationText = vLines.join('\n');
     }
     sections.verificationTokens = this.estimateTokens(verificationText);
+
+    // 5b. Active Problems Context (Milestone 31)
+    let problemsText = '';
+    const resolvedProblems = Array.isArray(params.activeProblems || params.problems || options.activeProblems || options.problems)
+      ? (params.activeProblems || params.problems || options.activeProblems || options.problems)
+      : [];
+
+    if (resolvedProblems.length > 0) {
+      const relevant = activeFilePath
+        ? resolvedProblems.filter((p) => p.filePath === activeFilePath || p.filePath?.endsWith(activeFilePath) || activeFilePath.endsWith(p.filePath))
+        : resolvedProblems;
+      const candidates = relevant.length > 0 ? relevant : resolvedProblems;
+      const topProblems = candidates.slice(0, 5);
+
+      const pLines = ['## ACTIVE PROBLEMS'];
+      for (const p of topProblems) {
+        const sev = (p.severity || 'error').toUpperCase();
+        const src = p.source ? ` (${p.source}${p.code ? ' ' + p.code : ''})` : '';
+        const loc = p.filePath ? `${p.filePath}${p.line ? ':' + p.line : ''}` : 'workspace';
+        pLines.push(`- [${sev}]${src} ${loc}: ${secretFilter.sanitizeString(p.message || 'Error')}`);
+      }
+      problemsText = pLines.join('\n');
+      if (problemsText.length > 600) {
+        problemsText = problemsText.slice(0, 550) + '\n... [TRUNCATED]';
+        truncatedSections.push('problems');
+      }
+    }
+    sections.problemsTokens = this.estimateTokens(problemsText);
+
+    // 5c. Active Git Hunk Context (Milestone 33)
+    let gitHunkText = '';
+    const resolvedHunk = params.activeGitHunk || options.activeGitHunk || turn?.metadata?.activeGitHunk || null;
+    if (resolvedHunk && typeof resolvedHunk === 'object') {
+      const hunkLines = ['## ACTIVE GIT HUNK'];
+      if (resolvedHunk.filePath) {
+        hunkLines.push(`- File: ${resolvedHunk.filePath}`);
+      }
+      if (resolvedHunk.hunkId || (resolvedHunk.startLine !== undefined && resolvedHunk.endLine !== undefined)) {
+        const idPart = resolvedHunk.hunkId ? `${resolvedHunk.hunkId} ` : '';
+        const rangePart = resolvedHunk.startLine !== undefined ? `(Lines ${resolvedHunk.startLine}–${resolvedHunk.endLine})` : '';
+        hunkLines.push(`- Hunk: ${idPart}${rangePart}`.trim());
+      }
+      if (resolvedHunk.changeType) {
+        hunkLines.push(`- Change Type: ${resolvedHunk.changeType}`);
+      }
+      if (Array.isArray(resolvedHunk.oldLines) && resolvedHunk.oldLines.length > 0) {
+        const oldContent = secretFilter.sanitizeString(resolvedHunk.oldLines.slice(0, 20).join('\n'));
+        hunkLines.push(`- Original (HEAD):\n\`\`\`\n${oldContent}\n\`\`\``);
+      }
+      if (Array.isArray(resolvedHunk.newLines) && resolvedHunk.newLines.length > 0) {
+        const newContent = secretFilter.sanitizeString(resolvedHunk.newLines.slice(0, 20).join('\n'));
+        hunkLines.push(`- Current:\n\`\`\`\n${newContent}\n\`\`\``);
+      }
+      gitHunkText = hunkLines.join('\n');
+    }
+    sections.gitHunkTokens = this.estimateTokens(gitHunkText);
 
     // 6. Active Skills & Engineering Guidance (Milestone 12)
     let skillsText = '';
@@ -629,6 +841,12 @@ class ContextEngine {
       skillsText ? `\n--- ACTIVE SKILLS ---\n${skillsText}` : null,
       capabilitiesText ? `\n--- PERMITTED CAPABILITIES ---\n${capabilitiesText}` : null,
       handoffText ? `\n--- ACTIVE TASK HANDOFF ---\n${handoffText}` : null,
+      editorContextText ? `\n--- ACTIVE EDITOR CONTEXT ---\n${editorContextText}` : null,
+      gitContextText ? `\n--- CURRENT GIT CONTEXT ---\n${gitContextText}` : null,
+      gitHunkText ? `\n--- ACTIVE GIT HUNK ---\n${gitHunkText}` : null,
+      debuggingContextText ? `\n--- CURRENT DEBUGGING CONTEXT ---\n${debuggingContextText}` : null,
+      debugSessionText ? `\n--- ACTIVE DEBUG SESSION ---\n${debugSessionText}` : null,
+      problemsText ? `\n--- ACTIVE PROBLEMS ---\n${problemsText}` : null,
       continuumText ? `\n--- CONTINUUM REPOSITORY CONTEXT ---\n${continuumText}` : null,
       workspaceText ? `\n--- WORKSPACE & TARGET STATE ---\n${workspaceText}` : null,
       decisionsText ? `\n--- ENGINEERING DECISIONS ---\n${decisionsText}` : null,

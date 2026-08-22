@@ -37,10 +37,14 @@ const { ChangeConflict, ChangeConflictResolver, perform3WayLineMerge } = require
 const { ASTDiffEngine, astDiffEngine, SUPPORTED_LANGUAGES, NODE_CHANGE_TYPES } = require('./ASTDiffEngine');
 const { RepositorySymbolIndex, repositorySymbolIndex, IGNORED_DIRECTORIES, SUPPORTED_EXTENSIONS } = require('./RepositorySymbolIndex');
 const { ImpactAnalyzer, impactAnalyzer } = require('./ImpactAnalyzer');
+const { LanguageIntelligence, languageIntelligence } = require('./LanguageIntelligence');
 const { RefactorPlan, MAX_REPAIR_CYCLES } = require('./RefactorPlan');
 
 module.exports = {
   ...types,
+
+  LanguageIntelligence,
+  languageIntelligence,
 
   harnessEventBus,
   HarnessEventBus,
@@ -102,6 +106,8 @@ module.exports = {
   requestRouter,
   ROUTER_MODES,
   CODING_INTENTS,
+  DiagnosticParser: require('../debugging/DiagnosticParser').DiagnosticParser,
+  diagnosticParser: require('../debugging/DiagnosticParser').diagnosticParser,
 };
 
 

@@ -50,25 +50,11 @@ export default function CodexSidebar({
       name: currentProjectName || "NEXUS",
       isCurrent: true,
       threads: recentSessions.map((s) => ({
-        id: s.id || s.snapshotId || s.sessionId,
-        title: s.user_intent_summary || s.userGoal || "AI Agent Session",
-        timestamp: s.timestamp,
-        sequenceNumber: s.sequence_number,
+        id: s.id || s.snapshotId || s.sessionId || `thread_${Date.now()}`,
+        title: s.user_intent_summary || s.userGoal || s.goal || "AI Agent Session",
+        timestamp: s.timestamp || (s.created_at ? new Date(s.created_at).getTime() : undefined),
+        sequenceNumber: s.sequence_number || s.sequenceNumber,
       })),
-    },
-    {
-      name: "Spectra",
-      isCurrent: false,
-      threads: [
-        { id: "spectra_1", title: "Spectral Decomposition Analysis" },
-      ],
-    },
-    {
-      name: "Cognitive Performance",
-      isCurrent: false,
-      threads: [
-        { id: "cog_1", title: "Tomography Execution Telemetry" },
-      ],
     },
   ];
 

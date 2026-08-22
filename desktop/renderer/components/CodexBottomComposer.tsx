@@ -241,28 +241,31 @@ export default function CodexBottomComposer({
                     className="absolute left-0 bottom-9 w-64 border rounded-xl shadow-2xl z-50 p-1.5 space-y-1 text-xs max-h-56 overflow-y-auto"
                   >
                     {[
-                      { id: "gemini", name: "Gemini", defaultModel: "gemini-1.5-flash" },
-                      { id: "groq", name: "Groq", defaultModel: "llama-3.3-70b-versatile" },
-                      { id: "openai", name: "OpenAI", defaultModel: "gpt-4o" },
-                      { id: "claude", name: "Claude", defaultModel: "claude-3-5-sonnet-20241022" },
-                      { id: "deepseek", name: "DeepSeek", defaultModel: "deepseek-coder" },
-                      { id: "grok", name: "Grok", defaultModel: "grok-2-latest" },
-                    ].map((p) => {
-                      const isSel = activeProvider === p.id;
+                      { id: "groq", name: "Groq", modelId: "openai/gpt-oss-120b", label: "Groq (OpenAI GPT-OSS 120B - Active)" },
+                      { id: "groq", name: "Groq", modelId: "openai/gpt-oss-20b", label: "Groq (OpenAI GPT-OSS 20B)" },
+                      { id: "groq", name: "Groq", modelId: "groq/compound", label: "Groq (Compound)" },
+                      { id: "groq", name: "Groq", modelId: "groq/compound-mini", label: "Groq (Compound Mini)" },
+                      { id: "groq", name: "Groq", modelId: "qwen/qwen3.6-27b", label: "Groq (Qwen 3.6 27B)" },
+                      { id: "gemini", name: "Gemini", modelId: "gemini-1.5-flash", label: "Gemini (1.5 Flash)" },
+                      { id: "openai", name: "OpenAI", modelId: "gpt-4o", label: "OpenAI (GPT-4o)" },
+                      { id: "claude", name: "Claude", modelId: "claude-3-5-sonnet-20241022", label: "Claude (3.5 Sonnet)" },
+                      { id: "deepseek", name: "DeepSeek", modelId: "deepseek-coder", label: "DeepSeek (Coder)" },
+                      { id: "grok", name: "Grok", modelId: "grok-2-latest", label: "Grok (2 Latest)" },
+                    ].map((p, idx) => {
+                      const isSel = activeProvider === p.id && activeModel === p.modelId;
                       return (
                         <button
-                          key={p.id}
+                          key={`${p.id}-${p.modelId}-${idx}`}
                           type="button"
                           onClick={() => {
-                            onSelectModel(p.id, p.defaultModel);
+                            onSelectModel(p.id, p.modelId);
                             setShowModelDropdown(false);
                           }}
                           className={`w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between hover:bg-white/5 cursor-pointer text-xs ${
                             isSel ? "text-cyan-300 font-bold bg-cyan-950/40" : "text-zinc-400"
                           }`}
                         >
-                          <span className="truncate">{isSel ? `✓ ${p.name}` : p.name}</span>
-                          <span className="text-[9px] text-zinc-500 capitalize">{p.defaultModel.split('-')[0]}</span>
+                          <span className="truncate">{isSel ? `✓ ${p.label}` : p.label}</span>
                         </button>
                       );
                     })}

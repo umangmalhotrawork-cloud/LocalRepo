@@ -234,18 +234,41 @@ class PtyManager {
         env,
       });
 
+      const sessionName = options.name || `Terminal ${this.terminals.size + 1}`;
       const termInfo = {
         id,
+        name: sessionName,
+        customName: options.name || null,
         pid: ptyProcess.pid,
         shell,
         cwd,
+        cols,
+        rows,
         ptyProcess,
         status: 'running',
+        exitCode: null,
+        createdAt: Date.now(),
+        lastActive: Date.now(),
+        buffer: [],
       };
 
       this.terminals.set(id, termInfo);
 
       ptyProcess.onData((data) => {
+        termInfo.lastActive = Date.now();
+        
+        // Append into in-memory ring buffer (up to 2000 lines)
+        const lines = data.split('\n');
+        if (termInfo.buffer.length > 0 && !data.startsWith('\n') && !data.startsWith('\r')) {
+          termInfo.buffer[termInfo.buffer.length - 1] += lines[0];
+          termInfo.buffer.push(...lines.slice(1));
+        } else {
+          termInfo.buffer.push(...lines);
+        }
+        if (termInfo.buffer.length > 2000) {
+          termInfo.buffer.splice(0, termInfo.buffer.length - 2000);
+        }
+
         if (webContents && !webContents.isDestroyed()) {
           webContents.send('terminal:data', { id, data });
         }
@@ -253,17 +276,27 @@ class PtyManager {
 
       ptyProcess.onExit(({ exitCode, signal }) => {
         termInfo.status = exitCode === 0 ? 'exited' : 'error';
+        termInfo.exitCode = exitCode !== undefined ? exitCode : null;
+        termInfo.lastActive = Date.now();
+        termInfo.buffer.push(`\n[Process exited with code ${exitCode}]`);
+        if (termInfo.buffer.length > 2000) {
+          termInfo.buffer.splice(0, termInfo.buffer.length - 2000);
+        }
+
         if (webContents && !webContents.isDestroyed()) {
           webContents.send('terminal:exit', { id, exitCode, signal });
+          webContents.send('terminal:status', { id, status: termInfo.status, exitCode });
         }
       });
 
       return {
         id,
+        name: sessionName,
         pid: ptyProcess.pid,
         shell,
         cwd,
         status: 'running',
+        createdAt: termInfo.createdAt,
       };
     } catch (err) {
       logger.error('TERMINAL', `Failed to spawn PTY terminal session (${shell}): ${err.message}`, {
@@ -291,6 +324,7 @@ class PtyManager {
   write(id, data) {
     const term = this.terminals.get(id);
     if (term && term.ptyProcess) {
+      term.lastActive = Date.now();
       term.ptyProcess.write(data);
     }
   }
@@ -299,9 +333,38 @@ class PtyManager {
     const term = this.terminals.get(id);
     if (term && term.ptyProcess) {
       try {
+        term.cols = cols;
+        term.rows = rows;
         term.ptyProcess.resize(cols, rows);
       } catch (e) {}
     }
+  }
+
+  rename(id, name) {
+    const term = this.terminals.get(id);
+    if (term) {
+      term.name = name;
+      term.customName = name;
+      return { success: true, id, name };
+    }
+    return { success: false, error: `Terminal ${id} not found` };
+  }
+
+  getBuffer(id) {
+    const term = this.terminals.get(id);
+    if (term) {
+      return { success: true, id, buffer: [...term.buffer] };
+    }
+    return { success: false, error: `Terminal ${id} not found`, buffer: [] };
+  }
+
+  clear(id) {
+    const term = this.terminals.get(id);
+    if (term) {
+      term.buffer = [];
+      return { success: true, id };
+    }
+    return { success: false, error: `Terminal ${id} not found` };
   }
 
   kill(id) {
@@ -319,8 +382,9 @@ class PtyManager {
     if (term) {
       const cwd = term.cwd;
       const shell = term.shell;
+      const name = term.name;
       this.kill(id);
-      return this.createTerminal({ cwd, shell }, webContents);
+      return this.createTerminal({ cwd, shell, name }, webContents);
     }
     return this.createTerminal({}, webContents);
   }
@@ -330,10 +394,17 @@ class PtyManager {
     for (const [id, term] of this.terminals.entries()) {
       list.push({
         id,
+        name: term.name || id,
+        customName: term.customName || null,
         pid: term.pid,
         shell: term.shell,
         cwd: term.cwd,
         status: term.status,
+        exitCode: term.exitCode,
+        createdAt: term.createdAt,
+        lastActive: term.lastActive,
+        cols: term.cols,
+        rows: term.rows,
       });
     }
     return list;

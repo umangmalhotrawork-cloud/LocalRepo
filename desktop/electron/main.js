@@ -1,8 +1,25 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require('electron');
+const { pathToFileURL } = require('url');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { execFile, spawn: execSpawn } = require('child_process');
+
+if (protocol && protocol.registerSchemesAsPrivileged) {
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: 'app',
+      privileges: {
+        standard: true,
+        secure: true,
+        allowServiceWorkers: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+        stream: true,
+      },
+    },
+  ]);
+}
 const { loadEnvConfig, isGitHubClientIdConfigured } = require('./envLoader');
 
 // Keep this before any OAuth-dependent require. githubAuthManager reads the
@@ -38,6 +55,9 @@ const { testRunnerDetector } = require('./testing/TestRunnerDetector');
 const { testExecutor } = require('./testing/TestExecutor');
 const { transactionalPatchApplier } = require('./transactionalPatchApplier');
 const { autonomousRepairEngine } = require('./autonomousRepairEngine');
+const { diagnosticParser } = require('./debugging/DiagnosticParser');
+const debugManager = require('./debugManager');
+const { settingsManager } = require('./settingsManager');
 const { evidenceGraph } = require('./evidence/EvidenceGraph');
 const behavioralDiffEngine = require('../engine/behavioral_diff_engine');
 const aiSystemReasoningEngine = require('../engine/ai_system_reasoning_engine');
@@ -238,24 +258,10 @@ function createWindow() {
         }
       });
   } else {
-    const candidatePaths = [
-      path.join(app.getAppPath(), 'out', 'desktop.html'),
-      path.join(__dirname, '..', '..', 'out', 'desktop.html'),
-      path.join(app.getAppPath(), 'out', 'index.html'),
-      path.join(__dirname, '..', '..', 'out', 'index.html'),
-      path.join(app.getAppPath(), 'desktop.html'),
-    ];
-
-    const finalPath = candidatePaths.find((p) => fs.existsSync(p));
-
-    if (finalPath) {
-      console.log(`[ELECTRON] Loading production build asset: ${finalPath}`);
-      mainWindow.loadFile(finalPath).catch((err) => {
-        console.error('[ELECTRON] Failed to load production file:', err.message);
-      });
-    } else {
-      console.error('[ELECTRON] Production build file not found in candidates:', candidatePaths);
-    }
+    console.log('[ELECTRON] Loading production build asset via app protocol: app://nexus/desktop.html');
+    mainWindow.loadURL('app://nexus/desktop.html').catch((err) => {
+      console.error('[ELECTRON] Failed to load app protocol URL:', err.message);
+    });
   }
 
   mainWindow.webContents.openDevTools({ mode: 'detach' });
@@ -801,6 +807,47 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (protocol && protocol.handle) {
+    protocol.handle('app', (request) => {
+      try {
+        const url = new URL(request.url);
+        let relativePath = decodeURIComponent(url.pathname);
+        if (relativePath.startsWith('/')) {
+          relativePath = relativePath.slice(1);
+        }
+
+        if (!relativePath || relativePath === 'desktop' || relativePath === '') {
+          relativePath = 'desktop.html';
+        }
+
+        const outCandidates = [
+          path.join(app.getAppPath(), 'out'),
+          path.join(__dirname, '..', '..', 'out'),
+          path.join(app.getAppPath()),
+        ];
+
+        let filePath = null;
+        for (const candidate of outCandidates) {
+          const testPath = path.join(candidate, relativePath);
+          if (fs.existsSync(testPath)) {
+            filePath = testPath;
+            break;
+          }
+        }
+
+        if (!filePath) {
+          console.error('[PROTOCOL:APP] File not found for request:', request.url, '-> relativePath:', relativePath);
+          return new Response('Not Found', { status: 404 });
+        }
+
+        return net.fetch(pathToFileURL(filePath).toString());
+      } catch (err) {
+        console.error('[PROTOCOL:APP] Error handling request:', request.url, err);
+        return new Response('Internal Server Error', { status: 500 });
+      }
+    });
+  }
+
   createWindow();
 
   app.on('activate', () => {
@@ -869,6 +916,69 @@ ipcMain.handle('dialog:open-capsule-file', async () => {
   return result.filePaths[0];
 });
 
+let activeWorkspaceWatcher = null;
+let watcherDebounceTimer = null;
+
+function setupWorkspaceWatcher(workspacePath) {
+  if (activeWorkspaceWatcher) {
+    try {
+      activeWorkspaceWatcher.close();
+    } catch (e) {}
+    activeWorkspaceWatcher = null;
+  }
+  if (!workspacePath || typeof workspacePath !== 'string' || !fs.existsSync(workspacePath)) {
+    return;
+  }
+
+  try {
+    const isMacOrWin = process.platform === 'darwin' || process.platform === 'win32';
+    activeWorkspaceWatcher = fs.watch(workspacePath, { recursive: isMacOrWin }, (eventType, filename) => {
+      if (!filename) return;
+      const fn = String(filename);
+      if (
+        fn.includes('.git') ||
+        fn.includes('node_modules') ||
+        fn.includes('.next') ||
+        fn.includes('dist') ||
+        fn.includes('out') ||
+        fn.includes('__pycache__') ||
+        fn.endsWith('.DS_Store') ||
+        fn.endsWith('~') ||
+        fn.startsWith('.nexus-recovery')
+      ) {
+        return;
+      }
+
+      if (watcherDebounceTimer) {
+        clearTimeout(watcherDebounceTimer);
+      }
+      watcherDebounceTimer = setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          try {
+            mainWindow.webContents.send('fs:changed', {
+              eventType,
+              filename: fn,
+              workspacePath,
+              timestamp: Date.now(),
+            });
+          } catch (e) {}
+        }
+      }, 250);
+    });
+
+    activeWorkspaceWatcher.on('error', (err) => {
+      logger.warn('WATCHER', `Filesystem watcher error: ${err.message}`);
+    });
+  } catch (e) {
+    logger.warn('WATCHER', `Failed to initialize fs.watch on ${workspacePath}: ${e.message}`);
+  }
+}
+
+ipcMain.handle('fs:watch-workspace', async (_, workspacePath) => {
+  setupWorkspaceWatcher(workspacePath);
+  return { success: true };
+});
+
 ipcMain.handle('fs:read-file', async (_, filePath) => {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
@@ -882,6 +992,144 @@ ipcMain.handle('fs:write-file', async (_, filePath, content) => {
   try {
     fs.writeFileSync(filePath, content, 'utf-8');
     return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('fs:create-file', async (_, payload) => {
+  try {
+    const { filePath, content = '', workspacePath, overwrite = false } = typeof payload === 'string' ? { filePath: payload } : (payload || {});
+    if (!filePath || typeof filePath !== 'string') {
+      return { success: false, error: 'filePath must be a non-empty string' };
+    }
+    const resolvedPath = path.resolve(filePath);
+    if (workspacePath) {
+      const resolvedWorkspace = path.resolve(workspacePath);
+      const rel = path.relative(resolvedWorkspace, resolvedPath);
+      if (rel.startsWith('..') || (path.isAbsolute(rel) && !resolvedPath.startsWith(resolvedWorkspace))) {
+        return { success: false, error: 'Path traversal out of workspace boundary is prohibited' };
+      }
+    }
+    if (fs.existsSync(resolvedPath) && !overwrite) {
+      return { success: false, error: `File already exists: ${resolvedPath}` };
+    }
+    const parentDir = path.dirname(resolvedPath);
+    if (!fs.existsSync(parentDir)) {
+      fs.mkdirSync(parentDir, { recursive: true });
+    }
+    fs.writeFileSync(resolvedPath, content, 'utf-8');
+    const tree = workspacePath ? buildFileTree(workspacePath) : null;
+    return { success: true, filePath: resolvedPath, tree };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('fs:create-dir', async (_, payload) => {
+  try {
+    const { dirPath, workspacePath } = typeof payload === 'string' ? { dirPath: payload } : (payload || {});
+    if (!dirPath || typeof dirPath !== 'string') {
+      return { success: false, error: 'dirPath must be a non-empty string' };
+    }
+    const resolvedPath = path.resolve(dirPath);
+    if (workspacePath) {
+      const resolvedWorkspace = path.resolve(workspacePath);
+      const rel = path.relative(resolvedWorkspace, resolvedPath);
+      if (rel.startsWith('..') || (path.isAbsolute(rel) && !resolvedPath.startsWith(resolvedWorkspace))) {
+        return { success: false, error: 'Path traversal out of workspace boundary is prohibited' };
+      }
+    }
+    if (!fs.existsSync(resolvedPath)) {
+      fs.mkdirSync(resolvedPath, { recursive: true });
+    }
+    const tree = workspacePath ? buildFileTree(workspacePath) : null;
+    return { success: true, dirPath: resolvedPath, tree };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('fs:delete-file', async (_, payload) => {
+  try {
+    const { targetPath, workspacePath, recursive = false } = typeof payload === 'string' ? { targetPath: payload } : (payload || {});
+    if (!targetPath || typeof targetPath !== 'string') {
+      return { success: false, error: 'targetPath must be a non-empty string' };
+    }
+    const resolvedPath = path.resolve(targetPath);
+    if (workspacePath) {
+      const resolvedWorkspace = path.resolve(workspacePath);
+      if (resolvedPath === resolvedWorkspace) {
+        return { success: false, error: 'Cannot delete the workspace root directory' };
+      }
+      const rel = path.relative(resolvedWorkspace, resolvedPath);
+      if (rel.startsWith('..') || (path.isAbsolute(rel) && !resolvedPath.startsWith(resolvedWorkspace))) {
+        return { success: false, error: 'Path traversal out of workspace boundary is prohibited' };
+      }
+    }
+    if (!fs.existsSync(resolvedPath)) {
+      return { success: false, error: `Path does not exist: ${resolvedPath}` };
+    }
+    const stat = fs.statSync(resolvedPath);
+    if (stat.isDirectory()) {
+      fs.rmSync(resolvedPath, { recursive: true, force: true });
+    } else {
+      fs.unlinkSync(resolvedPath);
+    }
+    const tree = workspacePath ? buildFileTree(workspacePath) : null;
+    return { success: true, targetPath: resolvedPath, tree };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('fs:rename-file', async (_, payload) => {
+  try {
+    const { oldPath, newPath, workspacePath, overwrite = false } = payload || {};
+    if (!oldPath || !newPath || typeof oldPath !== 'string' || typeof newPath !== 'string') {
+      return { success: false, error: 'oldPath and newPath must be non-empty strings' };
+    }
+    const resolvedOld = path.resolve(oldPath);
+    const resolvedNew = path.resolve(newPath);
+    if (workspacePath) {
+      const resolvedWorkspace = path.resolve(workspacePath);
+      if (resolvedOld === resolvedWorkspace) {
+        return { success: false, error: 'Cannot rename the workspace root directory' };
+      }
+      const relOld = path.relative(resolvedWorkspace, resolvedOld);
+      const relNew = path.relative(resolvedWorkspace, resolvedNew);
+      if (relOld.startsWith('..') || relNew.startsWith('..')) {
+        return { success: false, error: 'Path traversal out of workspace boundary is prohibited' };
+      }
+    }
+    if (!fs.existsSync(resolvedOld)) {
+      return { success: false, error: `Source path does not exist: ${resolvedOld}` };
+    }
+    if (fs.existsSync(resolvedNew) && !overwrite && resolvedOld !== resolvedNew) {
+      return { success: false, error: `Destination path already exists: ${resolvedNew}` };
+    }
+    const parentDir = path.dirname(resolvedNew);
+    if (!fs.existsSync(parentDir)) {
+      fs.mkdirSync(parentDir, { recursive: true });
+    }
+    fs.renameSync(resolvedOld, resolvedNew);
+    const tree = workspacePath ? buildFileTree(workspacePath) : null;
+    return { success: true, oldPath: resolvedOld, newPath: resolvedNew, tree };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('fs:reveal-in-finder', async (_, targetPath) => {
+  try {
+    if (targetPath && typeof targetPath === 'string') {
+      const resolved = path.resolve(targetPath);
+      if (fs.existsSync(resolved)) {
+        shell.showItemInFolder(resolved);
+        return { success: true };
+      }
+    }
+    return { success: false, error: 'Path does not exist' };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -902,6 +1150,15 @@ ipcMain.handle('fs:read-dir', async (_, dirPath) => {
     return { success: true, tree };
   } catch (e) {
     return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('diagnostics:parse', async (_, payload) => {
+  try {
+    const diagnostic = diagnosticParser.parse(payload);
+    return { success: true, diagnostic };
+  } catch (e) {
+    return { success: false, error: e.message, diagnostic: null };
   }
 });
 
@@ -1894,6 +2151,18 @@ ipcMain.handle('terminal:list', async () => {
   return ptyManager.list();
 });
 
+ipcMain.handle('terminal:rename', async (_, { id, name }) => {
+  return ptyManager.rename(id, name);
+});
+
+ipcMain.handle('terminal:getBuffer', async (_, id) => {
+  return ptyManager.getBuffer(id);
+});
+
+ipcMain.handle('terminal:clear', async (_, id) => {
+  return ptyManager.clear(id);
+});
+
 // Python Direct File Execution IPC Handler
 console.log('[PYTHON] IPC handler registered');
 ipcMain.handle('python:run-file', async (event, filePath) => {
@@ -2039,12 +2308,40 @@ ipcMain.handle('git:branches', async (_, workspacePath) => {
   return gitManager.getBranches(workspacePath);
 });
 
-ipcMain.handle('git:checkout', async (_, { workspacePath, branch }) => {
-  return gitManager.checkout(workspacePath, branch);
+ipcMain.handle('git:checkout', async (_, { workspacePath, branch, force, options }) => {
+  return gitManager.checkout(workspacePath, branch, options || { force });
 });
 
-ipcMain.handle('git:createBranch', async (_, { workspacePath, branch }) => {
-  return gitManager.createBranch(workspacePath, branch);
+ipcMain.handle('git:createBranch', async (_, { workspacePath, branch, checkout }) => {
+  return gitManager.createBranch(workspacePath, branch, checkout !== false);
+});
+
+ipcMain.handle('git:validateBranchName', async (_, { name }) => {
+  return gitManager.validateBranchName(name);
+});
+
+ipcMain.handle('git:stashes', async (_, workspacePath) => {
+  return gitManager.getStashes(workspacePath);
+});
+
+ipcMain.handle('git:stashSave', async (_, { workspacePath, message, includeUntracked, options }) => {
+  return gitManager.stashSave(workspacePath, options || { message, includeUntracked });
+});
+
+ipcMain.handle('git:stashApply', async (_, { workspacePath, stashId }) => {
+  return gitManager.stashApply(workspacePath, stashId);
+});
+
+ipcMain.handle('git:stashPop', async (_, { workspacePath, stashId }) => {
+  return gitManager.stashPop(workspacePath, stashId);
+});
+
+ipcMain.handle('git:stashDrop', async (_, { workspacePath, stashId }) => {
+  return gitManager.stashDrop(workspacePath, stashId);
+});
+
+ipcMain.handle('git:stashClear', async (_, workspacePath) => {
+  return gitManager.stashClear(workspacePath);
 });
 
 ipcMain.handle('git:discard', async (_, { workspacePath, file }) => {
@@ -2061,6 +2358,32 @@ ipcMain.handle('git:commitAndPush', async (_, { workspacePath, message }) => {
 
 ipcMain.handle('git:suggestCommitMessage', async (_, workspacePath) => {
   return gitManager.suggestCommitMessage(workspacePath);
+});
+
+// Milestone 28: Git Visual History & Inspection IPC Handlers
+ipcMain.handle('git:history', async (_, { workspacePath, options }) => {
+  return gitManager.getCommitHistory(workspacePath, options);
+});
+
+ipcMain.handle('git:commitDetails', async (_, { workspacePath, hash }) => {
+  return gitManager.getCommitDetails(workspacePath, hash);
+});
+
+ipcMain.handle('git:commitDiff', async (_, { workspacePath, hash, file, parentIndex }) => {
+  return gitManager.getCommitDiff(workspacePath, hash, file, parentIndex);
+});
+
+ipcMain.handle('git:fileHistory', async (_, { workspacePath, filePath, options }) => {
+  return gitManager.getFileHistory(workspacePath, filePath, options);
+});
+
+// Milestone 33: Git Gutter & Hunk Revert IPC Handlers
+ipcMain.handle('git:getFileHunks', async (_, { workspacePath, filePath }) => {
+  return gitManager.getFileHunks(workspacePath, filePath);
+});
+
+ipcMain.handle('git:revertHunk', async (_, { workspacePath, payload }) => {
+  return gitManager.revertHunk(workspacePath, payload);
 });
 
 // GitHub Authentication IPC Handlers
@@ -2097,6 +2420,18 @@ ipcMain.handle('search:run', async (_, payload) => {
   return searchManager.runSearch(payload);
 });
 
+ipcMain.handle('search:previewReplace', async (_, payload) => {
+  return searchManager.generateReplacementPreview(payload);
+});
+
+ipcMain.handle('search:generateChangeSet', async (_, payload) => {
+  return searchManager.generateChangeSetFromPreview(payload);
+});
+
+ipcMain.handle('search:applyReplace', async (_, payload) => {
+  return searchManager.applyReplacementChangeSet(payload);
+});
+
 ipcMain.handle('search:replace', async (_, payload) => {
   return searchManager.replaceSingle(payload);
 });
@@ -2131,8 +2466,20 @@ ipcMain.handle('ai:remove-api-key', async (_, providerId) => {
   return aiProviderRouter.removeApiKey(providerId);
 });
 
+ipcMain.handle('ai:has-api-key', async (_, providerId) => {
+  return aiProviderRouter.hasApiKey(providerId);
+});
+
 ipcMain.handle('ai:validate-key', async (_, { providerId, apiKey }) => {
   return aiProviderRouter.validateKey(providerId, apiKey);
+});
+
+ipcMain.handle('ai:get-diagnostics', async (_, providerId) => {
+  return aiProviderRouter.getProviderDiagnostics(providerId || 'groq');
+});
+
+ipcMain.handle('ai:discover-models', async (_, providerId) => {
+  return aiProviderRouter.getProviderDiagnostics(providerId || 'groq');
 });
 
 // Role-Based Multi-Model AI IPC Handlers
@@ -2688,6 +3035,15 @@ ipcMain.handle('harness:resolve-conflict-hunk', async (_, payload = {}) => {
   );
 });
 
+ipcMain.handle('harness:resolve-file-conflict', async (_, payload = {}) => {
+  return harnessRuntime.resolveChangeConflictFile(
+    payload.conflictId,
+    payload.resolution,
+    payload.customContent,
+    payload.context
+  );
+});
+
 ipcMain.handle('harness:create-parent-changeset-from-conflicts', async (_, payload = {}) => {
   const cs = harnessRuntime.createParentChangeSetFromConflicts(payload);
   return cs.toJSON();
@@ -2699,6 +3055,59 @@ ipcMain.handle('harness:apply-resolved-conflicts', async (_, payload = {}) => {
 
 ipcMain.handle('harness:cancel-conflict-resolution', async (_, payload = {}) => {
   return harnessRuntime.cancelConflictResolution(payload);
+});
+
+// Workspace Language Intelligence & Problems IPC Handlers (Milestone 31)
+ipcMain.handle('harness:get-definition', async (_, query = {}) => {
+  return harnessRuntime.getDefinition(query);
+});
+
+ipcMain.handle('harness:find-references', async (_, query = {}) => {
+  return harnessRuntime.findReferences(query);
+});
+
+ipcMain.handle('harness:get-hover', async (_, query = {}) => {
+  return harnessRuntime.getHover(query);
+});
+
+ipcMain.handle('harness:prepare-rename', async (_, query = {}) => {
+  return harnessRuntime.prepareRename(query);
+});
+
+ipcMain.handle('harness:apply-rename', async (_, options = {}) => {
+  return harnessRuntime.applyRename(options);
+});
+
+ipcMain.handle('harness:get-document-outline', async (_, query = {}) => {
+  return harnessRuntime.getDocumentOutline(query);
+});
+
+ipcMain.handle('harness:get-symbol-at-position', async (_, query = {}) => {
+  return harnessRuntime.getSymbolAtPosition(query);
+});
+
+ipcMain.handle('harness:get-breadcrumbs', async (_, query = {}) => {
+  return harnessRuntime.getBreadcrumbs(query);
+});
+
+ipcMain.handle('harness:parse-diagnostics', async (_, payload = {}) => {
+  return harnessRuntime.parseDiagnostics(payload.rawText, payload.options);
+});
+
+ipcMain.handle('harness:get-problems', async (_, filter = {}) => {
+  return harnessRuntime.getProblems(filter);
+});
+
+ipcMain.handle('harness:add-problems', async (_, payload = {}) => {
+  return harnessRuntime.addProblems(payload.problems, payload.source);
+});
+
+ipcMain.handle('harness:clear-problems', async (_, filter = {}) => {
+  return harnessRuntime.clearProblems(filter);
+});
+
+ipcMain.handle('harness:get-problems-summary', async () => {
+  return harnessRuntime.getProblemsSummary();
 });
 
 // Stream Harness Events directly to Electron Renderer
@@ -2729,6 +3138,108 @@ ipcMain.handle('test:run-all', async (_, payload) => {
 
 ipcMain.handle('test:coverage', async (_, payload) => {
   return testManager.getCoverage(payload);
+});
+
+ipcMain.handle('test:debug', async (_, payload) => {
+  return testManager.debugTest(payload.workspacePath, payload);
+});
+
+// Milestone 34: Unified Debugger Session IPC Handlers
+ipcMain.handle('debug:createSession', async (_, options) => {
+  return debugManager.createSession(options);
+});
+
+ipcMain.handle('debug:getSession', async (_, sessionId) => {
+  return debugManager.getSession(sessionId);
+});
+
+ipcMain.handle('debug:launch', async (_, payload) => {
+  return debugManager.launch(payload.sessionId, payload.launchConfig || payload);
+});
+
+ipcMain.handle('debug:pause', async (_, sessionId) => {
+  return debugManager.pause(sessionId);
+});
+
+ipcMain.handle('debug:continue', async (_, sessionId) => {
+  return debugManager.continue(sessionId);
+});
+
+ipcMain.handle('debug:stepOver', async (_, sessionId) => {
+  return debugManager.stepOver(sessionId);
+});
+
+ipcMain.handle('debug:stepInto', async (_, sessionId) => {
+  return debugManager.stepInto(sessionId);
+});
+
+ipcMain.handle('debug:stepOut', async (_, sessionId) => {
+  return debugManager.stepOut(sessionId);
+});
+
+ipcMain.handle('debug:stop', async (_, sessionId) => {
+  return debugManager.stop(sessionId);
+});
+
+ipcMain.handle('debug:setBreakpoints', async (_, payload) => {
+  return debugManager.setBreakpoints(payload.workspacePath, payload.filePath, payload.breakpoints);
+});
+
+ipcMain.handle('debug:getBreakpoints', async (_, payload) => {
+  return debugManager.getBreakpoints(payload.workspacePath, payload.filePath);
+});
+
+ipcMain.handle('debug:addWatchExpression', async (_, payload) => {
+  return debugManager.addWatchExpression(payload.sessionId, payload.expression);
+});
+
+ipcMain.handle('debug:removeWatchExpression', async (_, payload) => {
+  return debugManager.removeWatchExpression(payload.sessionId, payload.watchId);
+});
+
+ipcMain.handle('debug:evaluate', async (_, payload) => {
+  return debugManager.evaluate(payload.sessionId, payload.expression);
+});
+
+ipcMain.handle('debug:debugTest', async (_, payload) => {
+  return debugManager.debugTest(payload.workspacePath, payload);
+});
+
+// Milestone 35: Settings & Keybindings IPC Handlers
+ipcMain.handle('settings:get', async (_, workspacePath) => {
+  return settingsManager.getSettings(workspacePath);
+});
+
+ipcMain.handle('settings:update', async (_, payload) => {
+  return settingsManager.updateSetting(payload.workspacePath, payload.key, payload.value, payload.scope);
+});
+
+ipcMain.handle('settings:reset', async (_, payload) => {
+  return settingsManager.resetSetting(payload.workspacePath, payload.key, payload.scope);
+});
+
+ipcMain.handle('settings:resetAll', async (_, payload) => {
+  return settingsManager.resetAll(payload?.workspacePath, payload?.scope);
+});
+
+ipcMain.handle('keybindings:get', async () => {
+  return settingsManager.getKeybindings();
+});
+
+ipcMain.handle('keybindings:update', async (_, payload) => {
+  return settingsManager.updateKeybinding(payload.commandId, payload.shortcut);
+});
+
+ipcMain.handle('keybindings:reset', async (_, payload) => {
+  return settingsManager.resetKeybinding(payload.commandId);
+});
+
+ipcMain.handle('keybindings:resetAll', async () => {
+  return settingsManager.resetAllKeybindings();
+});
+
+ipcMain.handle('keybindings:detectConflicts', async (_, list) => {
+  return settingsManager.detectConflicts(list);
 });
 
 // Performance Profiler IPC Handlers

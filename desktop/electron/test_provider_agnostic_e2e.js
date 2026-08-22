@@ -52,9 +52,9 @@ async function runEndToEndVerification() {
 
   // 3. Test Selecting Provider & Model
   console.log('[E2E 3] Testing dynamic provider and model configuration...');
-  aiProviderRouter.setConfig('groq', 'llama-3.3-70b-versatile');
+  aiProviderRouter.setConfig('groq', 'openai/gpt-oss-120b');
   const groqCfg = aiProviderRouter.getConfig();
-  if (groqCfg.activeProvider !== 'groq' || groqCfg.activeModel !== 'llama-3.3-70b-versatile') {
+  if (groqCfg.activeProvider !== 'groq' || groqCfg.activeModel !== 'openai/gpt-oss-120b') {
     throw new Error('Failed to set Groq provider and model');
   }
 
@@ -75,7 +75,7 @@ async function runEndToEndVerification() {
     activeFilePath: path.join(workspacePath, 'cart.py'),
     maxSteps: 3,
     providerId: 'groq',
-    modelId: 'llama-3.3-70b-versatile',
+    modelId: 'openai/gpt-oss-120b',
   });
 
   if (!taskResult || !taskResult.success) {
@@ -90,7 +90,7 @@ async function runEndToEndVerification() {
     throw new Error('No task steps generated');
   }
 
-  if (taskResult.execution.requestedProviderId !== 'groq' || taskResult.execution.requestedModelId !== 'llama-3.3-70b-versatile') {
+  if (taskResult.execution.requestedProviderId !== 'groq' || taskResult.execution.requestedModelId !== 'openai/gpt-oss-120b') {
     throw new Error('Execution metadata did not record requested provider and model accurately');
   }
 

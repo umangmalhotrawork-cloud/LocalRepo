@@ -13,7 +13,7 @@ export interface WorkspacePersistedState {
   folderPath: string;
   openTabs: Array<{ path: string; name: string }>;
   activeTabPath: string;
-  mainView: "editor" | "dashboard" | "graph" | "clones" | "semantic_clones" | "luminance" | "behavior_fingerprint" | "patch_firewall" | "repository_patch_firewall" | "semantic_intent_radar" | "source_control" | "search" | "test_explorer" | "profiler" | "security_audit" | "snapshots";
+  mainView: "editor" | "dashboard" | "graph" | "clones" | "semantic_clones" | "luminance" | "behavior_fingerprint" | "patch_firewall" | "repository_patch_firewall" | "semantic_intent_radar" | "source_control" | "search" | "test_explorer" | "profiler" | "security_audit" | "snapshots" | "settings";
   explorerWidth: number;
   analysisWidth: number;
   consoleHeight: number;

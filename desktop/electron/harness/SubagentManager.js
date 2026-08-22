@@ -577,6 +577,16 @@ class SubagentManager {
       } catch (e) {}
     }
 
+    // Automatically clean up child workspace according to policy upon task completion
+    if (childThread.metadata?.workspaceId) {
+      try {
+        await this.workspaceIsolationManager.cleanupChildWorkspace(
+          childThread.metadata.workspaceId,
+          { isFailure: !structuredResult.success }
+        );
+      } catch (e) {}
+    }
+
     return structuredResult;
   }
 

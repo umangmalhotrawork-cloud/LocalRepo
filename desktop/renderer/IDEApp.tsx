@@ -2,13 +2,15 @@
 
 console.log('[IDE-APP] module evaluated');
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
-  FolderOpen, FolderTree, FileText, ChevronRight, ChevronDown, Play, Sparkles,
+  Folder, FolderOpen, FolderTree, FileText, ChevronRight, ChevronDown, Play, Sparkles,
   Terminal as TerminalIcon, Zap, X, Check, Save, RotateCcw, ArrowRight,
   Command, Search, Cpu, Layers, Activity, BarChart3, CheckCircle2, AlertTriangle, ShieldCheck, ShieldAlert,
   LayoutDashboard, Clock, FileSearch, Network, Download, Flame, Sun, Moon, Copy, GitPullRequest, GitBranch, Compass, Globe, FileCode, Bug, Bot, FlaskConical, Github,
-  History as HistoryIcon, Camera, Square, StepForward, Palette
+  History as HistoryIcon, Camera, Square, StepForward, Palette,
+  Plus, FolderPlus, FilePlus, Edit2, Trash2, MoreVertical, RefreshCw, ExternalLink,
+  Columns, Rows, ArrowRightLeft, Hash, Box, Code, Tag
 } from "lucide-react";
 
 import ConfirmDialog from "./components/ConfirmDialog";
@@ -45,6 +47,7 @@ import BehaviorFingerprintPanel, { BehavioralFingerprintReport } from "./compone
 import PatchFirewallPanel, { PatchFirewallReport } from "./components/PatchFirewallPanel";
 import RepositoryPatchFirewallPanel, { RepositoryPatchFirewallReport } from "./components/RepositoryPatchFirewallPanel";
 import SemanticIntentRadarPanel, { SemanticIntentDriftReport } from "./components/SemanticIntentRadarPanel";
+import ChangeConflictResolver, { ConflictItem } from "./components/ChangeConflictResolver";
 import RecoveryDialog from "./components/RecoveryDialog";
 import BDGInspectorPanel from "./components/BDGInspectorPanel";
 import TestExplorerPanel from "./components/TestExplorerPanel";
@@ -55,6 +58,7 @@ import { useProfiler } from "./hooks/useProfiler";
 import SecurityAuditPanel from "./components/SecurityAuditPanel";
 import TaskHome from "./components/TaskHome";
 import AgentWorkspace from "./components/AgentWorkspace";
+import { TerminalDiagnostic, ProblemItem, terminalDiagnosticToProblem } from "./utils/diagnosticParser";
 import CodexAIControlPopover from "./components/CodexAIControlPopover";
 import ThemesPopover from "./components/ThemesPopover";
 import GithubConnectModal from "./components/GithubConnectModal";
@@ -70,6 +74,8 @@ import BottomPanel, { BottomPanelTab } from "./components/BottomPanel";
 import { useSecurityAudit } from "./hooks/useSecurityAudit";
 import SnapshotPanel from "./components/SnapshotPanel";
 import { useSnapshots } from "./hooks/useSnapshots";
+import SettingsPanel from "./components/SettingsPanel";
+import { useSettings } from "./hooks/useSettings";
 import { useWorkspaceState, EditorViewState, WorkspacePersistedState, RecoverySnapshot, safeParse } from "./hooks/useWorkspaceState";
 import { useOutsideClick } from "./hooks/useOutsideClick";
 import { buildWorkspaceReport, ReportExportPayload } from "./utils/reportBuilder";
@@ -97,7 +103,7 @@ export interface SemanticCloneGroup {
   occurrences: StructuralCloneOccurrence[];
 }
 
-import MonacoEditor from "@monaco-editor/react";
+import MonacoEditor, { DiffEditor } from "@monaco-editor/react";
 
 declare global {
   interface Window {
@@ -107,6 +113,12 @@ declare global {
       readDir: (path: string) => Promise<any>;
       readFile: (path: string) => Promise<{ success: boolean; content?: string; error?: string }>;
       writeFile: (path: string, content: string) => Promise<{ success: boolean; error?: string }>;
+      createFile?: (filePath: string, content?: string, workspacePath?: string, overwrite?: boolean) => Promise<{ success: boolean; filePath?: string; tree?: any; error?: string }>;
+      createDir?: (dirPath: string, workspacePath?: string) => Promise<{ success: boolean; dirPath?: string; tree?: any; error?: string }>;
+      deleteFile?: (targetPath: string, workspacePath?: string, recursive?: boolean) => Promise<{ success: boolean; targetPath?: string; tree?: any; error?: string }>;
+      renameFile?: (oldPath: string, newPath: string, workspacePath?: string, overwrite?: boolean) => Promise<{ success: boolean; oldPath?: string; newPath?: string; tree?: any; error?: string }>;
+      revealInFinder?: (targetPath: string) => Promise<{ success: boolean; error?: string }>;
+      onFsChanged?: (callback: (event: any) => void) => () => void;
       fileExists: (path: string) => Promise<{ success: boolean; exists: boolean }>;
       analyzeFile: (payload: { filePath: string; content: string }) => Promise<any>;
       previewSafeRemove: (path: string) => Promise<any>;
@@ -136,14 +148,18 @@ declare global {
       runPythonFile: (filePath: string) => Promise<{ success: boolean; exitCode?: number; error?: string }>;
       onPythonOutput: (callback: (payload: { filePath?: string; data?: string; type?: 'stdout' | 'stderr' | 'exit'; exitCode?: number; isError?: boolean }) => void) => () => void;
       terminal?: {
-        create: (options?: { cwd?: string; shell?: string; cols?: number; rows?: number }) => Promise<{ id: string; pid: number; shell: string; cwd: string; status: string }>;
+        create: (options?: { cwd?: string; shell?: string; name?: string; cols?: number; rows?: number; env?: Record<string, string> }) => Promise<{ id: string; name?: string; pid: number; shell: string; cwd: string; status: string; createdAt?: number }>;
         write: (id: string, data: string) => Promise<void>;
         resize: (id: string, cols: number, rows: number) => Promise<void>;
         kill: (id: string) => Promise<void>;
-        restart: (id: string) => Promise<{ id: string; pid: number; shell: string; cwd: string; status: string }>;
-        list: () => Promise<Array<{ id: string; pid: number; shell: string; cwd: string; status: string }>>;
+        restart: (id: string) => Promise<{ id: string; name?: string; pid: number; shell: string; cwd: string; status: string }>;
+        list: () => Promise<Array<{ id: string; name?: string; customName?: string | null; pid: number; shell: string; cwd: string; status: string; exitCode?: number | null; createdAt?: number }>>;
+        rename?: (id: string, name: string) => Promise<{ success: boolean; id: string; name: string }>;
+        getBuffer?: (id: string) => Promise<{ success: boolean; id: string; buffer: string[] }>;
+        clear?: (id: string) => Promise<{ success: boolean; id: string }>;
         onData: (callback: (data: { id: string; data: string }) => void) => () => void;
         onExit: (callback: (data: { id: string; exitCode: number; signal?: number }) => void) => () => void;
+        onStatus?: (callback: (data: { id: string; status: string; exitCode?: number | null }) => void) => () => void;
       };
       git?: {
         status: (workspacePath: string) => Promise<any>;
@@ -156,10 +172,37 @@ declare global {
         push: (workspacePath: string, remote?: string, branch?: string) => Promise<any>;
         commitAndPush: (workspacePath: string, message: string) => Promise<any>;
         suggestCommitMessage: (workspacePath: string) => Promise<{ success: boolean; suggestedMessage?: string; isDefault?: boolean; source?: string; error?: string }>;
-        branches: (workspacePath: string) => Promise<{ all: string[]; current: string }>;
-        checkout: (workspacePath: string, branch: string) => Promise<any>;
-        createBranch: (workspacePath: string, branch: string) => Promise<any>;
+        branches: (workspacePath: string) => Promise<{ all: string[]; current: string; detached?: boolean; branches?: any[] }>;
+        checkout: (workspacePath: string, branch: string, options?: any) => Promise<any>;
+        createBranch: (workspacePath: string, branch: string, checkout?: boolean) => Promise<any>;
+        validateBranchName?: (name: string) => Promise<{ valid: boolean; error?: string }>;
+        stashes?: (workspacePath: string) => Promise<any[]>;
+        stashSave?: (workspacePath: string, options?: any) => Promise<any>;
+        stashApply?: (workspacePath: string, stashId?: string) => Promise<any>;
+        stashPop?: (workspacePath: string, stashId?: string) => Promise<any>;
+        stashDrop?: (workspacePath: string, stashId?: string) => Promise<any>;
+        stashClear?: (workspacePath: string) => Promise<any>;
+        history?: (workspacePath: string, options?: any) => Promise<any>;
+        commitDetails?: (workspacePath: string, hash: string) => Promise<any>;
+        fileHistory?: (workspacePath: string, filePath: string, options?: any) => Promise<any>;
         discard: (workspacePath: string, file: string) => Promise<any>;
+        // Milestone 33: Git Gutter & Inline Hunk Revert
+        getFileHunks?: (workspacePath: string, filePath: string) => Promise<{
+          isRepo: boolean;
+          filePath: string;
+          status: string;
+          hunks: GitHunk[];
+          headContent?: string;
+          currentContent?: string;
+        }>;
+        revertHunk?: (workspacePath: string, payload: any) => Promise<{
+          success: boolean;
+          filePath?: string;
+          revertedHunkId?: string;
+          newContent?: string;
+          error?: string;
+          message?: string;
+        }>;
       };
       github?: {
         status: () => Promise<{ isConnected: boolean; user?: any; error?: string }>;
@@ -167,9 +210,12 @@ declare global {
         disconnect: () => Promise<{ success: boolean }>;
       };
       search?: {
-        run: (payload: any) => Promise<{ success: boolean; results: SearchMatchItem[]; totalFiles: number; totalMatches: number; durationMs: number; error?: string }>;
-        replace: (payload: any) => Promise<{ success: boolean; file: string; line: number; newContent: string; error?: string }>;
-        replaceAll: (payload: any) => Promise<{ success: boolean; filesChanged: number; replacementsCount: number; error?: string }>;
+        run: (payload: any) => Promise<any>;
+        previewReplace: (payload: any) => Promise<any>;
+        generateChangeSet: (payload: any) => Promise<any>;
+        applyReplace: (payload: any) => Promise<any>;
+        replace: (payload: any) => Promise<any>;
+        replaceAll: (payload: any) => Promise<any>;
         cancel: (id: string) => Promise<void>;
       };
       ai?: {
@@ -220,7 +266,58 @@ declare global {
         getEvents?: (filter?: any) => Promise<any>;
         cancelSwarm?: (swarmId: string, reason?: string) => Promise<any>;
         getSwarmStatus?: (swarmId: string) => Promise<any>;
+        // Milestone 31 & 32 Language Intelligence, Problems, Document Outline & Breadcrumbs
+        getDefinition?: (query: any) => Promise<any>;
+        findReferences?: (query: any) => Promise<any>;
+        getHover?: (query: any) => Promise<any>;
+        prepareRename?: (query: any) => Promise<any>;
+        applyRename?: (options: any) => Promise<any>;
+        getDocumentOutline?: (query: any) => Promise<any>;
+        getSymbolAtPosition?: (query: any) => Promise<any>;
+        getBreadcrumbs?: (query: any) => Promise<any>;
+        parseDiagnostics?: (payload: any) => Promise<any>;
+        getProblems?: (filter?: any) => Promise<any>;
+        addProblems?: (payload: any) => Promise<any>;
+        clearProblems?: (filter?: any) => Promise<any>;
         onEvent?: (callback: (event: any) => void) => () => void;
+      };
+      tests?: {
+        discover?: (workspacePath: string) => Promise<any>;
+        run?: (payload: any) => Promise<any>;
+        runFile?: (payload: any) => Promise<any>;
+        runAll?: (payload: any) => Promise<any>;
+        coverage?: (payload: any) => Promise<any>;
+        debugTest?: (payload: any) => Promise<any>;
+      };
+      debug?: {
+        createSession?: (options: any) => Promise<any>;
+        getSession?: (sessionId: string) => Promise<any>;
+        launch?: (payload: any) => Promise<any>;
+        pause?: (sessionId: string) => Promise<any>;
+        continue?: (sessionId: string) => Promise<any>;
+        stepOver?: (sessionId: string) => Promise<any>;
+        stepInto?: (sessionId: string) => Promise<any>;
+        stepOut?: (sessionId: string) => Promise<any>;
+        stop?: (sessionId: string) => Promise<any>;
+        setBreakpoints?: (payload: any) => Promise<any>;
+        getBreakpoints?: (payload: any) => Promise<any>;
+        addWatchExpression?: (payload: any) => Promise<any>;
+        removeWatchExpression?: (payload: any) => Promise<any>;
+        evaluate?: (payload: any) => Promise<any>;
+        debugTest?: (payload: any) => Promise<any>;
+      };
+      settings?: {
+        get?: (workspacePath: string) => Promise<any>;
+        update?: (payload: any) => Promise<any>;
+        reset?: (payload: any) => Promise<any>;
+        resetAll?: (payload?: any) => Promise<any>;
+      };
+      keybindings?: {
+        get?: () => Promise<any>;
+        update?: (payload: any) => Promise<any>;
+        reset?: (commandId: string) => Promise<any>;
+        resetAll?: () => Promise<any>;
+        detectConflicts?: (list?: any) => Promise<any>;
       };
     };
   }
@@ -261,6 +358,17 @@ export interface VerificationResult {
   error?: string;
 }
 
+export interface GitHunk {
+  hunkId: string;
+  startLine: number;
+  endLine: number;
+  headStartLine: number;
+  headLineCount: number;
+  changeType: "ADDED" | "MODIFIED" | "DELETED";
+  oldLines: string[];
+  newLines: string[];
+}
+
 interface FileNode {
   name: string;
   path: string;
@@ -274,6 +382,33 @@ interface TabItem {
   content: string;
   savedContent: string;
   isDirty: boolean;
+}
+
+export interface EditorGroup {
+  id: string; // 'group-1' | 'group-2'
+  tabs: TabItem[];
+  activeTabPath: string | null;
+}
+
+export interface DocumentSymbolNode {
+  id: string;
+  name: string;
+  kind: string;
+  line: number;
+  column: number;
+  endLine?: number;
+  endColumn?: number;
+  signature?: string | null;
+  exported?: boolean;
+  children?: DocumentSymbolNode[];
+}
+
+export interface BreadcrumbItem {
+  label: string;
+  kind: 'workspace' | 'folder' | 'file' | 'class' | 'function' | 'method' | 'interface' | 'type' | 'symbol';
+  filePath?: string;
+  line?: number;
+  column?: number;
 }
 
 interface DiffPreviewData {
@@ -386,6 +521,8 @@ export default function IDEApp() {
   }, []);
 
   const [folderPath, setFolderPath] = useState<string | null>("demo-workspaces/ai_cart_project");
+  const folderPathRef = useRef(folderPath);
+  folderPathRef.current = folderPath;
   const [fileTree, setFileTree] = useState<FileNode | null>(defaultDemoTree);
   const [openTabs, setOpenTabs] = useState<TabItem[]>([
     {
@@ -397,10 +534,72 @@ export default function IDEApp() {
     },
   ]);
   const [activeTabPath, setActiveTabPath] = useState<string>("demo-workspaces/ai_cart_project/src/cart_calculator.py");
+
+  // Milestone 32 Split Editor Groups, Document Outline, Breadcrumbs State
+  const [editorGroups, setEditorGroups] = useState<EditorGroup[]>([
+    {
+      id: "group-1",
+      tabs: [
+        {
+          path: "demo-workspaces/ai_cart_project/src/cart_calculator.py",
+          name: "cart_calculator.py",
+          content: defaultCartCalculatorCode,
+          savedContent: defaultCartCalculatorCode,
+          isDirty: false,
+        },
+      ],
+      activeTabPath: "demo-workspaces/ai_cart_project/src/cart_calculator.py",
+    },
+  ]);
+  const [activeGroupId, setActiveGroupId] = useState<string>("group-1");
+  const [splitOrientation, setSplitOrientation] = useState<"vertical" | "horizontal">("vertical");
+  const [outlineSymbols, setOutlineSymbols] = useState<DocumentSymbolNode[]>([]);
+  const [outlineLoading, setOutlineLoading] = useState<boolean>(false);
+  const [isOutlineExpanded, setIsOutlineExpanded] = useState<boolean>(true);
+  const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItem[]>([]);
+  const [enclosingSymbol, setEnclosingSymbol] = useState<string | null>(null);
+  const editorInstancesRef = useRef<Record<string, any>>({});
+  // Milestone 33: Git Gutter Annotations & Hunk Revert State
+  const [gitHunks, setGitHunks] = useState<GitHunk[]>([]);
+  const [revertingHunkModal, setRevertingHunkModal] = useState<{
+    isOpen: boolean;
+    hunk: GitHunk | null;
+    filePath: string;
+  } | null>(null);
+  const gitGutterDecorationsRef = useRef<Record<string, string[]>>({});
+  // Milestone 34: Breakpoints and Unified Debug Session State
+  const [breakpoints, setBreakpoints] = useState<Record<string, number[]>>({});
+  const [activeDebugSessionId, setActiveDebugSessionId] = useState<string | null>(null);
+  const [activeCallStack, setActiveCallStack] = useState<any[]>([]);
+  const [watchExpressions, setWatchExpressions] = useState<any[]>([]);
+  const breakpointDecorationsRef = useRef<Record<string, string[]>>({});
+
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     "demo-workspaces/ai_cart_project": true,
     "demo-workspaces/ai_cart_project/src": true,
   });
+
+  // Synchronize openTabs and activeTabPath with activeGroupId
+  useEffect(() => {
+    const curGroup = editorGroups.find((g) => g.id === activeGroupId) || editorGroups[0];
+    if (curGroup) {
+      setOpenTabs(curGroup.tabs);
+      if (curGroup.activeTabPath) {
+        setActiveTabPath(curGroup.activeTabPath);
+      } else if (curGroup.tabs.length > 0) {
+        setActiveTabPath(curGroup.tabs[0].path);
+      }
+    }
+  }, [activeGroupId, editorGroups]);
+
+  // Milestone 24 File Operations & Context Menu State
+  const [explorerContextMenu, setExplorerContextMenu] = useState<{ x: number; y: number; node: FileNode | null } | null>(null);
+  const [explorerNewItemModal, setExplorerNewItemModal] = useState<{ isOpen: boolean; type: "file" | "folder"; targetDir: string; value: string } | null>(null);
+  const [explorerRenameModal, setExplorerRenameModal] = useState<{ isOpen: boolean; node: FileNode | null; value: string } | null>(null);
+  const [explorerDeleteConfirm, setExplorerDeleteConfirm] = useState<{ isOpen: boolean; node: FileNode | null } | null>(null);
+  const [isDiffEditorActive, setIsDiffEditorActive] = useState<boolean>(false);
+  const [diffEditorOriginal, setDiffEditorOriginal] = useState<string>("");
+  const [diffEditorModified, setDiffEditorModified] = useState<string>("");
 
   const [findings, setFindings] = useState<Finding[]>([
     {
@@ -476,13 +675,16 @@ export default function IDEApp() {
       return_sink_line: 24,
     },
   ]);
-  type MainView = "editor" | "dashboard" | "graph" | "clones" | "semantic_clones" | "luminance" | "behavior_fingerprint" | "patch_firewall" | "repository_patch_firewall" | "semantic_intent_radar" | "source_control" | "search" | "test_explorer" | "profiler" | "security_audit" | "snapshots";
+  type MainView = "editor" | "dashboard" | "graph" | "clones" | "semantic_clones" | "luminance" | "behavior_fingerprint" | "patch_firewall" | "repository_patch_firewall" | "semantic_intent_radar" | "source_control" | "search" | "test_explorer" | "profiler" | "security_audit" | "snapshots" | "settings";
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(findings[0] || null);
   const [workspaceReport, setWorkspaceReport] = useState<WorkspaceReport | null>(null);
   const [workspaceSummary, setWorkspaceSummary] = useState<WorkspaceReport | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceScanLoading, setWorkspaceScanLoading] = useState(false);
   const [mainView, setMainView] = useState<MainView>("editor");
+
+  const settingsHook = useSettings(folderPath || "");
+  const { settings } = settingsHook;
 
   const testsHook = useTests(folderPath || "");
   const testDecorationIdsRef = useRef<string[]>([]);
@@ -510,6 +712,77 @@ export default function IDEApp() {
       });
     }
   };
+
+  // Milestone 30: 3-Way Change Conflict Resolver State & Handlers
+  const [conflictResolverOpen, setConflictResolverOpen] = useState(false);
+  const [activeConflicts, setActiveConflicts] = useState<ConflictItem[]>([]);
+
+  const handleOpenConflictResolver = useCallback(async () => {
+    try {
+      const harness = (window as any).electronAPI?.harness;
+      if (harness?.listChangeConflicts) {
+        const list = await harness.listChangeConflicts();
+        if (Array.isArray(list) && list.length > 0) {
+          setActiveConflicts(list);
+        }
+      }
+    } catch (e) {
+      console.warn("[IDE] Error listing conflicts:", e);
+    }
+    setConflictResolverOpen(true);
+  }, []);
+
+  const handleResolveConflictHunk = useCallback(
+    async (
+      conflictId: string,
+      hunkId: string,
+      resolution: "KEEP_PARENT" | "KEEP_INCOMING" | "KEEP_BOTH" | "EDIT_RESULT",
+      customContent?: string
+    ) => {
+      const harness = (window as any).electronAPI?.harness;
+      if (harness?.resolveConflictHunk) {
+        await harness.resolveConflictHunk({ conflictId, hunkId, resolution, customContent });
+        if (harness.listChangeConflicts) {
+          const list = await harness.listChangeConflicts();
+          if (Array.isArray(list)) setActiveConflicts(list);
+        }
+      }
+    },
+    []
+  );
+
+  const handleResolveConflictFile = useCallback(
+    async (
+      conflictId: string,
+      resolution: "KEEP_PARENT" | "KEEP_INCOMING" | "KEEP_BOTH" | "EDIT_RESULT",
+      customContent?: string
+    ) => {
+      const harness = (window as any).electronAPI?.harness;
+      if (harness?.resolveFileConflict) {
+        await harness.resolveFileConflict({ conflictId, resolution, customContent });
+        if (harness.listChangeConflicts) {
+          const list = await harness.listChangeConflicts();
+          if (Array.isArray(list)) setActiveConflicts(list);
+        }
+      }
+    },
+    []
+  );
+
+  const handleApplyResolvedConflicts = useCallback(async () => {
+    const harness = (window as any).electronAPI?.harness;
+    if (harness?.applyResolvedConflicts) {
+      await harness.applyResolvedConflicts({
+        workspacePath: folderPath || process.cwd(),
+        autoApprove: true,
+      });
+      setConflictResolverOpen(false);
+      git.refreshStatus();
+      if (activeTabPath) {
+        handleOpenFile(activeTabPath);
+      }
+    }
+  }, [folderPath, git, activeTabPath]);
 
   const search = useSearch(folderPath || "");
   const searchMatchDecorationIdsRef = useRef<string[]>([]);
@@ -761,6 +1034,13 @@ export default function IDEApp() {
   const [showBottomPanel, setShowBottomPanel] = useState<boolean>(false);
   const [activeBottomTab, setActiveBottomTab] = useState<BottomPanelTab>("terminal");
   const [bottomPanelHeight, setBottomPanelHeight] = useState<number>(200);
+  const [problems, setProblems] = useState<ProblemItem[]>([]);
+  const currentWorkspacePathRef = useRef<string>("");
+
+  useEffect(() => {
+    currentWorkspacePathRef.current = folderPath || "";
+  }, [folderPath]);
+
   const [activeActivityItem, setActiveActivityItem] = useState<ActivityRailItem | null>("explorer");
   const [showDockedAgentPanel, setShowDockedAgentPanel] = useState<boolean>(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -851,6 +1131,10 @@ export default function IDEApp() {
       setToolsDrawerOpen(true);
       return;
     }
+    if ((item as string) === "settings") {
+      setMainView("settings");
+      return;
+    }
     setActiveActivityItem(item);
     setShowExplorer(true);
     setWorkspaceMode("workbench");
@@ -888,9 +1172,19 @@ export default function IDEApp() {
     setActiveTabId: setActiveTerminalTabId,
     createTerminalTab,
     closeTerminalTab,
+    renameTab: renameTerminalTab,
+    clearTabOutput: clearTerminalTabOutput,
     restartTerminalTab,
     sendTerminalInput,
     appendOutputToTab,
+    splitLayout: terminalSplitLayout,
+    setSplitLayout: setTerminalSplitLayout,
+    splitTabIds: terminalSplitTabIds,
+    setSplitTabIds: setTerminalSplitTabIds,
+    focusedPaneId: terminalFocusedPaneId,
+    setFocusedPaneId: setTerminalFocusedPaneId,
+    splitTab: splitTerminalTab,
+    unsplit: unsplitTerminal,
   } = useTerminal(folderPath || "");
 
   const [debugSteps, setDebugSteps] = useState<DebugStep[]>([]);
@@ -1070,6 +1364,192 @@ export default function IDEApp() {
       addLog(`[DEBUGGER] Failed to trace Python execution: ${err.message || String(err)}`);
     } finally {
       setDebugRunning(false);
+    }
+  };
+
+  // Milestone 34: Breakpoints and Unified Debugger Handlers
+  const fetchBreakpoints = useCallback(async (targetFile?: string) => {
+    const file = targetFile || activeTabPath;
+    if (!file || !folderPath || typeof window === "undefined" || !window.electronAPI?.debug?.getBreakpoints) return;
+    try {
+      const res = await window.electronAPI.debug.getBreakpoints({ workspacePath: folderPath, filePath: file });
+      if (res && Array.isArray(res.breakpoints)) {
+        setBreakpoints((prev) => ({
+          ...prev,
+          [file]: res.breakpoints.map((b: any) => b.line),
+        }));
+      }
+    } catch (e) {}
+  }, [folderPath, activeTabPath]);
+
+  const handleToggleBreakpoint = async (line: number, targetFile?: string) => {
+    const file = targetFile || activeTabPath;
+    if (!file) return;
+
+    const currentLines = breakpoints[file] || [];
+    const exists = currentLines.includes(line);
+    const nextLines = exists ? currentLines.filter((l) => l !== line) : [...currentLines, line].sort((a, b) => a - b);
+
+    setBreakpoints((prev) => ({
+      ...prev,
+      [file]: nextLines,
+    }));
+
+    if (folderPath && typeof window !== "undefined" && window.electronAPI?.debug?.setBreakpoints) {
+      await window.electronAPI.debug.setBreakpoints({
+        workspacePath: folderPath,
+        filePath: file,
+        breakpoints: nextLines.map((l) => ({ line: l, enabled: true })),
+      });
+    }
+
+    showToast(exists ? `Removed breakpoint at line ${line}` : `Set breakpoint at line ${line}`);
+  };
+
+  const handleRunUnifiedDebugger = async (targetFilePath?: string) => {
+    const file = targetFilePath || activeTabPath;
+    if (!file) return;
+    setDebugRunning(true);
+    setDebugError(undefined);
+    addLog(`[DEBUGGER] Launching unified debug session on ${file}...`);
+
+    try {
+      if (typeof window !== "undefined" && window.electronAPI?.debug?.launch) {
+        const sessionRes = await window.electronAPI.debug.launch({
+          filePath: file,
+          workspacePath: folderPath || undefined,
+          runtime: file.endsWith(".py") ? "python" : "node",
+          content: activeTab?.content,
+        });
+
+        if (sessionRes) {
+          setActiveDebugSessionId(sessionRes.sessionId);
+          if (sessionRes.steps && sessionRes.steps.length > 0) {
+            setDebugSteps(sessionRes.steps);
+            setDebugIndex(sessionRes.currentStepIndex >= 0 ? sessionRes.currentStepIndex : 0);
+          }
+          if (sessionRes.callStack) {
+            setActiveCallStack(sessionRes.callStack);
+          }
+          if (sessionRes.watchExpressions) {
+            setWatchExpressions(sessionRes.watchExpressions);
+          }
+          if (sessionRes.error || sessionRes.exception) {
+            setDebugError(sessionRes.error || sessionRes.exception?.message);
+          }
+          setDebugPanelOpen(true);
+          setToolsDrawerOpen(true);
+          setToolsDrawerTab("debugger");
+          addLog(`[DEBUGGER] Session active at line ${sessionRes.currentLine || 1}`);
+        }
+      } else {
+        await handleRunPythonDebugger();
+      }
+    } catch (err: any) {
+      addLog(`[DEBUGGER] Launch error: ${err.message || String(err)}`);
+    } finally {
+      setDebugRunning(false);
+    }
+  };
+
+  const handleContinueDebug = async () => {
+    if (!activeDebugSessionId || typeof window === "undefined" || !window.electronAPI?.debug?.continue) {
+      setDebugIndex((prev) => Math.min(debugSteps.length - 1, prev + 1));
+      return;
+    }
+    try {
+      const res = await window.electronAPI.debug.continue(activeDebugSessionId);
+      if (res && res.session) {
+        setDebugIndex(res.session.currentStepIndex >= 0 ? res.session.currentStepIndex : 0);
+        if (res.session.callStack) setActiveCallStack(res.session.callStack);
+        if (res.session.watchExpressions) setWatchExpressions(res.session.watchExpressions);
+      }
+    } catch (e) {}
+  };
+
+  const handleStepOverDebug = async () => {
+    if (!activeDebugSessionId || typeof window === "undefined" || !window.electronAPI?.debug?.stepOver) {
+      setDebugIndex((prev) => Math.min(debugSteps.length - 1, prev + 1));
+      return;
+    }
+    try {
+      const res = await window.electronAPI.debug.stepOver(activeDebugSessionId);
+      if (res && res.session) {
+        setDebugIndex(res.session.currentStepIndex >= 0 ? res.session.currentStepIndex : 0);
+        if (res.session.callStack) setActiveCallStack(res.session.callStack);
+        if (res.session.watchExpressions) setWatchExpressions(res.session.watchExpressions);
+      }
+    } catch (e) {}
+  };
+
+  const handleStepIntoDebug = async () => {
+    if (!activeDebugSessionId || typeof window === "undefined" || !window.electronAPI?.debug?.stepInto) {
+      setDebugIndex((prev) => Math.min(debugSteps.length - 1, prev + 1));
+      return;
+    }
+    try {
+      const res = await window.electronAPI.debug.stepInto(activeDebugSessionId);
+      if (res && res.session) {
+        setDebugIndex(res.session.currentStepIndex >= 0 ? res.session.currentStepIndex : 0);
+        if (res.session.callStack) setActiveCallStack(res.session.callStack);
+      }
+    } catch (e) {}
+  };
+
+  const handleStepOutDebug = async () => {
+    if (!activeDebugSessionId || typeof window === "undefined" || !window.electronAPI?.debug?.stepOut) {
+      return;
+    }
+    try {
+      const res = await window.electronAPI.debug.stepOut(activeDebugSessionId);
+      if (res && res.session) {
+        setDebugIndex(res.session.currentStepIndex >= 0 ? res.session.currentStepIndex : 0);
+        if (res.session.callStack) setActiveCallStack(res.session.callStack);
+      }
+    } catch (e) {}
+  };
+
+  const handleStopDebug = async () => {
+    if (activeDebugSessionId && typeof window !== "undefined" && window.electronAPI?.debug?.stop) {
+      await window.electronAPI.debug.stop(activeDebugSessionId);
+    }
+    setActiveDebugSessionId(null);
+    setDebugPanelOpen(false);
+  };
+
+  const handleDebugTest = async (test: TestCase) => {
+    if (!test || !test.filePath) return;
+    addLog(`[TEST DEBUG] Initializing Debug Session for ${test.name}...`);
+    await handleOpenFile({ name: test.filePath.split("/").pop() || "test.py", path: test.filePath, isDirectory: false });
+
+    try {
+      if (typeof window !== "undefined" && window.electronAPI?.debug?.debugTest) {
+        const res = await window.electronAPI.debug.debugTest({
+          workspacePath: folderPath || undefined,
+          filePath: test.filePath,
+          line: test.line,
+          testName: test.name,
+          framework: test.framework,
+        });
+
+        if (res && res.session) {
+          setActiveDebugSessionId(res.sessionId);
+          if (res.session.steps) {
+            setDebugSteps(res.session.steps);
+            setDebugIndex(res.session.currentStepIndex >= 0 ? res.session.currentStepIndex : 0);
+          }
+          if (res.session.callStack) setActiveCallStack(res.session.callStack);
+          if (res.session.watchExpressions) setWatchExpressions(res.session.watchExpressions);
+          setDebugPanelOpen(true);
+          setToolsDrawerOpen(true);
+          setToolsDrawerTab("debugger");
+          showToast(`Debugging test: ${test.name}`);
+        }
+      } else {
+        await handleRunPythonDebugger();
+      }
+    } catch (err: any) {
+      addLog(`[TEST DEBUG ERROR] ${err.message}`);
     }
   };
 
@@ -2017,6 +2497,93 @@ export default function IDEApp() {
       const isCmd = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
 
+      // Milestone 35: Dynamic configurable keybindings dispatch
+      const matchedCmd = settingsHook.matchEventToCommand(e);
+      if (matchedCmd) {
+        e.preventDefault();
+        switch (matchedCmd) {
+          case "workbench.action.save":
+            handleSaveFile();
+            return;
+          case "workbench.action.closeTab": {
+            const currentActive = openTabsRef.current.find((t) => t.path === activeTabPathRef.current);
+            if (currentActive) handleCloseTab(currentActive.path);
+            return;
+          }
+          case "workbench.action.quickOpen":
+            setSearchModalMode("files");
+            setShowSearchModal(true);
+            return;
+          case "workbench.action.commandPalette":
+            setCmdPaletteOpen(true);
+            return;
+          case "workbench.action.findInFiles":
+            setMainView((prev) => (prev === "search" ? "editor" : "search"));
+            return;
+          case "workbench.action.symbols":
+            setSearchModalMode("symbols");
+            setShowSearchModal(true);
+            return;
+          case "workbench.action.splitEditorRight":
+            handleSplitRight();
+            return;
+          case "workbench.action.focusGroup1":
+            setActiveGroupId("group-1");
+            return;
+          case "workbench.action.focusGroup2":
+            setEditorGroups((prev) => {
+              if (prev.length > 1) setActiveGroupId("group-2");
+              return prev;
+            });
+            return;
+          case "workbench.action.sourceControl":
+            setMainView((prev) => (prev === "source_control" ? "editor" : "source_control"));
+            return;
+          case "workbench.action.testExplorer":
+            setMainView((prev) => (prev === "test_explorer" ? "editor" : "test_explorer"));
+            return;
+          case "workbench.action.profiler":
+            setMainView((prev) => (prev === "profiler" ? "editor" : "profiler"));
+            return;
+          case "workbench.action.securityAudit":
+            setMainView((prev) => (prev === "security_audit" ? "editor" : "security_audit"));
+            return;
+          case "workbench.action.agentChat":
+            setAiPanelMode("agent");
+            setAiPanelOpen((prev) => !prev);
+            return;
+          case "debug.start":
+            handleRunUnifiedDebugger();
+            return;
+          case "debug.stepOver":
+            handleStepOverDebug();
+            return;
+          case "debug.stepInto":
+            handleStepIntoDebug();
+            return;
+          case "debug.stepOut":
+            handleStepOutDebug();
+            return;
+          case "debug.stop":
+            handleStopDebug();
+            return;
+          case "debug.toggleBreakpoint": {
+            const curLine = cursorPos?.line || 1;
+            handleToggleBreakpoint(curLine);
+            return;
+          }
+          case "git.refreshGutter":
+            if (activeTabPathRef.current) fetchGitHunks(activeTabPathRef.current);
+            return;
+        }
+      }
+
+      if (isCmd && key === ",") {
+        e.preventDefault();
+        setMainView("settings");
+        return;
+      }
+
       if (isCmd && e.shiftKey && key === "f") {
         e.preventDefault();
         setMainView((prev) => (prev === "search" ? "editor" : "search"));
@@ -2044,6 +2611,20 @@ export default function IDEApp() {
         e.preventDefault();
         const currentActive = openTabsRef.current.find(t => t.path === activeTabPathRef.current);
         if (currentActive) handleCloseTab(currentActive.path);
+      } else if (isCmd && key === "\\") {
+        e.preventDefault();
+        handleSplitRight();
+      } else if (isCmd && key === "1") {
+        e.preventDefault();
+        setActiveGroupId("group-1");
+      } else if (isCmd && key === "2") {
+        e.preventDefault();
+        setEditorGroups((prev) => {
+          if (prev.length > 1) {
+            setActiveGroupId("group-2");
+          }
+          return prev;
+        });
       } else if (isCmd && key === "k") {
         e.preventDefault();
         setCmdPaletteOpen(true);
@@ -2125,6 +2706,29 @@ export default function IDEApp() {
           activeTabPathRef.current
         );
         showToast("Snapshot created successfully");
+      } else if (isCmd && e.shiftKey && (key === "`" || key === "~")) {
+        e.preventDefault();
+        setShowBottomPanel(true);
+        setActiveBottomTab("terminal");
+        setTerminalPanelMode("terminal");
+        createTerminalTab(folderPathRef.current || "");
+      } else if (isCmd && key === "`") {
+        e.preventDefault();
+        setShowBottomPanel((prev) => !prev);
+        setActiveBottomTab("terminal");
+        setTerminalPanelMode("terminal");
+      } else if (isCmd && e.shiftKey && (key === "\\" || key === "|")) {
+        e.preventDefault();
+        setShowBottomPanel(true);
+        setActiveBottomTab("terminal");
+        setTerminalPanelMode("terminal");
+        splitTerminalTab("horizontal");
+      } else if (isCmd && (key === "\\" || key === "|")) {
+        e.preventDefault();
+        setShowBottomPanel(true);
+        setActiveBottomTab("terminal");
+        setTerminalPanelMode("terminal");
+        splitTerminalTab("vertical");
       } else if (e.key === "Escape") {
         if (debugPanelOpen) {
           setDebugPanelOpen(false);
@@ -2335,11 +2939,19 @@ export default function IDEApp() {
       } catch (e) {}
     }
 
-    const existing = openTabs.find((t) => t.path === filePath);
-    if (existing) {
+    const targetGroupId = activeGroupId || "group-1";
+    const currentGroup = editorGroups.find((g) => g.id === targetGroupId) || editorGroups[0];
+    const existingInGroup = currentGroup ? currentGroup.tabs.find((t) => t.path === filePath) : null;
+
+    if (existingInGroup) {
+      setEditorGroups((prevGroups) =>
+        prevGroups.map((g) => (g.id === targetGroupId ? { ...g, activeTabPath: filePath } : g))
+      );
       setActiveTabPath(filePath);
       restoreTabCursor(filePath);
-      runAnalysis(existing);
+      runAnalysis(existingInGroup);
+      fetchOutline(filePath);
+      fetchBreadcrumbs(filePath, 1, 1);
       return;
     }
 
@@ -2367,10 +2979,29 @@ export default function IDEApp() {
       savedContent: content,
       isDirty: false,
     };
-    setOpenTabs((prev) => [...prev, newTab]);
+
+    setEditorGroups((prevGroups) =>
+      prevGroups.map((g) => {
+        if (g.id === targetGroupId) {
+          const exists = g.tabs.some((t) => t.path === filePath);
+          const nextTabs = exists ? g.tabs : [...g.tabs, newTab];
+          return {
+            ...g,
+            tabs: nextTabs,
+            activeTabPath: filePath,
+          };
+        }
+        return g;
+      })
+    );
+
+    setOpenTabs((prev) => (prev.some((t) => t.path === filePath) ? prev : [...prev, newTab]));
     setActiveTabPath(filePath);
     restoreTabCursor(filePath);
     runAnalysis(newTab);
+    fetchOutline(filePath);
+    fetchBreadcrumbs(filePath, 1, 1);
+    fetchGitHunks(filePath);
   };
 
   const restoreTabCursor = (path: string) => {
@@ -2535,7 +3166,40 @@ export default function IDEApp() {
     setMainView("patch_firewall");
   };
 
-  const executeCloseTab = (path: string) => {
+  const executeCloseTab = (path: string, groupId?: string) => {
+    const targetGroupId = groupId || activeGroupId || "group-1";
+
+    setEditorGroups((prevGroups) => {
+      let updatedGroups = prevGroups.map((g) => {
+        if (g.id === targetGroupId) {
+          const remainingTabs = g.tabs.filter((t) => t.path !== path);
+          let nextActive = g.activeTabPath;
+          if (g.activeTabPath === path) {
+            nextActive = remainingTabs.length > 0 ? remainingTabs[remainingTabs.length - 1].path : null;
+          }
+          return {
+            ...g,
+            tabs: remainingTabs,
+            activeTabPath: nextActive,
+          };
+        }
+        return g;
+      });
+
+      // If secondary group becomes completely empty and we have 2 groups, close it
+      if (updatedGroups.length > 1) {
+        const targetGroup = updatedGroups.find((g) => g.id === targetGroupId);
+        if (targetGroup && targetGroup.tabs.length === 0 && targetGroupId !== "group-1") {
+          updatedGroups = updatedGroups.filter((g) => g.id !== targetGroupId);
+          if (activeGroupId === targetGroupId) {
+            setActiveGroupId("group-1");
+          }
+        }
+      }
+
+      return updatedGroups;
+    });
+
     const newTabs = openTabs.filter((t) => t.path !== path);
     setOpenTabs(newTabs);
 
@@ -2548,6 +3212,8 @@ export default function IDEApp() {
         setMainView("editor");
       }
       runAnalysis(nextTab);
+      fetchOutline(nextTab.path);
+      fetchBreadcrumbs(nextTab.path, 1, 1);
     }
   };
 
@@ -2572,9 +3238,19 @@ export default function IDEApp() {
             }
             return nextTabs;
           });
+          setEditorGroups((prevGroups) =>
+            prevGroups.map((g) => ({
+              ...g,
+              tabs: g.tabs.map((t) =>
+                t.path === activeTab.path ? { ...t, savedContent: t.content, isDirty: false } : t
+              ),
+            }))
+          );
           showToast(`Saved ${activeTab.name}`);
           addLog(`[FS] File saved successfully to disk.`);
           git.refreshStatus(folderPath || "");
+          fetchOutline(activeTab.path);
+          fetchGitHunks(activeTab.path);
         } else {
           addLog(`[ERROR] Save failed: ${res.error}`);
         }
@@ -2594,9 +3270,603 @@ export default function IDEApp() {
         }
         return nextTabs;
       });
+      setEditorGroups((prevGroups) =>
+        prevGroups.map((g) => ({
+          ...g,
+          tabs: g.tabs.map((t) =>
+            t.path === activeTab.path ? { ...t, savedContent: t.content, isDirty: false } : t
+          ),
+        }))
+      );
       showToast(`Saved ${activeTab.name}`);
       addLog(`[FS] Saved ${activeTab.name} (Mock).`);
+      fetchOutline(activeTab.path);
     }
+  };
+
+  // Milestone 32 Split Editor Actions & Outline / Breadcrumbs Handlers
+  const handleSplitRight = () => {
+    if (editorGroups.length === 1) {
+      const g1 = editorGroups[0];
+      const g2Tabs = [...g1.tabs];
+      const g2Active = g1.activeTabPath;
+      setEditorGroups([
+        g1,
+        {
+          id: "group-2",
+          tabs: g2Tabs,
+          activeTabPath: g2Active,
+        },
+      ]);
+      setSplitOrientation("vertical");
+      setActiveGroupId("group-2");
+    } else {
+      setSplitOrientation("vertical");
+    }
+  };
+
+  const handleSplitDown = () => {
+    if (editorGroups.length === 1) {
+      const g1 = editorGroups[0];
+      const g2Tabs = [...g1.tabs];
+      const g2Active = g1.activeTabPath;
+      setEditorGroups([
+        g1,
+        {
+          id: "group-2",
+          tabs: g2Tabs,
+          activeTabPath: g2Active,
+        },
+      ]);
+      setSplitOrientation("horizontal");
+      setActiveGroupId("group-2");
+    } else {
+      setSplitOrientation("horizontal");
+    }
+  };
+
+  const handleCloseEditorGroup = (groupId?: string) => {
+    if (editorGroups.length > 1) {
+      const targetId = groupId || (activeGroupId === "group-2" ? "group-2" : "group-2");
+      setEditorGroups((prev) => prev.filter((g) => g.id !== targetId));
+      setActiveGroupId("group-1");
+    }
+  };
+
+  const handleMoveTabToOtherGroup = (tabPath?: string, fromGroupId?: string) => {
+    const fromId = fromGroupId || activeGroupId || "group-1";
+    const toId = fromId === "group-1" ? "group-2" : "group-1";
+    const currentGroup = editorGroups.find((g) => g.id === fromId);
+    if (!currentGroup || currentGroup.tabs.length === 0) return;
+
+    const targetTabPath = tabPath || currentGroup.activeTabPath || currentGroup.tabs[0]?.path;
+    const tabToMove = currentGroup.tabs.find((t) => t.path === targetTabPath);
+    if (!tabToMove) return;
+
+    setEditorGroups((prevGroups) => {
+      let nextGroups = [...prevGroups];
+      if (!nextGroups.some((g) => g.id === toId)) {
+        nextGroups.push({
+          id: toId,
+          tabs: [],
+          activeTabPath: null,
+        });
+      }
+
+      return nextGroups.map((g) => {
+        if (g.id === fromId) {
+          const remainingTabs = g.tabs.filter((t) => t.path !== targetTabPath);
+          const nextActive = remainingTabs.some((t) => t.path === g.activeTabPath)
+            ? g.activeTabPath
+            : (remainingTabs[0]?.path || null);
+          return {
+            ...g,
+            tabs: remainingTabs,
+            activeTabPath: nextActive,
+          };
+        } else if (g.id === toId) {
+          const exists = g.tabs.some((t) => t.path === targetTabPath);
+          const newTabs = exists ? g.tabs : [...g.tabs, tabToMove];
+          return {
+            ...g,
+            tabs: newTabs,
+            activeTabPath: targetTabPath,
+          };
+        }
+        return g;
+      });
+    });
+
+    setActiveGroupId(toId);
+  };
+
+  const fetchOutline = useCallback(async (filePath: string) => {
+    if (!filePath || typeof window === "undefined" || !window.electronAPI?.harness?.getDocumentOutline) return;
+    setOutlineLoading(true);
+    try {
+      const res = await window.electronAPI.harness.getDocumentOutline({
+        filePath,
+        workspacePath: folderPath || undefined,
+      });
+      if (res && Array.isArray(res.symbols)) {
+        setOutlineSymbols(res.symbols);
+      } else {
+        setOutlineSymbols([]);
+      }
+    } catch (e) {
+      console.warn("[OUTLINE] Failed to fetch document outline:", e);
+      setOutlineSymbols([]);
+    } finally {
+      setOutlineLoading(false);
+    }
+  }, [folderPath]);
+
+  const fetchBreadcrumbs = useCallback(async (filePath: string, line: number = 1, col: number = 1) => {
+    if (!filePath || typeof window === "undefined" || !window.electronAPI?.harness?.getSymbolAtPosition) return;
+    try {
+      const res = await window.electronAPI.harness.getSymbolAtPosition({
+        filePath,
+        line,
+        column: col,
+        workspacePath: folderPath || undefined,
+      });
+      if (res) {
+        if (Array.isArray(res.breadcrumbs)) {
+          setBreadcrumbs(res.breadcrumbs);
+        }
+        setEnclosingSymbol(res.symbol?.name || null);
+      }
+    } catch (e) {
+      console.warn("[BREADCRUMBS] Failed to fetch symbol at position:", e);
+    }
+  }, [folderPath]);
+
+  // Milestone 33: Git Gutter Annotations & Hunk Revert Handlers
+  const fetchGitHunks = useCallback(async (filePath?: string) => {
+    const targetFile = filePath || activeTabPathRef.current || activeTabPath;
+    if (!targetFile || !folderPath || typeof window === "undefined" || !window.electronAPI?.git?.getFileHunks) return;
+    try {
+      const res = await window.electronAPI.git.getFileHunks(folderPath, targetFile);
+      if (res && Array.isArray(res.hunks)) {
+        setGitHunks(res.hunks);
+
+        // Apply Monaco decorations across all mounted editor instances that have this model open
+        Object.entries(editorInstancesRef.current).forEach(([groupId, editor]) => {
+          if (!editor) return;
+          const model = editor.getModel();
+          if (!model) return;
+
+          const newDecorations = res.hunks.map((hunk: GitHunk) => {
+            let linesClass = "git-gutter-modified";
+            let lineClass = "git-gutter-line-modified";
+            if (hunk.changeType === "ADDED") {
+              linesClass = "git-gutter-added";
+              lineClass = "git-gutter-line-added";
+            } else if (hunk.changeType === "DELETED") {
+              linesClass = "git-gutter-deleted";
+              lineClass = "git-gutter-line-deleted";
+            }
+
+            const oldBlock = hunk.oldLines && hunk.oldLines.length > 0
+              ? `**Original (HEAD):**\n\`\`\`\n${hunk.oldLines.join("\n")}\n\`\`\`\n\n`
+              : "";
+            const newBlock = hunk.newLines && hunk.newLines.length > 0
+              ? `**Current:**\n\`\`\`\n${hunk.newLines.join("\n")}\n\`\`\`\n\n`
+              : "";
+
+            const hoverMarkdown = `### Git Hunk (${hunk.changeType})\n` +
+              `Lines ${hunk.startLine}–${hunk.endLine} (HEAD Line ${hunk.headStartLine})\n\n` +
+              oldBlock +
+              newBlock;
+
+            return {
+              range: {
+                startLineNumber: Math.max(1, hunk.startLine),
+                startColumn: 1,
+                endLineNumber: Math.max(1, hunk.endLine),
+                endColumn: 1,
+              },
+              options: {
+                isWholeLine: true,
+                linesDecorationsClassName: linesClass,
+                className: lineClass,
+                hoverMessage: {
+                  value: hoverMarkdown,
+                },
+              },
+            };
+          });
+
+          const prevDecs = gitGutterDecorationsRef.current[groupId] || [];
+          gitGutterDecorationsRef.current[groupId] = editor.deltaDecorations(prevDecs, newDecorations);
+        });
+      } else {
+        setGitHunks([]);
+        Object.entries(editorInstancesRef.current).forEach(([groupId, editor]) => {
+          if (!editor) return;
+          const prevDecs = gitGutterDecorationsRef.current[groupId] || [];
+          if (prevDecs.length > 0) {
+            gitGutterDecorationsRef.current[groupId] = editor.deltaDecorations(prevDecs, []);
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("[GIT-GUTTER] Failed to fetch file hunks:", e);
+    }
+  }, [folderPath, activeTabPath]);
+
+  const handleRevertHunk = async (hunk: GitHunk, targetFilePath?: string) => {
+    const file = targetFilePath || activeTabPathRef.current || activeTabPath;
+    if (!file || !folderPath || typeof window === "undefined" || !window.electronAPI?.git?.revertHunk) return;
+
+    try {
+      const res = await window.electronAPI.git.revertHunk(folderPath, {
+        filePath: file,
+        hunkId: hunk.hunkId,
+        hunk,
+      });
+
+      if (res && res.success && typeof res.newContent === "string") {
+        const updatedText = res.newContent;
+        showToast(`Reverted Git hunk in ${file.split("/").pop()}`);
+        addLog(`[GIT] Reverted hunk ${hunk.hunkId} in ${file}`);
+
+        // Update editor content in open tabs & editor groups
+        setEditorGroups((prevGroups) =>
+          prevGroups.map((g) => ({
+            ...g,
+            tabs: g.tabs.map((t) =>
+              t.path === file ? { ...t, content: updatedText, savedContent: updatedText, isDirty: false } : t
+            ),
+          }))
+        );
+        setOpenTabs((prev) =>
+          prev.map((t) => (t.path === file ? { ...t, content: updatedText, savedContent: updatedText, isDirty: false } : t))
+        );
+
+        // Update Monaco models directly
+        Object.values(editorInstancesRef.current).forEach((editor: any) => {
+          if (editor && editor.getModel()) {
+            const curVal = editor.getValue();
+            if (curVal !== updatedText) {
+              editor.setValue(updatedText);
+            }
+          }
+        });
+
+        await fetchGitHunks(file);
+        if (git.refreshStatus) git.refreshStatus(folderPath);
+      } else {
+        alert(`Failed to revert hunk: ${res?.message || res?.error || "Unknown error"}`);
+      }
+    } catch (err: any) {
+      alert(`Error reverting hunk: ${err.message}`);
+    }
+    setRevertingHunkModal(null);
+  };
+
+  const handleJumpToSymbol = (sym: any) => {
+    const currentEditor = editorRef.current;
+    if (currentEditor && sym && sym.line) {
+      try {
+        currentEditor.revealLineInCenter(sym.line);
+        currentEditor.setPosition({ lineNumber: sym.line, column: sym.column || 1 });
+        currentEditor.focus();
+      } catch (e) {}
+    }
+  };
+
+  const handleEditorGroupMount = (groupId: string, editor: any, monaco: any) => {
+    editorInstancesRef.current[groupId] = editor;
+    if (groupId === activeGroupId) {
+      editorRef.current = editor;
+      monacoRef.current = monaco;
+    }
+    handleEditorMount(editor, monaco);
+
+    editor.onDidFocusEditorText(() => {
+      setActiveGroupId(groupId);
+      editorRef.current = editor;
+    });
+
+    editor.onDidChangeCursorPosition((e: any) => {
+      const line = e.position.lineNumber;
+      const col = e.position.column;
+      const curPath = activeTabPathRef.current;
+      if (curPath) {
+        fetchBreadcrumbs(curPath, line, col);
+      }
+    });
+
+    // Milestone 34: Toggle breakpoint on gutter click
+    editor.onMouseDown((e: any) => {
+      if (
+        e.target &&
+        monaco &&
+        (e.target.type === monaco.editor?.MouseTargetType?.GUTTER_GLYPH_MARGIN ||
+         e.target.type === monaco.editor?.MouseTargetType?.GUTTER_LINE_NUMBERS ||
+         e.target.type === 2 || e.target.type === 3)
+      ) {
+        const line = e.target.position?.lineNumber;
+        if (line) {
+          handleToggleBreakpoint(line);
+        }
+      }
+    });
+
+    if (activeTabPathRef.current) {
+      fetchGitHunks(activeTabPathRef.current);
+      fetchBreakpoints(activeTabPathRef.current);
+    }
+  };
+
+  // Milestone 24: Core File Operations Handlers
+  const handleRefreshWorkspaceTree = async (customPath?: string) => {
+    const target = customPath || folderPath;
+    if (!target || typeof window === "undefined" || !window.electronAPI?.readDir) return;
+    try {
+      const dirRes = await window.electronAPI.readDir(target);
+      if (dirRes && dirRes.tree) {
+        setFileTree(dirRes.tree);
+      }
+    } catch (e) {
+      console.error("[IDE-APP] Error refreshing tree:", e);
+    }
+  };
+
+  // Subscribe to main process filesystem watcher events
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.electronAPI?.onFsChanged) {
+      const unsub = window.electronAPI.onFsChanged((event: any) => {
+        if (event) {
+          handleRefreshWorkspaceTree(event.workspacePath);
+          if (folderPath) git.refreshStatus(folderPath);
+          if (activeTabPath) fetchGitHunks(activeTabPath);
+        }
+      });
+      return unsub;
+    }
+  }, [folderPath, activeTabPath, fetchGitHunks]);
+
+  const handleExplorerCreateFile = async (targetDir: string, fileName: string) => {
+    if (!fileName || !fileName.trim()) return;
+    const cleanName = fileName.trim();
+    const targetBase = targetDir || folderPath || "demo-workspaces/ai_cart_project";
+    const fullPath = targetBase.endsWith("/") ? `${targetBase}${cleanName}` : `${targetBase}/${cleanName}`;
+
+    if (typeof window !== "undefined" && window.electronAPI?.createFile) {
+      try {
+        const res = await window.electronAPI.createFile(fullPath, "", folderPath || undefined, false);
+        if (res && res.success) {
+          showToast(`Created file: ${cleanName}`);
+          await handleRefreshWorkspaceTree();
+          handleOpenFile({ name: cleanName, path: fullPath, isDirectory: false });
+        } else {
+          alert(`Failed to create file: ${res?.error || "Unknown error"}`);
+        }
+      } catch (err: any) {
+        alert(`Error creating file: ${err.message}`);
+      }
+    } else {
+      handleOpenFile({ name: cleanName, path: fullPath, isDirectory: false });
+      showToast(`Created file (mock): ${cleanName}`);
+    }
+    setExplorerNewItemModal(null);
+  };
+
+  const handleExplorerCreateDir = async (targetDir: string, dirName: string) => {
+    if (!dirName || !dirName.trim()) return;
+    const cleanName = dirName.trim();
+    const targetBase = targetDir || folderPath || "demo-workspaces/ai_cart_project";
+    const fullPath = targetBase.endsWith("/") ? `${targetBase}${cleanName}` : `${targetBase}/${cleanName}`;
+
+    if (typeof window !== "undefined" && window.electronAPI?.createDir) {
+      try {
+        const res = await window.electronAPI.createDir(fullPath, folderPath || undefined);
+        if (res && res.success) {
+          showToast(`Created folder: ${cleanName}`);
+          setExpandedFolders((prev) => ({ ...prev, [fullPath]: true, [targetBase]: true }));
+          await handleRefreshWorkspaceTree();
+        } else {
+          alert(`Failed to create folder: ${res?.error || "Unknown error"}`);
+        }
+      } catch (err: any) {
+        alert(`Error creating folder: ${err.message}`);
+      }
+    } else {
+      showToast(`Created folder (mock): ${cleanName}`);
+    }
+    setExplorerNewItemModal(null);
+  };
+
+  const handleExplorerRename = async (node: FileNode, newName: string) => {
+    if (!node || !node.path || !newName || !newName.trim()) return;
+    const cleanName = newName.trim();
+    const oldPath = node.path;
+    const parentDir = oldPath.includes("/") ? oldPath.substring(0, oldPath.lastIndexOf("/")) : folderPath || "";
+    const newPath = `${parentDir}/${cleanName}`;
+
+    if (oldPath === newPath) {
+      setExplorerRenameModal(null);
+      return;
+    }
+
+    if (typeof window !== "undefined" && window.electronAPI?.renameFile) {
+      try {
+        const res = await window.electronAPI.renameFile(oldPath, newPath, folderPath || undefined, false);
+        if (res && res.success) {
+          showToast(`Renamed to: ${cleanName}`);
+          setEditorGroups((prevGroups) =>
+            prevGroups.map((g) => {
+              const updatedTabs = g.tabs.map((t) => {
+                if (t.path === oldPath) {
+                  return { ...t, path: newPath, name: cleanName };
+                }
+                if (t.path.startsWith(oldPath + "/")) {
+                  const subPath = t.path.replace(oldPath, newPath);
+                  return { ...t, path: subPath, name: subPath.split("/").pop() || t.name };
+                }
+                return t;
+              });
+              let nextActive = g.activeTabPath;
+              if (g.activeTabPath === oldPath) {
+                nextActive = newPath;
+              } else if (g.activeTabPath && g.activeTabPath.startsWith(oldPath + "/")) {
+                nextActive = g.activeTabPath.replace(oldPath, newPath);
+              }
+              return {
+                ...g,
+                tabs: updatedTabs,
+                activeTabPath: nextActive,
+              };
+            })
+          );
+          setOpenTabs((prev) =>
+            prev.map((t) => {
+              if (t.path === oldPath) {
+                return { ...t, path: newPath, name: cleanName };
+              }
+              if (t.path.startsWith(oldPath + "/")) {
+                const subPath = t.path.replace(oldPath, newPath);
+                return { ...t, path: subPath, name: subPath.split("/").pop() || t.name };
+              }
+              return t;
+            })
+          );
+          if (activeTabPath === oldPath) {
+            setActiveTabPath(newPath);
+          } else if (activeTabPath && activeTabPath.startsWith(oldPath + "/")) {
+            setActiveTabPath(activeTabPath.replace(oldPath, newPath));
+          }
+          await handleRefreshWorkspaceTree();
+          fetchOutline(newPath);
+        } else {
+          alert(`Failed to rename: ${res?.error || "Unknown error"}`);
+        }
+      } catch (err: any) {
+        alert(`Error renaming: ${err.message}`);
+      }
+    } else {
+      showToast(`Renamed (mock): ${cleanName}`);
+    }
+    setExplorerRenameModal(null);
+  };
+
+  const handleExplorerDelete = async (node: FileNode) => {
+    if (!node || !node.path) return;
+    const targetPath = node.path;
+
+    if (typeof window !== "undefined" && window.electronAPI?.deleteFile) {
+      try {
+        const res = await window.electronAPI.deleteFile(targetPath, folderPath || undefined, true);
+        if (res && res.success) {
+          showToast(`Deleted: ${node.name}`);
+          setEditorGroups((prevGroups) =>
+            prevGroups.map((g) => {
+              const remaining = g.tabs.filter(
+                (t) => t.path !== targetPath && !t.path.startsWith(targetPath + "/")
+              );
+              let nextActive = g.activeTabPath;
+              if (g.activeTabPath === targetPath || (g.activeTabPath && g.activeTabPath.startsWith(targetPath + "/"))) {
+                nextActive = remaining[0]?.path || null;
+              }
+              return {
+                ...g,
+                tabs: remaining,
+                activeTabPath: nextActive,
+              };
+            })
+          );
+          setOpenTabs((prev) =>
+            prev.filter((t) => t.path !== targetPath && !t.path.startsWith(targetPath + "/"))
+          );
+          if (activeTabPath === targetPath || (activeTabPath && activeTabPath.startsWith(targetPath + "/"))) {
+            const remaining = openTabs.filter(
+              (t) => t.path !== targetPath && !t.path.startsWith(targetPath + "/")
+            );
+            setActiveTabPath(remaining.length > 0 ? remaining[0].path : "");
+          }
+          await handleRefreshWorkspaceTree();
+        } else {
+          alert(`Failed to delete: ${res?.error || "Unknown error"}`);
+        }
+      } catch (err: any) {
+        alert(`Error deleting: ${err.message}`);
+      }
+    } else {
+      showToast(`Deleted (mock): ${node.name}`);
+    }
+    setExplorerDeleteConfirm(null);
+  };
+
+  const [activeDiagnostic, setActiveDiagnostic] = useState<TerminalDiagnostic | null>(null);
+
+  const handleNavigateToLocation = async (loc: { filePath: string; line?: number; column?: number }) => {
+    if (!loc || !loc.filePath) return;
+    const name = loc.filePath.split("/").pop() || loc.filePath;
+    await handleOpenFile({ name, path: loc.filePath, isDirectory: false });
+    if (loc.line) {
+      setTimeout(() => {
+        if (editorRef.current) {
+          try {
+            editorRef.current.setPosition({ lineNumber: loc.line!, column: loc.column || 1 });
+            editorRef.current.revealLineInCenter(loc.line!);
+            editorRef.current.focus();
+          } catch (e) {}
+        }
+      }, 120);
+    }
+  };
+
+  const handleAskAiAboutDiagnostic = (diagnostic: TerminalDiagnostic) => {
+    if (!diagnostic) return;
+    const prob = terminalDiagnosticToProblem(diagnostic);
+    setProblems((prev) => {
+      const filtered = prev.filter((p) => p.id !== prob.id);
+      return [prob, ...filtered];
+    });
+    setActiveDiagnostic(diagnostic);
+    const targetFile = diagnostic.filePath ? (diagnostic.filePath.split("/").pop() || diagnostic.filePath) : "project";
+    const promptText = `Diagnose and fix issue in ${targetFile}${diagnostic.line ? ` line ${diagnostic.line}` : ""}: ${diagnostic.summary}`;
+    setActiveTaskPrompt(promptText);
+    setWorkspaceMode("workbench");
+    setShowDockedAgentPanel(true);
+    addLog(`[AI-DIAGNOSTIC] Dispatched AI diagnosis for ${diagnostic.summary}`);
+  };
+
+  const handleSendTerminalSelectionToAi = (selectedText: string) => {
+    if (!selectedText || !selectedText.trim()) return;
+    const promptText = `Analyze and address this selected terminal output:\n\n\`\`\`\n${selectedText.trim()}\n\`\`\``;
+    setActiveTaskPrompt(promptText);
+    setWorkspaceMode("workbench");
+    setShowDockedAgentPanel(true);
+    addLog(`[AI-SELECTION] Dispatched selected terminal context to AI`);
+  };
+
+  const handleRepairWithAI = (repairContext: {
+    testName: string;
+    filePath: string;
+    line?: number;
+    column?: number;
+    errorSummary: string;
+    stackTrace: string;
+    command: string;
+  }) => {
+    const diag: TerminalDiagnostic = {
+      command: repairContext.command,
+      summary: repairContext.errorSummary,
+      stackTrace: repairContext.stackTrace,
+      filePath: repairContext.filePath,
+      line: repairContext.line || null,
+      column: repairContext.column || null,
+      timestamp: Date.now(),
+    };
+    setActiveDiagnostic(diag);
+    const formattedTask = `Test failure: ${repairContext.testName}\nCommand: ${repairContext.command}\nFile: ${repairContext.filePath}${repairContext.line ? `:${repairContext.line}` : ''}\nError: ${repairContext.errorSummary}\n\nStack Trace:\n${repairContext.stackTrace}\n\nPlease investigate this failure, diagnose root cause, and implement a verified fix.`;
+    setActiveTaskPrompt(formattedTask);
+    setWorkspaceMode("workbench");
+    setShowDockedAgentPanel(true);
+    addLog(`[AI-REPAIR] Dispatched auto-repair for ${repairContext.testName}`);
   };
 
   const runAnalysis = async (tab: TabItem) => {
@@ -3934,10 +5204,220 @@ export default function IDEApp() {
       if (monaco?.editor?.setTheme) {
         monaco.editor.setTheme(themeDef.monacoThemeId);
       }
+
+      // Register Language Intelligence Providers once per Monaco runtime (Milestone 31)
+      if (!monaco._nexusLanguageProvidersRegistered) {
+        monaco._nexusLanguageProvidersRegistered = true;
+        const supportedLangs = ["typescript", "javascript", "python", "json", "markdown", "html", "css"];
+
+        for (const lang of supportedLangs) {
+          // 1. Go to Definition Provider (F12 / Cmd+Click)
+          monaco.languages.registerDefinitionProvider(lang, {
+            provideDefinition: async (model: any, position: any) => {
+              const word = model.getWordAtPosition(position);
+              if (!word || !word.word) return null;
+              if (!(window as any).electronAPI?.harness?.getDefinition) return null;
+
+              try {
+                const res = await (window as any).electronAPI.harness.getDefinition({
+                  symbolName: word.word,
+                  filePath: activeTabPathRef.current,
+                  line: position.lineNumber,
+                  column: position.column,
+                  workspacePath: currentWorkspacePathRef.current,
+                });
+
+                if (!res || !Array.isArray(res.definitions) || res.definitions.length === 0) {
+                  return null;
+                }
+
+                return res.definitions.map((def: any) => ({
+                  uri: monaco.Uri.file(def.absPath || def.filePath),
+                  range: new monaco.Range(
+                    def.startLine || 1,
+                    def.startColumn || 1,
+                    def.endLine || def.startLine || 1,
+                    def.endColumn || (def.startColumn || 1) + (def.name?.length || 5)
+                  ),
+                }));
+              } catch (e) {
+                console.warn("[LSP-DEFINITION-ERROR]", e);
+                return null;
+              }
+            },
+          });
+
+          // 2. Find References Provider (Shift+F12)
+          monaco.languages.registerReferenceProvider(lang, {
+            provideReferences: async (model: any, position: any) => {
+              const word = model.getWordAtPosition(position);
+              if (!word || !word.word) return null;
+              if (!(window as any).electronAPI?.harness?.findReferences) return null;
+
+              try {
+                const res = await (window as any).electronAPI.harness.findReferences({
+                  symbolName: word.word,
+                  filePath: activeTabPathRef.current,
+                  line: position.lineNumber,
+                  column: position.column,
+                  workspacePath: currentWorkspacePathRef.current,
+                });
+
+                if (!res || !Array.isArray(res.references) || res.references.length === 0) {
+                  return null;
+                }
+
+                return res.references.map((ref: any) => ({
+                  uri: monaco.Uri.file(ref.absPath || ref.filePath),
+                  range: new monaco.Range(
+                    ref.line || 1,
+                    ref.column || 1,
+                    ref.line || 1,
+                    (ref.column || 1) + (word.word.length || 1)
+                  ),
+                }));
+              } catch (e) {
+                console.warn("[LSP-REFERENCES-ERROR]", e);
+                return null;
+              }
+            },
+          });
+
+          // 3. Hover Provider
+          monaco.languages.registerHoverProvider(lang, {
+            provideHover: async (model: any, position: any) => {
+              const word = model.getWordAtPosition(position);
+              if (!word || !word.word) return null;
+              if (!(window as any).electronAPI?.harness?.getHover) return null;
+
+              try {
+                const res = await (window as any).electronAPI.harness.getHover({
+                  symbolName: word.word,
+                  filePath: activeTabPathRef.current,
+                  line: position.lineNumber,
+                  column: position.column,
+                  workspacePath: currentWorkspacePathRef.current,
+                });
+
+                if (!res || !res.found || !res.markdown) return null;
+
+                return {
+                  range: new monaco.Range(
+                    position.lineNumber,
+                    word.startColumn,
+                    position.lineNumber,
+                    word.endColumn
+                  ),
+                  contents: [{ value: res.markdown }],
+                };
+              } catch (e) {
+                return null;
+              }
+            },
+          });
+
+          // 4. Rename Provider (F2)
+          monaco.languages.registerRenameProvider(lang, {
+            provideRenameEdits: async (model: any, position: any, newName: string) => {
+              const word = model.getWordAtPosition(position);
+              if (!word || !word.word) return null;
+              if (!(window as any).electronAPI?.harness?.applyRename) return null;
+
+              try {
+                const res = await (window as any).electronAPI.harness.applyRename({
+                  symbolName: word.word,
+                  newName,
+                  filePath: activeTabPathRef.current,
+                  workspacePath: currentWorkspacePathRef.current,
+                  autoApprove: true,
+                });
+
+                if (!res || !res.success) {
+                  console.warn("[LSP-RENAME-FAILED]", res?.error);
+                  return null;
+                }
+
+                if (currentWorkspacePathRef.current) {
+                  git.refreshStatus(currentWorkspacePathRef.current);
+                }
+                return { edits: [] };
+              } catch (e) {
+                console.warn("[LSP-RENAME-ERROR]", e);
+                return null;
+              }
+            },
+            resolveRenameLocation: async (model: any, position: any) => {
+              const word = model.getWordAtPosition(position);
+              if (!word || !word.word) {
+                return {
+                  rejectReason: "Cannot rename this element: no valid symbol under cursor",
+                };
+              }
+              return {
+                range: new monaco.Range(
+                  position.lineNumber,
+                  word.startColumn,
+                  position.lineNumber,
+                  word.endColumn
+                ),
+                text: word.word,
+              };
+            },
+          });
+        }
+      }
     } catch (err) {
       console.error("[MONACO] Error setting up Monaco theme/events:", err);
     }
   };
+
+  // Synchronize Monaco model markers with active problems (Milestone 31)
+  useEffect(() => {
+    if (!monacoRef.current || !editorRef.current || !activeTabPath) return;
+    const monaco = monacoRef.current;
+    const editor = editorRef.current;
+    const model = editor.getModel();
+    if (!model) return;
+
+    const fileProblems = problems.filter((p) => {
+      const pPath = p.filePath || (p as any).file;
+      if (!pPath) return false;
+      return (
+        pPath === activeTabPath ||
+        activeTabPath.endsWith(pPath) ||
+        pPath.endsWith(activeTabPath) ||
+        activeTabPath.includes(pPath)
+      );
+    });
+
+    if (fileProblems.length === 0) {
+      monaco.editor.setModelMarkers(model, "nexus_problems", []);
+      return;
+    }
+
+    const markers = fileProblems.map((prob) => {
+      let severity = monaco.MarkerSeverity.Error;
+      if (prob.severity === "warning") severity = monaco.MarkerSeverity.Warning;
+      else if (prob.severity === "info") severity = monaco.MarkerSeverity.Info;
+
+      const startLine = prob.line || 1;
+      const startCol = prob.column || 1;
+      const endLine = prob.endLine || prob.line || 1;
+      const endCol = prob.endColumn || (prob.column ? prob.column + 10 : 100);
+
+      return {
+        severity,
+        message: `${prob.code ? `[${prob.code}] ` : ""}${prob.message}`,
+        startLineNumber: startLine,
+        startColumn: startCol,
+        endLineNumber: endLine,
+        endColumn: endCol,
+        source: prob.source || "nexus",
+      };
+    });
+
+    monaco.editor.setModelMarkers(model, "nexus_problems", markers);
+  }, [problems, activeTabPath]);
 
   const startExplorerResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -4004,34 +5484,377 @@ export default function IDEApp() {
       <div key={nodePath} style={{ paddingLeft: `${level * 10}px` }}>
         {node.isDirectory ? (
           <div>
-            <button
-              onClick={() => toggleFolder(nodePath)}
-              className="w-full py-1 px-2 flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white hover:bg-zinc-900/60 rounded font-mono text-left"
+            <div
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setExplorerContextMenu({ x: e.clientX, y: e.clientY, node });
+              }}
+              className="group flex items-center justify-between w-full py-1 px-2 text-xs text-zinc-400 hover:text-white hover:bg-zinc-900/60 rounded font-mono"
             >
-              {isExp ? <ChevronDown className="w-3.5 h-3.5 text-cyan-400" /> : <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />}
-              <span className="font-semibold text-zinc-300">{node.name || "Folder"}</span>
-            </button>
+              <button
+                onClick={() => toggleFolder(nodePath)}
+                className="flex items-center gap-1.5 min-w-0 flex-1 text-left cursor-pointer"
+              >
+                {isExp ? <ChevronDown className="w-3.5 h-3.5 text-cyan-400 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-zinc-500 shrink-0" />}
+                <span className="font-semibold text-zinc-300 truncate">{node.name || "Folder"}</span>
+              </button>
+              <div className="hidden group-hover:flex items-center gap-0.5 shrink-0 opacity-80">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExplorerNewItemModal({ isOpen: true, type: "file", targetDir: node.path, value: "" });
+                  }}
+                  className="p-0.5 hover:text-cyan-300 rounded"
+                  title="New File in Folder"
+                >
+                  <FilePlus className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExplorerNewItemModal({ isOpen: true, type: "folder", targetDir: node.path, value: "" });
+                  }}
+                  className="p-0.5 hover:text-cyan-300 rounded"
+                  title="New Subfolder"
+                >
+                  <FolderPlus className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExplorerContextMenu({ x: e.clientX, y: e.clientY, node });
+                  }}
+                  className="p-0.5 hover:text-cyan-300 rounded"
+                  title="More Actions"
+                >
+                  <MoreVertical className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
             {isExp && Array.isArray(node.children) && (
               <div>{node.children.filter(Boolean).map((child) => renderTree(child, level + 1))}</div>
             )}
           </div>
         ) : (
-          <button
-            onClick={() => {
-              if (node && (node.path || node.name)) {
-                handleOpenFile(node);
-              }
+          <div
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setExplorerContextMenu({ x: e.clientX, y: e.clientY, node });
             }}
-            className={`w-full py-1 px-2 flex items-center gap-1.5 text-xs font-mono text-left rounded transition-colors ${
+            className={`group flex items-center justify-between w-full py-1 px-2 text-xs font-mono text-left rounded transition-colors ${
               activeTabPath === node.path
                 ? "bg-cyan-950/60 text-cyan-300 border border-cyan-500/40 font-bold"
                 : "text-zinc-400 hover:text-white hover:bg-zinc-900/40"
             }`}
           >
-            <FileText className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="truncate">{node.name || "file"}</span>
-          </button>
+            <button
+              onClick={() => {
+                if (node && (node.path || node.name)) {
+                  handleOpenFile(node);
+                }
+              }}
+              className="flex items-center gap-1.5 min-w-0 flex-1 text-left cursor-pointer"
+            >
+              <FileText className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span className="truncate">{node.name || "file"}</span>
+            </button>
+            <div className="hidden group-hover:flex items-center gap-0.5 shrink-0 opacity-80">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExplorerRenameModal({ isOpen: true, node, value: node.name });
+                }}
+                className="p-0.5 hover:text-cyan-300 rounded"
+                title="Rename File"
+              >
+                <Edit2 className="w-3 h-3" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExplorerDeleteConfirm({ isOpen: true, node });
+                }}
+                className="p-0.5 hover:text-rose-400 rounded"
+                title="Delete File"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
         )}
+      </div>
+    );
+  };
+
+  const renderOutlineNode = (node: DocumentSymbolNode, depth = 0) => {
+    let IconComp = Code;
+    let iconColor = "text-cyan-400";
+    if (node.kind === "CLASS") {
+      IconComp = Box;
+      iconColor = "text-amber-400";
+    } else if (node.kind === "INTERFACE" || node.kind === "TYPE") {
+      IconComp = Hash;
+      iconColor = "text-emerald-400";
+    } else if (node.kind === "VARIABLE" || node.kind === "CONSTANT") {
+      IconComp = Tag;
+      iconColor = "text-purple-400";
+    }
+
+    return (
+      <div key={node.id || `${node.name}_${node.line}_${depth}`}>
+        <div
+          onClick={() => handleJumpToSymbol(node)}
+          style={{ paddingLeft: `${depth * 12 + 4}px` }}
+          className="group flex items-center justify-between py-1 px-1.5 rounded hover:bg-zinc-800/60 cursor-pointer text-zinc-300 hover:text-white transition-colors"
+        >
+          <div className="flex items-center gap-1.5 min-w-0 truncate">
+            <IconComp className={`w-3 h-3 shrink-0 ${iconColor}`} />
+            <span className="truncate font-medium">{node.name}</span>
+            {node.signature && (
+              <span className="text-[9px] text-zinc-500 truncate">{node.signature.replace(/^def |^function /, "")}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {node.exported && (
+              <span className="text-[8px] px-1 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/40">exp</span>
+            )}
+            <span className="text-[9px] text-zinc-600 font-mono">:{node.line}</span>
+          </div>
+        </div>
+        {node.children && node.children.length > 0 && (
+          <div>
+            {node.children.map((child) => renderOutlineNode(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderBreadcrumbsBar = (group: EditorGroup) => {
+    const groupActiveTab = group.tabs.find((t) => t.path === group.activeTabPath) || group.tabs[0];
+    if (!groupActiveTab) return null;
+
+    return (
+      <div className="h-6 bg-[#08080c] border-b border-[#181822] flex items-center px-3 gap-1 font-mono text-[10.5px] text-zinc-400 overflow-x-auto shrink-0 select-none">
+        {breadcrumbs.map((crumb, idx) => {
+          let Icon = FileText;
+          let color = "text-zinc-400";
+          if (crumb.kind === "workspace") {
+            Icon = FolderTree;
+            color = "text-cyan-400";
+          } else if (crumb.kind === "folder") {
+            Icon = Folder;
+            color = "text-amber-400/80";
+          } else if (crumb.kind === "file") {
+            Icon = FileCode;
+            color = "text-blue-400";
+          } else if (crumb.kind === "class") {
+            Icon = Box;
+            color = "text-amber-400";
+          } else if (crumb.kind === "function" || crumb.kind === "method") {
+            Icon = Code;
+            color = "text-cyan-400";
+          }
+
+          const isLast = idx === breadcrumbs.length - 1;
+          return (
+            <div key={`${crumb.label}_${idx}`} className="flex items-center gap-1 shrink-0">
+              {idx > 0 && <span className="text-zinc-600 text-[10px]">/</span>}
+              <button
+                onClick={() => {
+                  if (crumb.line) {
+                    handleJumpToSymbol(crumb);
+                  } else if (crumb.filePath && crumb.kind === "file") {
+                    handleOpenFile({ path: crumb.filePath, name: crumb.label, isDirectory: false });
+                  }
+                }}
+                className={`flex items-center gap-1 px-1 py-0.5 rounded hover:bg-zinc-800/60 hover:text-white cursor-pointer ${
+                  isLast ? "text-cyan-300 font-semibold" : ""
+                }`}
+              >
+                <Icon className={`w-3 h-3 ${color}`} />
+                <span>{crumb.label}</span>
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderEditorGroupPane = (group: EditorGroup, isSecondary: boolean = false) => {
+    const groupActiveTab = group.tabs.find((t) => t.path === group.activeTabPath) || group.tabs[0];
+    const isFocused = activeGroupId === group.id;
+
+    return (
+      <div
+        key={group.id}
+        onClick={() => setActiveGroupId(group.id)}
+        className={`flex-1 flex flex-col h-full min-w-0 min-h-0 relative ${
+          isFocused && editorGroups.length > 1 ? "ring-1 ring-cyan-500/40" : ""
+        }`}
+      >
+        {/* Tab Bar */}
+        <div className="h-9 bg-[#0a0a0a] border-b border-[#1f1f1f] flex items-center justify-between px-2 font-mono text-xs overflow-x-auto shrink-0 select-none">
+          <div className="flex items-center gap-1 overflow-x-auto min-w-0">
+            {group.tabs.map((tab) => {
+              const isActive = group.activeTabPath === tab.path;
+              return (
+                <div
+                  key={tab.path}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveGroupId(group.id);
+                    setEditorGroups((prevGroups) =>
+                      prevGroups.map((g) => (g.id === group.id ? { ...g, activeTabPath: tab.path } : g))
+                    );
+                    setActiveTabPath(tab.path);
+                    if (tab.path === "nexus://patch-firewall") {
+                      setMainView("patch_firewall");
+                    } else {
+                      setMainView("editor");
+                    }
+                    restoreTabCursor(tab.path);
+                    runAnalysis(tab);
+                  }}
+                  className={`group px-3 py-1 rounded-t-lg flex items-center gap-2 cursor-pointer transition-all ${
+                    isActive
+                      ? "bg-[#050505] text-cyan-400 border-t border-x border-cyan-500/40 font-bold shadow-sm"
+                      : "text-zinc-400 hover:text-white hover:bg-zinc-900/40"
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="truncate max-w-[120px]">{tab.name}</span>
+
+                  {tab.isDirty && (
+                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" title="Unsaved changes ●" />
+                  )}
+
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (tab.isDirty) {
+                        setCloseConfirmTab(tab);
+                      } else {
+                        executeCloseTab(tab.path, group.id);
+                      }
+                    }}
+                    className="opacity-60 hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-opacity inline-block cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Group Controls */}
+          <div className="flex items-center gap-1 shrink-0 pl-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSplitRight();
+              }}
+              title="Split Editor Right (⌘\)"
+              className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-cyan-400 transition-colors cursor-pointer"
+            >
+              <Columns className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSplitDown();
+              }}
+              title="Split Editor Down (⌘K ⌘\)"
+              className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-cyan-400 transition-colors cursor-pointer"
+            >
+              <Rows className="w-3.5 h-3.5" />
+            </button>
+            {editorGroups.length > 1 && (
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleMoveTabToOtherGroup(groupActiveTab?.path, group.id);
+                  }}
+                  title="Move Tab to Other Group"
+                  className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-amber-400 transition-colors cursor-pointer"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCloseEditorGroup(group.id);
+                  }}
+                  title="Close Editor Group"
+                  className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-red-400 transition-colors cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Breadcrumbs Bar */}
+        {renderBreadcrumbsBar(group)}
+
+        {/* Editor Area */}
+        <div className="flex-1 relative overflow-hidden bg-[#050505] min-h-0">
+          {groupActiveTab ? (
+            <MonacoEditor
+              key={`${group.id}_${groupActiveTab.path}`}
+              width="100%"
+              height="100%"
+              language={getLanguageFromPath(groupActiveTab.path)}
+              value={groupActiveTab.content ?? ""}
+              onChange={(val) => {
+                const updatedVal = val || "";
+                setEditorGroups((prevGroups) =>
+                  prevGroups.map((g) => {
+                    if (g.id === group.id) {
+                      return {
+                        ...g,
+                        tabs: g.tabs.map((t) =>
+                          t.path === groupActiveTab.path
+                            ? { ...t, content: updatedVal, isDirty: updatedVal !== t.savedContent }
+                            : t
+                        ),
+                      };
+                    }
+                    return g;
+                  })
+                );
+                handleEditorChange(val);
+              }}
+              onMount={(editor, monaco) => handleEditorGroupMount(group.id, editor, monaco)}
+              options={{
+                fontSize: settings["editor.fontSize"] || 13,
+                tabSize: settings["editor.tabSize"] || 2,
+                insertSpaces: settings["editor.insertSpaces"] !== false,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                lineNumbers: settings["editor.lineNumbers"] || "on",
+                minimap: { enabled: Boolean(settings["editor.minimap"]) },
+                bracketPairColorization: { enabled: settings["editor.bracketPairColorization"] !== false },
+                "semanticHighlighting.enabled": true,
+                wordWrap: settings["editor.wordWrap"] || "off",
+                smoothScrolling: settings["editor.smoothScrolling"] !== false,
+                cursorBlinking: settings["editor.cursorBlinking"] || "smooth",
+                automaticLayout: true,
+                padding: { top: 8 },
+              }}
+            />
+          ) : (
+            <div className="w-full h-full bg-[#050505] text-zinc-600 flex items-center justify-center font-mono text-xs select-none">
+              No file open in this editor group
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -4336,6 +6159,10 @@ return (
             setIsWholeWord={search.setIsWholeWord}
             includeHidden={search.includeHidden}
             setIncludeHidden={search.setIncludeHidden}
+            includeGlobs={search.includeGlobs}
+            setIncludeGlobs={search.setIncludeGlobs}
+            excludeGlobs={search.excludeGlobs}
+            setExcludeGlobs={search.setExcludeGlobs}
             results={search.results}
             groupedResults={search.groupedResults}
             totalFiles={search.totalFiles}
@@ -4352,13 +6179,35 @@ return (
             onReplaceAllInFile={(f) => search.replaceAllInFile(f)}
             onReplaceAllInWorkspace={() => search.replaceAllInWorkspace()}
             onNavigateResult={(dir) => search.navigateResult(dir)}
+            previewModel={search.previewModel}
+            isPreviewOpen={search.isPreviewOpen}
+            previewLoading={search.previewLoading}
+            activePreviewFile={search.activePreviewFile}
+            setActivePreviewFilePath={search.setActivePreviewFilePath}
+            changeSetRisk={search.changeSetRisk}
+            isApplying={search.isApplying}
+            onGeneratePreview={search.generatePreview}
+            onClosePreview={search.closePreview}
+            onToggleMatchSelection={search.toggleMatchSelection}
+            onToggleFileSelection={search.toggleFileSelection}
+            onSelectAllMatches={search.selectAllMatches}
+            onDeselectAllMatches={search.deselectAllMatches}
+            onApplyReplacementChangeSet={search.applyReplacementChangeSet}
           />
         }
         gitContent={
           <SourceControlPanel
             isRepo={git.isRepo}
             currentBranch={git.currentBranch}
+            isDetached={git.isDetached}
+            tracking={git.tracking}
+            ahead={git.ahead}
+            behind={git.behind}
+            isClean={git.isClean}
+            hasLocalChanges={git.hasLocalChanges}
             branches={git.branches}
+            branchDetails={git.branchDetails}
+            stashes={git.stashes}
             staged={git.staged}
             unstaged={git.unstaged}
             untracked={git.untracked}
@@ -4375,10 +6224,29 @@ return (
             onCommitAndPush={(msg) => git.commitAndPushChanges(msg)}
             onPush={(remote, branch) => git.pushChanges(remote, branch)}
             onSuggestMessage={() => git.suggestCommitMessage()}
-            onCheckoutBranch={(b) => git.checkoutBranch(b)}
-            onCreateBranch={(b) => git.createAndCheckoutBranch(b)}
+            onCheckoutBranch={(b, f) => git.checkoutBranch(b, f)}
+            onCreateBranch={(b, c) => git.createAndCheckoutBranch(b, c)}
+            onValidateBranchName={(n) => git.validateBranchName(n)}
+            onStashSave={(opt) => git.stashSave(opt)}
+            onStashApply={(id) => git.stashApply(id)}
+            onStashPop={(id) => git.stashPop(id)}
+            onStashDrop={(id) => git.stashDrop(id)}
+            onStashClear={() => git.stashClear()}
             onDiscardFile={(f) => git.discardFile(f)}
             onOpenFileDiff={handleOpenGitDiff}
+            historyGraph={git.historyGraph}
+            selectedCommit={git.selectedCommit}
+            selectedCommitDiff={git.selectedCommitDiff}
+            historyBranch={git.historyBranch}
+            setHistoryBranch={git.setHistoryBranch}
+            historyLoading={git.historyLoading}
+            onFetchHistory={git.fetchHistory}
+            onFetchCommitDetails={git.fetchCommitDetails}
+            onFetchCommitDiff={git.fetchCommitDiff}
+            onFetchFileHistory={git.fetchFileHistory}
+            onSelectCommit={git.setSelectedCommit}
+            onOpenConflictResolver={handleOpenConflictResolver}
+            conflictsCount={activeConflicts.length}
           />
         }
         testsContent={
@@ -4388,6 +6256,11 @@ return (
               handleOpenTestFile(file, undefined);
               setToolsDrawerOpen(false);
             }}
+            onRepairWithAI={(ctx) => {
+              handleRepairWithAI(ctx);
+              setToolsDrawerOpen(false);
+            }}
+            onDebugTest={handleDebugTest}
             testsHook={testsHook}
           />
         }
@@ -4398,7 +6271,39 @@ return (
             steps={debugSteps}
             currentIndex={debugIndex}
             onStepChange={setDebugIndex}
-            onRestart={handleRunPythonDebugger}
+            onRestart={handleRunUnifiedDebugger}
+            onContinue={handleContinueDebug}
+            onStepOver={handleStepOverDebug}
+            onStepInto={handleStepIntoDebug}
+            onStepOut={handleStepOutDebug}
+            onStop={handleStopDebug}
+            callStack={activeCallStack}
+            watchExpressions={watchExpressions}
+            onAddWatch={async (expr) => {
+              if (activeDebugSessionId && typeof window !== "undefined" && window.electronAPI?.debug?.addWatchExpression) {
+                const res = await window.electronAPI.debug.addWatchExpression({ sessionId: activeDebugSessionId, expression: expr });
+                if (res?.watchExpressions) setWatchExpressions(res.watchExpressions);
+              }
+            }}
+            onRemoveWatch={async (id) => {
+              if (activeDebugSessionId && typeof window !== "undefined" && window.electronAPI?.debug?.removeWatchExpression) {
+                const res = await window.electronAPI.debug.removeWatchExpression({ sessionId: activeDebugSessionId, watchId: id });
+                if (res?.watchExpressions) setWatchExpressions(res.watchExpressions);
+              }
+            }}
+            onEvaluateConsole={async (expr) => {
+              if (activeDebugSessionId && typeof window !== "undefined" && window.electronAPI?.debug?.evaluate) {
+                return window.electronAPI.debug.evaluate({ sessionId: activeDebugSessionId, expression: expr });
+              }
+              return { success: false, error: "No active debugger session" };
+            }}
+            onSelectFrame={(frame) => {
+              if (frame.line && editorRef.current) {
+                editorRef.current.revealLineInCenter(frame.line);
+                editorRef.current.setPosition({ lineNumber: frame.line, column: 1 });
+              }
+            }}
+            error={debugError}
           />
         }
         terminalContent={
@@ -4406,10 +6311,20 @@ return (
             tabs={terminalTabs}
             activeTabId={activeTerminalTabId}
             onSelectTab={(id) => setActiveTerminalTabId(id)}
-            onCreateTab={() => createTerminalTab(folderPath || "")}
+            onCreateTab={(shell?: string, name?: string) => {
+              createTerminalTab(folderPath || "", shell, name);
+            }}
             onCloseTab={(id) => closeTerminalTab(id)}
             onRestartTab={(id) => restartTerminalTab(id)}
             onSendInput={(id, input) => sendTerminalInput(id, input)}
+            onRenameTab={renameTerminalTab}
+            onClearTabOutput={clearTerminalTabOutput}
+            splitLayout={terminalSplitLayout}
+            splitTabIds={terminalSplitTabIds}
+            focusedPaneId={terminalFocusedPaneId}
+            onSplitTab={splitTerminalTab}
+            onUnsplit={unsplitTerminal}
+            onFocusPane={setTerminalFocusedPaneId}
             logs={logs}
             onClearLogs={() => setLogs([])}
             debugLogs={debugSteps.map((s) => `[Step ${s.step}] Line ${s.line} in ${s.functionName || "global"}`)}
@@ -4418,6 +6333,15 @@ return (
             activeMode={terminalPanelMode === "output" || terminalPanelMode === "debug" ? terminalPanelMode : "terminal"}
             onModeChange={(mode) => setTerminalPanelMode(mode)}
             onClosePanel={() => setToolsDrawerOpen(false)}
+            onAskAiAboutDiagnostic={(diag) => {
+              handleAskAiAboutDiagnostic(diag);
+              setToolsDrawerOpen(false);
+            }}
+            onOpenLocation={(fp, line, col) => handleNavigateToLocation({ filePath: fp, line, column: col })}
+            onSendSelectionToAi={(txt) => {
+              handleSendTerminalSelectionToAi(txt);
+              setToolsDrawerOpen(false);
+            }}
           />
         }
         capabilitiesContent={
@@ -4507,7 +6431,15 @@ return (
               <SourceControlPanel
                 isRepo={git.isRepo}
                 currentBranch={git.currentBranch}
+                isDetached={git.isDetached}
+                tracking={git.tracking}
+                ahead={git.ahead}
+                behind={git.behind}
+                isClean={git.isClean}
+                hasLocalChanges={git.hasLocalChanges}
                 branches={git.branches}
+                branchDetails={git.branchDetails}
+                stashes={git.stashes}
                 staged={git.staged}
                 unstaged={git.unstaged}
                 untracked={git.untracked}
@@ -4524,10 +6456,29 @@ return (
                 onCommitAndPush={(msg) => git.commitAndPushChanges(msg)}
                 onPush={(remote, branch) => git.pushChanges(remote, branch)}
                 onSuggestMessage={() => git.suggestCommitMessage()}
-                onCheckoutBranch={(b) => git.checkoutBranch(b)}
-                onCreateBranch={(b) => git.createAndCheckoutBranch(b)}
+                onCheckoutBranch={(b, f) => git.checkoutBranch(b, f)}
+                onCreateBranch={(b, c) => git.createAndCheckoutBranch(b, c)}
+                onValidateBranchName={(n) => git.validateBranchName(n)}
+                onStashSave={(opt) => git.stashSave(opt)}
+                onStashApply={(id) => git.stashApply(id)}
+                onStashPop={(id) => git.stashPop(id)}
+                onStashDrop={(id) => git.stashDrop(id)}
+                onStashClear={() => git.stashClear()}
                 onDiscardFile={(f) => git.discardFile(f)}
                 onOpenFileDiff={handleOpenGitDiff}
+                historyGraph={git.historyGraph}
+                selectedCommit={git.selectedCommit}
+                selectedCommitDiff={git.selectedCommitDiff}
+                historyBranch={git.historyBranch}
+                setHistoryBranch={git.setHistoryBranch}
+                historyLoading={git.historyLoading}
+                onFetchHistory={git.fetchHistory}
+                onFetchCommitDetails={git.fetchCommitDetails}
+                onFetchCommitDiff={git.fetchCommitDiff}
+                onFetchFileHistory={git.fetchFileHistory}
+                onSelectCommit={git.setSelectedCommit}
+                onOpenConflictResolver={handleOpenConflictResolver}
+                conflictsCount={activeConflicts.length}
               />
             ) : (
               <>
@@ -4548,7 +6499,33 @@ return (
                       ? "Patch Safety Firewall"
                       : "Explorer"}
                   </span>
-                  <span className="text-cyan-400 text-[9.5px]">NEXUS</span>
+                  {activeActivityItem !== "search" && activeActivityItem !== "sessions" && activeActivityItem !== "verification" ? (
+                    <div className="flex items-center gap-1 text-zinc-400">
+                      <button
+                        onClick={() => setExplorerNewItemModal({ isOpen: true, type: "file", targetDir: folderPath || "", value: "" })}
+                        className="p-1 rounded hover:bg-[#1a1a24] hover:text-cyan-300 transition-colors cursor-pointer"
+                        title="New File"
+                      >
+                        <FilePlus className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => setExplorerNewItemModal({ isOpen: true, type: "folder", targetDir: folderPath || "", value: "" })}
+                        className="p-1 rounded hover:bg-[#1a1a24] hover:text-cyan-300 transition-colors cursor-pointer"
+                        title="New Folder"
+                      >
+                        <FolderPlus className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleRefreshWorkspaceTree()}
+                        className="p-1 rounded hover:bg-[#1a1a24] hover:text-cyan-300 transition-colors cursor-pointer"
+                        title="Refresh Workspace"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-cyan-400 text-[9.5px]">NEXUS</span>
+                  )}
                 </div>
 
                 {/* Sidebar Tool Body */}
@@ -4567,6 +6544,10 @@ return (
                       setIsWholeWord={search.setIsWholeWord}
                       includeHidden={search.includeHidden}
                       setIncludeHidden={search.setIncludeHidden}
+                      includeGlobs={search.includeGlobs}
+                      setIncludeGlobs={search.setIncludeGlobs}
+                      excludeGlobs={search.excludeGlobs}
+                      setExcludeGlobs={search.setExcludeGlobs}
                       results={search.results}
                       groupedResults={search.groupedResults}
                       totalFiles={search.totalFiles}
@@ -4582,6 +6563,20 @@ return (
                       onReplaceAllInFile={(f) => search.replaceAllInFile(f)}
                       onReplaceAllInWorkspace={() => search.replaceAllInWorkspace()}
                       onNavigateResult={(dir) => search.navigateResult(dir)}
+                      previewModel={search.previewModel}
+                      isPreviewOpen={search.isPreviewOpen}
+                      previewLoading={search.previewLoading}
+                      activePreviewFile={search.activePreviewFile}
+                      setActivePreviewFilePath={search.setActivePreviewFilePath}
+                      changeSetRisk={search.changeSetRisk}
+                      isApplying={search.isApplying}
+                      onGeneratePreview={search.generatePreview}
+                      onClosePreview={search.closePreview}
+                      onToggleMatchSelection={search.toggleMatchSelection}
+                      onToggleFileSelection={search.toggleFileSelection}
+                      onSelectAllMatches={search.selectAllMatches}
+                      onDeselectAllMatches={search.deselectAllMatches}
+                      onApplyReplacementChangeSet={search.applyReplacementChangeSet}
                     />
                   ) : activeActivityItem === "sessions" ? (
                     <CodexSidebar
@@ -4611,7 +6606,44 @@ return (
                       }}
                     />
                   ) : (
-                    fileTree && renderTree(fileTree)
+                    <>
+                      {fileTree && renderTree(fileTree)}
+
+                      {/* Milestone 32 Document Outline Accordion */}
+                      <div className="mt-4 border-t border-[#1f1f1f] pt-2">
+                        <div
+                          onClick={() => setIsOutlineExpanded(!isOutlineExpanded)}
+                          className="px-3 py-1.5 flex items-center justify-between text-xs font-mono text-zinc-400 hover:text-white cursor-pointer select-none"
+                        >
+                          <div className="flex items-center gap-1.5 font-bold">
+                            {isOutlineExpanded ? <ChevronDown className="w-3.5 h-3.5 text-cyan-400" /> : <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />}
+                            <span>DOCUMENT OUTLINE</span>
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (activeTabPath) fetchOutline(activeTabPath);
+                            }}
+                            title="Refresh Outline"
+                            className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white cursor-pointer"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${outlineLoading ? "animate-spin text-cyan-400" : ""}`} />
+                          </button>
+                        </div>
+
+                        {isOutlineExpanded && (
+                          <div className="px-2 py-1 space-y-0.5 max-h-64 overflow-y-auto font-mono text-[11px]">
+                            {outlineLoading ? (
+                              <div className="px-3 py-2 text-zinc-500 text-[10px] italic">Extracting symbols...</div>
+                            ) : outlineSymbols.length === 0 ? (
+                              <div className="px-3 py-2 text-zinc-600 text-[10px]">No symbols detected in current file</div>
+                            ) : (
+                              outlineSymbols.map((node) => renderOutlineNode(node, 0))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </>
                   )}
                 </div>
 
@@ -4739,7 +6771,15 @@ return (
                 <SourceControlPanel
                   isRepo={git.isRepo}
                   currentBranch={git.currentBranch}
+                  isDetached={git.isDetached}
+                  tracking={git.tracking}
+                  ahead={git.ahead}
+                  behind={git.behind}
+                  isClean={git.isClean}
+                  hasLocalChanges={git.hasLocalChanges}
                   branches={git.branches}
+                  branchDetails={git.branchDetails}
+                  stashes={git.stashes}
                   staged={git.staged}
                   unstaged={git.unstaged}
                   untracked={git.untracked}
@@ -4756,10 +6796,29 @@ return (
                   onCommitAndPush={(msg) => git.commitAndPushChanges(msg)}
                   onPush={(remote, branch) => git.pushChanges(remote, branch)}
                   onSuggestMessage={() => git.suggestCommitMessage()}
-                  onCheckoutBranch={(b) => git.checkoutBranch(b)}
-                  onCreateBranch={(b) => git.createAndCheckoutBranch(b)}
+                  onCheckoutBranch={(b, f) => git.checkoutBranch(b, f)}
+                  onCreateBranch={(b, c) => git.createAndCheckoutBranch(b, c)}
+                  onValidateBranchName={(n) => git.validateBranchName(n)}
+                  onStashSave={(opt) => git.stashSave(opt)}
+                  onStashApply={(id) => git.stashApply(id)}
+                  onStashPop={(id) => git.stashPop(id)}
+                  onStashDrop={(id) => git.stashDrop(id)}
+                  onStashClear={() => git.stashClear()}
                   onDiscardFile={(f) => git.discardFile(f)}
                   onOpenFileDiff={handleOpenGitDiff}
+                  historyGraph={git.historyGraph}
+                  selectedCommit={git.selectedCommit}
+                  selectedCommitDiff={git.selectedCommitDiff}
+                  historyBranch={git.historyBranch}
+                  setHistoryBranch={git.setHistoryBranch}
+                  historyLoading={git.historyLoading}
+                  onFetchHistory={git.fetchHistory}
+                  onFetchCommitDetails={git.fetchCommitDetails}
+                  onFetchCommitDiff={git.fetchCommitDiff}
+                  onFetchFileHistory={git.fetchFileHistory}
+                  onSelectCommit={git.setSelectedCommit}
+                  onOpenConflictResolver={handleOpenConflictResolver}
+                  conflictsCount={activeConflicts.length}
                 />
               </div>
               <div className="flex-1 h-full flex flex-col bg-[#08080a] border-l border-[#1f1f1f]">
@@ -4832,6 +6891,10 @@ return (
                   setIsWholeWord={search.setIsWholeWord}
                   includeHidden={search.includeHidden}
                   setIncludeHidden={search.setIncludeHidden}
+                  includeGlobs={search.includeGlobs}
+                  setIncludeGlobs={search.setIncludeGlobs}
+                  excludeGlobs={search.excludeGlobs}
+                  setExcludeGlobs={search.setExcludeGlobs}
                   results={search.results}
                   groupedResults={search.groupedResults}
                   totalFiles={search.totalFiles}
@@ -4845,6 +6908,20 @@ return (
                   onReplaceAllInFile={(f) => search.replaceAllInFile(f)}
                   onReplaceAllInWorkspace={() => search.replaceAllInWorkspace()}
                   onNavigateResult={(dir) => search.navigateResult(dir)}
+                  previewModel={search.previewModel}
+                  isPreviewOpen={search.isPreviewOpen}
+                  previewLoading={search.previewLoading}
+                  activePreviewFile={search.activePreviewFile}
+                  setActivePreviewFilePath={search.setActivePreviewFilePath}
+                  changeSetRisk={search.changeSetRisk}
+                  isApplying={search.isApplying}
+                  onGeneratePreview={search.generatePreview}
+                  onClosePreview={search.closePreview}
+                  onToggleMatchSelection={search.toggleMatchSelection}
+                  onToggleFileSelection={search.toggleFileSelection}
+                  onSelectAllMatches={search.selectAllMatches}
+                  onDeselectAllMatches={search.deselectAllMatches}
+                  onApplyReplacementChangeSet={search.applyReplacementChangeSet}
                 />
               </div>
               <div className="flex-1 h-full flex flex-col" style={{ backgroundColor: "var(--theme-background, #050507)" }}>
@@ -4905,20 +6982,21 @@ return (
                       onChange={handleEditorChange}
                       onMount={handleEditorMount}
                       options={{
-                        fontSize: 13,
+                        fontSize: settings["editor.fontSize"] || 13,
+                        tabSize: settings["editor.tabSize"] || 2,
+                        insertSpaces: settings["editor.insertSpaces"] !== false,
                         fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                        minimap: { enabled: false },
+                        minimap: { enabled: Boolean(settings["editor.minimap"]) },
                         scrollBeyondLastLine: false,
                         automaticLayout: true,
                         theme: "vs-dark",
-                        tabSize: 2,
-                        wordWrap: "on",
+                        wordWrap: settings["editor.wordWrap"] || "on",
                         padding: { top: 12, bottom: 12 },
                         renderLineHighlight: "all",
-                        lineNumbers: "on",
+                        lineNumbers: settings["editor.lineNumbers"] || "on",
                         glyphMargin: true,
-                        cursorBlinking: "smooth",
-                        smoothScrolling: true,
+                        cursorBlinking: settings["editor.cursorBlinking"] || "smooth",
+                        smoothScrolling: settings["editor.smoothScrolling"] !== false,
                       }}
                     />
                   ) : (
@@ -4935,6 +7013,7 @@ return (
                 <TestExplorerPanel
                   workspacePath={folderPath || ""}
                   onOpenTestFile={handleOpenTestFile}
+                  onRepairWithAI={handleRepairWithAI}
                   testsHook={testsHook}
                 />
               </div>
@@ -5036,81 +7115,65 @@ return (
             </div>
           ) : (
             <>
-              {/* Multi-Tab Bar */}
-              <div className="h-9 bg-[#0a0a0a] border-b border-[#1f1f1f] flex items-center px-2 gap-1 font-mono text-xs overflow-x-auto shrink-0">
-                {openTabs.map((tab) => (
-                  <div
-                    key={tab.path}
-                    onClick={() => {
-                      setActiveTabPath(tab.path);
-                      if (tab.path === "nexus://patch-firewall") {
-                        setMainView("patch_firewall");
-                      } else {
-                        setMainView("editor");
-                      }
-                      restoreTabCursor(tab.path);
-                      runAnalysis(tab);
-                    }}
-                    className={`group px-3 py-1 rounded-t-lg flex items-center gap-2 cursor-pointer transition-all ${
-                      activeTabPath === tab.path
-                        ? "bg-[#050505] text-cyan-400 border-t border-x border-cyan-500/40 font-bold shadow-sm"
-                        : "text-zinc-400 hover:text-white hover:bg-zinc-900/40"
-                    }`}
-                  >
-                    <FileText className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>{tab.name}</span>
-
-                    {tab.isDirty && (
-                      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" title="Unsaved changes ●" />
-                    )}
-
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      onClick={(e) => handleCloseTab(tab.path, e)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.stopPropagation();
-                          handleCloseTab(tab.path, e as any);
-                        }
-                      }}
-                      className="opacity-60 hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-white transition-opacity inline-block cursor-pointer"
-                    >
-                      <X className="w-3 h-3" />
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Monaco Editor Container & Live Web Preview Split Pane */}
-              <div ref={monacoWrapperRef} style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden", display: "flex" }} className="flex-1 min-w-0 min-h-0 relative overflow-hidden bg-[#050505] flex">
-                <div style={{ flex: showLivePreview ? 0.5 : 1, minWidth: 0, height: "100%", position: "relative" }} className="h-full">
-                  {activeTab ? (
-                    <MonacoEditor
-                      key={activeTab.path}
-                      width="100%"
-                      height="100%"
-                      language={getLanguageFromPath(activeTab.path)}
-                      value={activeTab.content ?? ""}
-                      onChange={handleEditorChange}
-                      onMount={handleEditorMount}
-                      options={{
-                        fontSize: 13,
-                        fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                        lineNumbers: "on",
-                        minimap: { enabled: true },
-                        bracketPairColorization: { enabled: true },
-                        "semanticHighlighting.enabled": true,
-                        wordWrap: "off",
-                        smoothScrolling: true,
-                        automaticLayout: true,
-                        padding: { top: 12 },
-                      }}
-                    />
-                  ) : (
-                    <div className="w-full h-full bg-[#050505] text-zinc-500 flex items-center justify-center font-mono text-xs">
-                      No file selected
+              {/* Monaco Editor Multi-Group Container & Live Web Preview Split Pane */}
+              <div
+                ref={monacoWrapperRef}
+                style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", overflow: "hidden", display: "flex" }}
+                className="flex-1 min-w-0 min-h-0 relative overflow-hidden bg-[#050505] flex"
+              >
+                <div
+                  style={{ flex: showLivePreview ? 0.5 : 1, minWidth: 0, height: "100%", position: "relative" }}
+                  className={`h-full flex ${
+                    editorGroups.length > 1 && splitOrientation === "horizontal" ? "flex-col" : "flex-row"
+                  }`}
+                >
+                  {isDiffEditorActive ? (
+                    <div className="w-full h-full flex flex-col">
+                      <div className="h-7 bg-[#0a0a10] border-b border-[#1f1f28] flex items-center justify-between px-3 text-[11px] font-mono text-zinc-300">
+                        <span className="flex items-center gap-1.5 text-cyan-300 font-bold">
+                          <GitPullRequest className="w-3.5 h-3.5" />
+                          <span>ChangeSet Diff Inspection Mode</span>
+                        </span>
+                        <button
+                          onClick={() => setIsDiffEditorActive(false)}
+                          className="px-2 py-0.5 rounded bg-[#161622] hover:bg-[#202030] text-zinc-300 border border-[#242436] cursor-pointer"
+                        >
+                          Close Diff
+                        </button>
+                      </div>
+                      <div className="flex-1 min-h-0">
+                        <DiffEditor
+                          original={diffEditorOriginal}
+                          modified={diffEditorModified}
+                          language={getLanguageFromPath(activeTab?.path || "")}
+                          theme="vs-dark"
+                          options={{
+                            fontSize: 13,
+                            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                            automaticLayout: true,
+                            readOnly: true,
+                            renderSideBySide: true,
+                            minimap: { enabled: false },
+                          }}
+                        />
+                      </div>
                     </div>
+                  ) : (
+                    <>
+                      {renderEditorGroupPane(editorGroups[0])}
+                      {editorGroups.length > 1 && (
+                        <>
+                          <div
+                            className={
+                              splitOrientation === "horizontal"
+                                ? "h-1 bg-[#1f1f1f] hover:bg-cyan-500/50 transition-colors cursor-row-resize shrink-0"
+                                : "w-1 bg-[#1f1f1f] hover:bg-cyan-500/50 transition-colors cursor-col-resize shrink-0"
+                            }
+                          />
+                          {renderEditorGroupPane(editorGroups[1], true)}
+                        </>
+                      )}
+                    </>
                   )}
                 </div>
 
@@ -5711,6 +7774,9 @@ return (
             activeSessionTitle={activeTaskPrompt || "Agent Task Session"}
             activeContinuumSnapshot={activeContinuumSnapshot}
             selectionInfo={selectionInfo}
+            cursorPos={cursorPos}
+            gitBranch={git.currentBranch || "main"}
+            diagnostic={activeDiagnostic}
             initialTask={activeTaskPrompt}
             onPreviewDiff={handleAgentPreviewDiff}
             onApplyStep={handleApplyAgentStep}
@@ -5737,10 +7803,20 @@ return (
           tabs: terminalTabs,
           activeTabId: activeTerminalTabId,
           onSelectTab: (id) => setActiveTerminalTabId(id),
-          onCreateTab: () => createTerminalTab(folderPath || ""),
+          onCreateTab: (shell?: string, name?: string) => {
+            createTerminalTab(folderPath || "", shell, name);
+          },
           onCloseTab: (id) => closeTerminalTab(id),
           onRestartTab: (id) => restartTerminalTab(id),
           onSendInput: (id, input) => sendTerminalInput(id, input),
+          onRenameTab: renameTerminalTab,
+          onClearTabOutput: clearTerminalTabOutput,
+          splitLayout: terminalSplitLayout,
+          splitTabIds: terminalSplitTabIds,
+          focusedPaneId: terminalFocusedPaneId,
+          onSplitTab: splitTerminalTab,
+          onUnsplit: unsplitTerminal,
+          onFocusPane: setTerminalFocusedPaneId,
           logs,
           onClearLogs: () => setLogs([]),
           debugLogs: debugSteps.map((s) => `[Step ${s.step}] Line ${s.line} in ${s.functionName || "global"}`),
@@ -5748,12 +7824,16 @@ return (
           onClearDebugLogs: () => setPythonOutput(""),
           activeMode: terminalPanelMode,
           onModeChange: (mode) => setTerminalPanelMode(mode),
+          onAskAiAboutDiagnostic: (diag) => handleAskAiAboutDiagnostic(diag),
+          onOpenLocation: (fp, line, col) => handleNavigateToLocation({ filePath: fp, line, column: col }),
+          onSendSelectionToAi: (txt) => handleSendTerminalSelectionToAi(txt),
         }}
         gitSummary={{
           branch: git.currentBranch || "main",
           stagedCount: git.staged.length,
           unstagedCount: git.unstaged.length,
         }}
+        problems={problems}
       />
 
       {/* Professional Status Bar */}
@@ -5767,6 +7847,7 @@ return (
         verificationActive={true}
         onSelectVerificationTab={() => setActiveActivityItem("verification")}
         onSelectAgentPanel={() => setShowDockedAgentPanel(true)}
+        onSelectSourceControl={() => setActiveActivityItem("git")}
       />
 
       {/* 4. Right-Side Sliding Diff Drawer */}
@@ -6079,11 +8160,83 @@ return (
         onOpenFingerprint={() => setMainView("behavior_fingerprint")}
         onOpenFirewall={() => setMainView("patch_firewall")}
         onOpenIntentRadar={() => setMainView("semantic_intent_radar")}
+        onNewTerminalTab={() => {
+          setShowBottomPanel(true);
+          setActiveBottomTab("terminal");
+          setTerminalPanelMode("terminal");
+          createTerminalTab(folderPath || "");
+        }}
+        onSplitTerminalVertical={() => {
+          setShowBottomPanel(true);
+          setActiveBottomTab("terminal");
+          setTerminalPanelMode("terminal");
+          splitTerminalTab("vertical");
+        }}
+        onSplitTerminalHorizontal={() => {
+          setShowBottomPanel(true);
+          setActiveBottomTab("terminal");
+          setTerminalPanelMode("terminal");
+          splitTerminalTab("horizontal");
+        }}
+        onClearTerminalOutput={() => {
+          clearTerminalTabOutput(terminalFocusedPaneId || activeTerminalTabId);
+        }}
+        onSplitEditorRight={handleSplitRight}
+        onSplitEditorDown={handleSplitDown}
+        onCloseEditorGroup={() => handleCloseEditorGroup()}
+        onMoveTabToOtherGroup={() => handleMoveTabToOtherGroup()}
+        onToggleOutline={() => setIsOutlineExpanded((prev) => !prev)}
+        onRevertCurrentHunk={() => {
+          if (gitHunks.length > 0) {
+            setRevertingHunkModal({
+              isOpen: true,
+              hunk: gitHunks[0],
+              filePath: activeTabPath,
+            });
+          } else {
+            showToast("No active Git hunks in current file");
+          }
+        }}
+        onRefreshGitGutter={() => {
+          if (activeTabPath) fetchGitHunks(activeTabPath);
+        }}
+        onStartDebugging={() => handleRunUnifiedDebugger()}
+        onStopDebugging={handleStopDebug}
+        onStepOver={handleStepOverDebug}
+        onStepInto={handleStepIntoDebug}
+        onStepOut={handleStepOutDebug}
+        onToggleBreakpoint={() => {
+          const curLine = cursorPos?.line || 1;
+          handleToggleBreakpoint(curLine);
+        }}
+        onDebugTestSelected={() => {
+          if (activeTab) {
+            handleDebugTest({
+              id: `test_sel_${Date.now()}`,
+              name: activeTab.name,
+              filePath: activeTab.path,
+              line: cursorPos?.line || 1,
+              type: "test",
+              framework: activeTab.path.endsWith(".py") ? "pytest" : "jest",
+              status: "pending",
+            });
+          }
+        }}
+        onOpenSettings={() => setMainView("settings")}
+        onOpenKeybindings={() => setMainView("settings")}
         openTabs={openTabs.map((t) => ({ path: t.path, name: t.name }))}
         onSelectTab={(path) => {
           setActiveTabPath(path);
           restoreTabCursor(path);
         }}
+      />
+
+      {/* Settings & Preferences Modal */}
+      <SettingsPanel
+        isOpen={mainView === "settings"}
+        onClose={() => setMainView("editor")}
+        workspacePath={folderPath || ""}
+        settingsHook={settingsHook}
       />
 
       <QuickOpen
@@ -6206,6 +8359,447 @@ return (
         onSuccess={handleApiKeyModalSuccess}
         providerId={aiActiveProvider}
       />
+
+      {/* Explorer Right-Click Context Menu */}
+      {explorerContextMenu && (
+        <div
+          className="fixed inset-0 z-50 bg-transparent"
+          onClick={() => setExplorerContextMenu(null)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setExplorerContextMenu(null);
+          }}
+        >
+          <div
+            style={{
+              top: Math.min(explorerContextMenu.y, window.innerHeight - 220),
+              left: Math.min(explorerContextMenu.x, window.innerWidth - 180),
+              backgroundColor: "var(--theme-surface-panel, #0a0a0f)",
+              borderColor: "var(--theme-border, #1f1f28)",
+            }}
+            className="absolute z-50 w-48 rounded-lg border shadow-xl p-1 font-mono text-xs text-zinc-300 space-y-0.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {explorerContextMenu.node?.isDirectory ? (
+              <>
+                <button
+                  onClick={() => {
+                    const target = explorerContextMenu.node?.path || folderPath || "";
+                    setExplorerContextMenu(null);
+                    setExplorerNewItemModal({ isOpen: true, type: "file", targetDir: target, value: "" });
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded hover:bg-[#1f1f2e] hover:text-cyan-300 flex items-center gap-2 text-left cursor-pointer"
+                >
+                  <FilePlus className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>New File</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const target = explorerContextMenu.node?.path || folderPath || "";
+                    setExplorerContextMenu(null);
+                    setExplorerNewItemModal({ isOpen: true, type: "folder", targetDir: target, value: "" });
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded hover:bg-[#1f1f2e] hover:text-cyan-300 flex items-center gap-2 text-left cursor-pointer"
+                >
+                  <FolderPlus className="w-3.5 h-3.5 text-amber-400" />
+                  <span>New Folder</span>
+                </button>
+                <div className="h-px bg-[#1f1f28] my-1" />
+                <button
+                  onClick={() => {
+                    const node = explorerContextMenu.node;
+                    setExplorerContextMenu(null);
+                    if (node) setExplorerRenameModal({ isOpen: true, node, value: node.name });
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded hover:bg-[#1f1f2e] hover:text-cyan-300 flex items-center gap-2 text-left cursor-pointer"
+                >
+                  <Edit2 className="w-3.5 h-3.5 text-zinc-400" />
+                  <span>Rename</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const node = explorerContextMenu.node;
+                    setExplorerContextMenu(null);
+                    if (node) setExplorerDeleteConfirm({ isOpen: true, node });
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded hover:bg-rose-950/60 hover:text-rose-300 flex items-center gap-2 text-left cursor-pointer text-rose-400"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Delete</span>
+                </button>
+                <div className="h-px bg-[#1f1f28] my-1" />
+                <button
+                  onClick={() => {
+                    const node = explorerContextMenu.node;
+                    setExplorerContextMenu(null);
+                    if (node?.path && navigator?.clipboard) {
+                      navigator.clipboard.writeText(node.path);
+                      showToast("Path copied to clipboard");
+                    }
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded hover:bg-[#1f1f2e] hover:text-cyan-300 flex items-center gap-2 text-left cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5 text-zinc-400" />
+                  <span>Copy Path</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const node = explorerContextMenu.node;
+                    setExplorerContextMenu(null);
+                    if (node?.path && window.electronAPI?.revealInFinder) {
+                      window.electronAPI.revealInFinder(node.path);
+                    }
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded hover:bg-[#1f1f2e] hover:text-cyan-300 flex items-center gap-2 text-left cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-zinc-400" />
+                  <span>Reveal in Finder</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => {
+                    const node = explorerContextMenu.node;
+                    setExplorerContextMenu(null);
+                    if (node) handleOpenFile(node);
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded hover:bg-[#1f1f2e] hover:text-cyan-300 flex items-center gap-2 text-left cursor-pointer font-bold"
+                >
+                  <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Open File</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const node = explorerContextMenu.node;
+                    const parentDir = node?.path && node.path.includes("/") ? node.path.substring(0, node.path.lastIndexOf("/")) : folderPath || "";
+                    setExplorerContextMenu(null);
+                    setExplorerNewItemModal({ isOpen: true, type: "file", targetDir: parentDir, value: "" });
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded hover:bg-[#1f1f2e] hover:text-cyan-300 flex items-center gap-2 text-left cursor-pointer"
+                >
+                  <FilePlus className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>New File Here</span>
+                </button>
+                <div className="h-px bg-[#1f1f28] my-1" />
+                <button
+                  onClick={() => {
+                    const node = explorerContextMenu.node;
+                    setExplorerContextMenu(null);
+                    if (node) setExplorerRenameModal({ isOpen: true, node, value: node.name });
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded hover:bg-[#1f1f2e] hover:text-cyan-300 flex items-center gap-2 text-left cursor-pointer"
+                >
+                  <Edit2 className="w-3.5 h-3.5 text-zinc-400" />
+                  <span>Rename</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const node = explorerContextMenu.node;
+                    setExplorerContextMenu(null);
+                    if (node) setExplorerDeleteConfirm({ isOpen: true, node });
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded hover:bg-rose-950/60 hover:text-rose-300 flex items-center gap-2 text-left cursor-pointer text-rose-400"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Delete</span>
+                </button>
+                <div className="h-px bg-[#1f1f28] my-1" />
+                <button
+                  onClick={() => {
+                    const node = explorerContextMenu.node;
+                    setExplorerContextMenu(null);
+                    if (node?.path && navigator?.clipboard) {
+                      navigator.clipboard.writeText(node.path);
+                      showToast("Path copied to clipboard");
+                    }
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded hover:bg-[#1f1f2e] hover:text-cyan-300 flex items-center gap-2 text-left cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5 text-zinc-400" />
+                  <span>Copy Path</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const node = explorerContextMenu.node;
+                    setExplorerContextMenu(null);
+                    if (node?.path && window.electronAPI?.revealInFinder) {
+                      window.electronAPI.revealInFinder(node.path);
+                    }
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded hover:bg-[#1f1f2e] hover:text-cyan-300 flex items-center gap-2 text-left cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-zinc-400" />
+                  <span>Reveal in Finder</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* New File / New Folder Modal */}
+      {explorerNewItemModal?.isOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div
+            style={{
+              backgroundColor: "var(--theme-surface-panel, #0c0c14)",
+              borderColor: "var(--theme-border, #1f1f2c)",
+            }}
+            className="w-full max-w-sm rounded-xl border p-4 shadow-2xl space-y-3 font-mono text-xs text-zinc-200"
+          >
+            <div className="flex items-center justify-between">
+              <span className="font-bold flex items-center gap-1.5 text-cyan-300">
+                {explorerNewItemModal.type === "file" ? <FilePlus className="w-4 h-4" /> : <FolderPlus className="w-4 h-4" />}
+                <span>New {explorerNewItemModal.type === "file" ? "File" : "Folder"}</span>
+              </span>
+              <button
+                onClick={() => setExplorerNewItemModal(null)}
+                className="text-zinc-500 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div>
+              <label className="text-[10.5px] text-zinc-400 block mb-1">
+                Enter {explorerNewItemModal.type === "file" ? "file name (e.g. index.ts)" : "folder name"}:
+              </label>
+              <input
+                autoFocus
+                type="text"
+                value={explorerNewItemModal.value}
+                onChange={(e) =>
+                  setExplorerNewItemModal((prev) => (prev ? { ...prev, value: e.target.value } : null))
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    if (explorerNewItemModal.type === "file") {
+                      handleExplorerCreateFile(explorerNewItemModal.targetDir, explorerNewItemModal.value);
+                    } else {
+                      handleExplorerCreateDir(explorerNewItemModal.targetDir, explorerNewItemModal.value);
+                    }
+                  } else if (e.key === "Escape") {
+                    setExplorerNewItemModal(null);
+                  }
+                }}
+                placeholder={explorerNewItemModal.type === "file" ? "name.ts" : "new-folder"}
+                className="w-full px-3 py-1.5 bg-[#050508] border border-[#242436] rounded-lg text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => setExplorerNewItemModal(null)}
+                className="px-3 py-1 rounded-lg border border-[#242436] hover:bg-[#1a1a24] text-zinc-400 hover:text-white cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (explorerNewItemModal.type === "file") {
+                    handleExplorerCreateFile(explorerNewItemModal.targetDir, explorerNewItemModal.value);
+                  } else {
+                    handleExplorerCreateDir(explorerNewItemModal.targetDir, explorerNewItemModal.value);
+                  }
+                }}
+                className="px-3.5 py-1 rounded-lg bg-cyan-400 hover:bg-cyan-300 text-black font-bold cursor-pointer"
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rename Modal */}
+      {explorerRenameModal?.isOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div
+            style={{
+              backgroundColor: "var(--theme-surface-panel, #0c0c14)",
+              borderColor: "var(--theme-border, #1f1f2c)",
+            }}
+            className="w-full max-w-sm rounded-xl border p-4 shadow-2xl space-y-3 font-mono text-xs text-zinc-200"
+          >
+            <div className="flex items-center justify-between">
+              <span className="font-bold flex items-center gap-1.5 text-cyan-300">
+                <Edit2 className="w-4 h-4" />
+                <span>Rename Item</span>
+              </span>
+              <button
+                onClick={() => setExplorerRenameModal(null)}
+                className="text-zinc-500 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div>
+              <label className="text-[10.5px] text-zinc-400 block mb-1">New name:</label>
+              <input
+                autoFocus
+                type="text"
+                value={explorerRenameModal.value}
+                onChange={(e) =>
+                  setExplorerRenameModal((prev) => (prev ? { ...prev, value: e.target.value } : null))
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && explorerRenameModal.node) {
+                    handleExplorerRename(explorerRenameModal.node, explorerRenameModal.value);
+                  } else if (e.key === "Escape") {
+                    setExplorerRenameModal(null);
+                  }
+                }}
+                className="w-full px-3 py-1.5 bg-[#050508] border border-[#242436] rounded-lg text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => setExplorerRenameModal(null)}
+                className="px-3 py-1 rounded-lg border border-[#242436] hover:bg-[#1a1a24] text-zinc-400 hover:text-white cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (explorerRenameModal.node) {
+                    handleExplorerRename(explorerRenameModal.node, explorerRenameModal.value);
+                  }
+                }}
+                className="px-3.5 py-1 rounded-lg bg-cyan-400 hover:bg-cyan-300 text-black font-bold cursor-pointer"
+              >
+                Rename
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {explorerDeleteConfirm?.isOpen && explorerDeleteConfirm.node && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div
+            style={{
+              backgroundColor: "var(--theme-surface-panel, #0c0c14)",
+              borderColor: "var(--theme-border, #1f1f2c)",
+            }}
+            className="w-full max-w-sm rounded-xl border border-rose-500/40 p-4 shadow-2xl space-y-3 font-mono text-xs text-zinc-200"
+          >
+            <div className="flex items-center gap-2 text-rose-400 font-bold">
+              <Trash2 className="w-4 h-4" />
+              <span>Delete {explorerDeleteConfirm.node.isDirectory ? "Folder" : "File"}</span>
+            </div>
+            <p className="text-zinc-300 text-xs leading-relaxed">
+              Are you sure you want to permanently delete <strong className="text-white font-bold">{explorerDeleteConfirm.node.name}</strong>?
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setExplorerDeleteConfirm(null)}
+                className="px-3 py-1 rounded-lg border border-[#242436] hover:bg-[#1a1a24] text-zinc-400 hover:text-white cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (explorerDeleteConfirm.node) {
+                    handleExplorerDelete(explorerDeleteConfirm.node);
+                  }
+                }}
+                className="px-3.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold cursor-pointer"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Milestone 30: Interactive 3-Way ChangeSet Merge Editor */}
+      <ChangeConflictResolver
+        isOpen={conflictResolverOpen}
+        conflicts={activeConflicts}
+        workspacePath={folderPath || undefined}
+        onResolveHunk={handleResolveConflictHunk}
+        onResolveFile={handleResolveConflictFile}
+        onApplyResolved={handleApplyResolvedConflicts}
+        onCancel={() => {
+          setConflictResolverOpen(false);
+          const harness = (window as any).electronAPI?.harness;
+          if (harness?.cancelConflictResolution) {
+            harness.cancelConflictResolution();
+          }
+        }}
+      />
+
+      {/* Milestone 33: Git Hunk Revert Modal */}
+      {revertingHunkModal?.isOpen && revertingHunkModal.hunk && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div
+            style={{
+              backgroundColor: "var(--theme-surface-panel, #0c0c14)",
+              borderColor: "var(--theme-border, #1f1f2c)",
+            }}
+            className="w-full max-w-lg rounded-xl border p-4 shadow-2xl space-y-3 font-mono text-xs text-zinc-200"
+          >
+            <div className="flex items-center justify-between">
+              <span className="font-bold flex items-center gap-1.5 text-cyan-300">
+                <RotateCcw className="w-4 h-4 text-cyan-400" />
+                <span>Revert Git Hunk ({revertingHunkModal.hunk.changeType})</span>
+              </span>
+              <button
+                onClick={() => setRevertingHunkModal(null)}
+                className="text-zinc-500 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="text-[11px] text-zinc-400">
+              <span>File: <strong className="text-zinc-200">{revertingHunkModal.filePath}</strong></span>
+              <span className="ml-3">Lines: <strong className="text-zinc-200">{revertingHunkModal.hunk.startLine}–{revertingHunkModal.hunk.endLine}</strong></span>
+            </div>
+            
+            {revertingHunkModal.hunk.oldLines.length > 0 && (
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-emerald-400 font-bold block mb-1">
+                  Original (HEAD to restore):
+                </label>
+                <pre className="max-h-32 overflow-y-auto p-2 bg-[#050508] border border-emerald-500/30 rounded text-[11px] text-emerald-300 font-mono">
+                  {revertingHunkModal.hunk.oldLines.join("\n")}
+                </pre>
+              </div>
+            )}
+
+            {revertingHunkModal.hunk.newLines.length > 0 && (
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-rose-400 font-bold block mb-1">
+                  Current (to be reverted):
+                </label>
+                <pre className="max-h-32 overflow-y-auto p-2 bg-[#050508] border border-rose-500/30 rounded text-[11px] text-rose-300 font-mono">
+                  {revertingHunkModal.hunk.newLines.join("\n")}
+                </pre>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setRevertingHunkModal(null)}
+                className="px-3 py-1 rounded-lg border border-[#242436] hover:bg-[#1a1a24] text-zinc-400 hover:text-white cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (revertingHunkModal.hunk) {
+                    handleRevertHunk(revertingHunkModal.hunk, revertingHunkModal.filePath);
+                  }
+                }}
+                className="px-3.5 py-1 rounded-lg bg-cyan-400 hover:bg-cyan-300 text-black font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Revert This Hunk</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

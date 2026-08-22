@@ -186,8 +186,8 @@ class AgentManager {
       },
     });
 
-    // If harnessResult did not succeed (e.g. offline provider in legacy tests), invoke visible legacy fallback
-    if (!harnessResult.success) {
+    // If harnessResult did not succeed and NO provider key is configured (e.g. offline provider in tests), invoke visible legacy fallback
+    if (!harnessResult.success && (!aiProviderRouter || !aiProviderRouter.hasApiKey(providerId || aiProviderRouter.activeProviderId))) {
       console.warn('[LEGACY-FACADE] Harness execution failed (e.g. offline provider), invoking legacy deterministic fallback for backward compatibility');
       const files = this.scanWorkspaceFiles(workspacePath, 20);
       const targetFile = this.resolveTargetFile(workspacePath, files, activeFilePath, task, isExplicitEditorTarget);
@@ -213,9 +213,9 @@ class AgentManager {
         summary: harnessResult.response || harnessResult.summary || 'Conversation completed.',
         execution: {
           providerId: harnessResult.execution?.providerId || providerId || 'groq',
-          modelId: harnessResult.execution?.modelId || modelId || 'llama-3.3-70b-versatile',
+          modelId: harnessResult.execution?.modelId || modelId || 'llama-3.1-8b-instant',
           requestedProviderId: harnessResult.execution?.requestedProviderId || providerId || 'groq',
-          requestedModelId: harnessResult.execution?.requestedModelId || modelId || 'llama-3.3-70b-versatile',
+          requestedModelId: harnessResult.execution?.requestedModelId || modelId || 'llama-3.1-8b-instant',
           isFallback: Boolean(harnessResult.execution?.isFallback),
         },
       };
@@ -272,7 +272,7 @@ class AgentManager {
       summary: harnessResult.finalResponse || harnessResult.summary || 'Coding task completed.',
       execution: harnessResult.execution || {
         providerId: providerId || 'groq',
-        modelId: modelId || 'llama-3.3-70b-versatile',
+        modelId: modelId || 'llama-3.1-8b-instant',
         isFallback: false,
       },
     };

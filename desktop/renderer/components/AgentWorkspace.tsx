@@ -3,16 +3,27 @@
 import React, { useState } from "react";
 import { Sparkles, ArrowLeft, Square, Play, CheckCircle2, FileText, ChevronRight, ShieldCheck, Terminal } from "lucide-react";
 import AgentPanel, { AgentStep, ProposedEdit } from "./AgentPanel";
+import { TerminalDiagnostic } from "../utils/diagnosticParser";
 
 interface AgentWorkspaceProps {
   workspacePath: string;
   activeFilePath?: string;
   activeTaskPrompt: string;
+  diagnostic?: TerminalDiagnostic | null;
   onBackToHome: () => void;
   onPreviewDiff?: (edit: ProposedEdit) => void;
   onApplyStep?: (step: AgentStep) => Promise<boolean>;
   onApplyAllApproved?: (steps: AgentStep[], createCommit: boolean, verifyCmd: string) => Promise<void>;
   runningCommandOutput?: string;
+  selectionInfo?: {
+    text: string;
+    startLineNumber: number;
+    endLineNumber: number;
+    startColumn?: number;
+    endColumn?: number;
+  } | null;
+  cursorPos?: { line: number; col: number } | null;
+  gitBranch?: string;
   // Right-side Editor content renderer passed from parent
   editorCanvas: React.ReactNode;
 }
@@ -21,11 +32,15 @@ export default function AgentWorkspace({
   workspacePath,
   activeFilePath,
   activeTaskPrompt,
+  diagnostic,
   onBackToHome,
   onPreviewDiff,
   onApplyStep,
   onApplyAllApproved,
   runningCommandOutput,
+  selectionInfo,
+  cursorPos,
+  gitBranch,
   editorCanvas,
 }: AgentWorkspaceProps) {
   return (
@@ -69,6 +84,10 @@ export default function AgentWorkspace({
               onClose={() => {}}
               workspacePath={workspacePath}
               activeFilePath={activeFilePath}
+              diagnostic={diagnostic}
+              selectionInfo={selectionInfo}
+              cursorPos={cursorPos}
+              gitBranch={gitBranch}
               initialTask={activeTaskPrompt}
               onPreviewDiff={onPreviewDiff}
               onApplyStep={onApplyStep}

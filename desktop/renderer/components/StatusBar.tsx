@@ -15,6 +15,7 @@ interface StatusBarProps {
   activeTask?: string;
   onSelectVerificationTab?: () => void;
   onSelectAgentPanel?: () => void;
+  onSelectSourceControl?: () => void;
 }
 
 export default function StatusBar({
@@ -28,6 +29,7 @@ export default function StatusBar({
   activeTask,
   onSelectVerificationTab,
   onSelectAgentPanel,
+  onSelectSourceControl,
 }: StatusBarProps) {
   const [aiConfig, setAiConfig] = useState<any>(null);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
@@ -144,10 +146,14 @@ export default function StatusBar({
       {/* Left Items */}
       <div className="flex items-center gap-2.5">
         {/* Git Branch */}
-        <div className="flex items-center gap-1 text-zinc-300 font-medium">
+        <button
+          onClick={onSelectSourceControl}
+          className="flex items-center gap-1 text-zinc-300 hover:text-cyan-300 font-medium cursor-pointer transition-colors"
+          title={`Active Branch: ${gitBranch} (Click to open Source Control)`}
+        >
           <GitBranch className="w-3 h-3 text-cyan-400" />
           <span>{gitBranch}</span>
-        </div>
+        </button>
 
         <span className="text-[#1a1a24]">|</span>
 

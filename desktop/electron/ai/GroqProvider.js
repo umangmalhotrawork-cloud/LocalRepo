@@ -12,13 +12,15 @@ class GroqProvider extends OpenAICompatibleProvider {
       'Groq',
       'https://api.groq.com/openai/v1',
       [
-        { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B Versatile' },
-        { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant' },
-        { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B 32k' },
-        { id: 'gemma2-9b-it', name: 'Gemma 2 9B' },
-        { id: 'deepseek-r1-distill-llama-70b', name: 'DeepSeek R1 Distill Llama 70B' },
+        { id: 'openai/gpt-oss-120b', name: 'OpenAI GPT-OSS 120B (High Intelligence & Active)' },
+        { id: 'openai/gpt-oss-20b', name: 'OpenAI GPT-OSS 20B' },
+        { id: 'groq/compound', name: 'Groq Compound (Fast Multi-Expert)' },
+        { id: 'groq/compound-mini', name: 'Groq Compound Mini' },
+        { id: 'qwen/qwen3.6-27b', name: 'Qwen 3.6 27B' },
+        { id: 'allam-2-7b', name: 'ALLaM 2 7B' },
+        { id: 'canopylabs/orpheus-v1-english', name: 'Canopy Labs Orpheus English' },
       ],
-      DEFAULT_MODELS[PROVIDER_IDS.GROQ] || 'llama-3.3-70b-versatile',
+      DEFAULT_MODELS[PROVIDER_IDS.GROQ] || 'openai/gpt-oss-120b',
       { supportsJsonMode: true }
     );
   }

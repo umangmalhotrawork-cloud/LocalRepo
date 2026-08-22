@@ -24,9 +24,18 @@ cp package.json "${RESOURCES_APP_DIR}/"
 cp -R out "${RESOURCES_APP_DIR}/"
 cp -R desktop "${RESOURCES_APP_DIR}/"
 
+# Exclude test suites and test fixtures from production bundle
+find "${RESOURCES_APP_DIR}/desktop" -name "test_*.js" -delete
+find "${RESOURCES_APP_DIR}/desktop" -name "*.test.js" -delete
+find "${RESOURCES_APP_DIR}/desktop" -name "*.test.ts" -delete
+find "${RESOURCES_APP_DIR}/desktop" -name "*.test.tsx" -delete
+
 if [ -f "package-lock.json" ]; then
   cp package-lock.json "${RESOURCES_APP_DIR}/"
 fi
+
+# Copy full production runtime dependency closure
+node scripts/copy-production-dependencies.js "${RESOURCES_APP_DIR}"
 
 # Ensure native spawn-helper binaries have executable permissions
 find node_modules/node-pty -name "spawn-helper" -exec chmod 0755 {} + 2>/dev/null || true

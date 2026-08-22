@@ -26,9 +26,10 @@ class HarnessPersistenceAdapter {
    * @param {Array<Object>} [turns] - Array of Turn objects
    * @param {Array<Object>} [items] - Array of Item objects
    * @param {string} [workspacePath] - Workspace directory path
+   * @param {Object} [options]
    * @returns {Object} Valid ContinuumSnapshot
    */
-  threadToContinuumSnapshot(thread, turns = [], items = [], workspacePath = '') {
+  threadToContinuumSnapshot(thread, turns = [], items = [], workspacePath = '', options = {}) {
     const activeWorkspace = workspacePath || thread.metadata?.workspacePath || process.cwd();
     const workspaceHash = this.continuumManager.getWorkspaceHash(activeWorkspace);
     const workspaceName = thread.metadata?.workspaceName || path.basename(activeWorkspace) || 'workspace';
@@ -121,12 +122,15 @@ class HarnessPersistenceAdapter {
       ? wsMgr.getChildWorkspace(thread.metadata.workspaceId)
       : (wsMgr.getChildWorkspace(thread.threadId) || null);
 
+    const conflictsData = (options && options.conflicts) || thread.metadata?.conflicts || thread.conflicts || [];
+
     snapshot.metadata.harness = {
       thread: secretFilter.sanitizeObject(thread),
       turns: secretFilter.sanitizeObject(turns),
       items: secretFilter.sanitizeObject(items),
       handoffState: secretFilter.sanitizeObject(handoffStateJSON),
       changeSets: secretFilter.sanitizeObject(changeSetsData),
+      conflicts: secretFilter.sanitizeObject(conflictsData),
       workspace: secretFilter.sanitizeObject(workspaceRecord),
     };
 
@@ -181,6 +185,7 @@ class HarnessPersistenceAdapter {
         items,
         handoffState: snapshot.metadata.harness.handoffState || null,
         changeSets: snapshot.metadata.harness.changeSets || [],
+        conflicts: snapshot.metadata.harness.conflicts || [],
         workspace: snapshot.metadata.harness.workspace || null,
       };
     }
@@ -269,7 +274,7 @@ class HarnessPersistenceAdapter {
       turns.push(turn);
     });
 
-    return { thread, turns, items };
+    return { thread, turns, items, conflicts: snapshot.metadata?.harness?.conflicts || [] };
   }
 
   /**
@@ -278,11 +283,12 @@ class HarnessPersistenceAdapter {
    * @param {Array<Object>} turns
    * @param {Array<Object>} items
    * @param {string} [workspacePath]
+   * @param {Object} [options]
    * @returns {Object} Save result from continuumManager
    */
-  saveThread(thread, turns = [], items = [], workspacePath = '') {
+  saveThread(thread, turns = [], items = [], workspacePath = '', options = {}) {
     const activeWorkspace = workspacePath || thread.metadata?.workspacePath || process.cwd();
-    const snapshot = this.threadToContinuumSnapshot(thread, turns, items, activeWorkspace);
+    const snapshot = this.threadToContinuumSnapshot(thread, turns, items, activeWorkspace, options);
     return this.continuumManager.saveSnapshot(snapshot, activeWorkspace);
   }
 
@@ -290,7 +296,7 @@ class HarnessPersistenceAdapter {
    * Loads a Thread and its active child entities from Continuum storage.
    * @param {string} threadId
    * @param {string} [workspacePath]
-   * @returns {{ success: boolean, thread?: Object, turns?: Array<Object>, items?: Array<Object>, error?: string }}
+   * @returns {{ success: boolean, thread?: Object, turns?: Array<Object>, items?: Array<Object>, conflicts?: Array<Object>, error?: string }}
    */
   loadThread(threadId, workspacePath = '') {
     const activeWorkspace = workspacePath || process.cwd();
@@ -303,13 +309,14 @@ class HarnessPersistenceAdapter {
     }
 
     try {
-      const { thread, turns, items, workspace } = this.continuumSnapshotToThread(loadRes.snapshot);
+      const { thread, turns, items, workspace, conflicts } = this.continuumSnapshotToThread(loadRes.snapshot);
       return {
         success: true,
         thread,
         turns,
         items,
         workspace,
+        conflicts: conflicts || [],
         snapshot: loadRes.snapshot,
       };
     } catch (err) {

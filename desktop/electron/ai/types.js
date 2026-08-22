@@ -20,7 +20,7 @@ const PROVIDER_STATUS = {
 
 const DEFAULT_MODELS = {
   [PROVIDER_IDS.GEMINI]: 'gemini-1.5-flash',
-  [PROVIDER_IDS.GROQ]: 'llama-3.3-70b-versatile',
+  [PROVIDER_IDS.GROQ]: 'openai/gpt-oss-120b',
   [PROVIDER_IDS.OPENAI]: 'gpt-4o',
   [PROVIDER_IDS.CLAUDE]: 'claude-3-5-sonnet-20241022',
   [PROVIDER_IDS.DEEPSEEK]: 'deepseek-coder',

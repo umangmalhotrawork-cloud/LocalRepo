@@ -493,6 +493,10 @@ class RepositorySymbolIndex {
     return files;
   }
 
+  indexFile(absFilePath) {
+    return this._indexSingleFile(absFilePath);
+  }
+
   _indexSingleFile(absFilePath) {
     const relPath = this._normalizeRelativePath(absFilePath);
     try {
@@ -524,10 +528,31 @@ class RepositorySymbolIndex {
         continue;
       }
 
+      // Call extraction relationship
+      if (node.type === 'CallExpression') {
+        if (node.name) {
+          this.relationships.push({
+            sourceSymbolId: null,
+            targetSymbolId: null,
+            targetName: node.name,
+            type: RELATIONSHIP_TYPE.CALLS,
+            sourceFilePath: relPath,
+            targetFilePath: null,
+            line: node.startLine || 1,
+            confidence: IMPACT_CONFIDENCE.HEURISTIC,
+          });
+        }
+        continue;
+      }
+
+      if (node.type === 'ReturnStatement' || node.type === 'ControlFlow') continue;
+
       let kind = SYMBOL_KIND.VARIABLE;
       if (node.type === 'FunctionDeclaration') kind = SYMBOL_KIND.FUNCTION;
       else if (node.type === 'ClassDeclaration') kind = SYMBOL_KIND.CLASS;
-      else if (node.type === 'ReturnStatement' || node.type === 'ControlFlow') continue;
+      else if (node.type === 'InterfaceDeclaration') kind = SYMBOL_KIND.INTERFACE;
+      else if (node.type === 'TypeAliasDeclaration') kind = SYMBOL_KIND.TYPE;
+      else if (node.type === 'EnumDeclaration') kind = SYMBOL_KIND.ENUM;
 
       if (!node.name) continue;
 
@@ -579,20 +604,6 @@ class RepositorySymbolIndex {
         line: node.startLine || 1,
         confidence: IMPACT_CONFIDENCE.DIRECT,
       });
-
-      // Call extraction
-      if (node.type === 'CallExpression') {
-        this.relationships.push({
-          sourceSymbolId: null,
-          targetSymbolId: null,
-          targetName: node.name,
-          type: RELATIONSHIP_TYPE.CALLS,
-          sourceFilePath: relPath,
-          targetFilePath: null,
-          line: node.startLine || 1,
-          confidence: IMPACT_CONFIDENCE.HEURISTIC,
-        });
-      }
     }
 
     this.fileSymbols.set(relPath, fileSymIds);

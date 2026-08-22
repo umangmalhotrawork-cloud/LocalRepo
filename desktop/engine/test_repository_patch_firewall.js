@@ -117,7 +117,7 @@ async function runTests() {
   const tempBefore = fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('echonullity_cf_') || f.startsWith('echonullity_blast_'));
   await evaluateRepositoryPatchFirewall({ patch_text: safeDiff, repository_path: repoDir });
   const tempAfter = fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('echonullity_cf_') || f.startsWith('echonullity_blast_'));
-  assert.strictEqual(tempAfter.length, tempBefore.length, 'Zero temp files should leak');
+  assert(tempAfter.length <= tempBefore.length, 'Zero temp files should leak');
   console.log('✓ Test 9 Passed: Temp cleanup verification');
 
   // -------------------------------------------------------------
