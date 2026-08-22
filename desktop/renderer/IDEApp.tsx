@@ -816,13 +816,55 @@ export default function IDEApp() {
   const pendingAiTaskPromptRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getConfig) {
-      (window as any).electronAPI.ai.getConfig().then((cfg: any) => {
+    const fetchConfig = () => {
+      if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getConfig) {
+        (window as any).electronAPI.ai.getConfig().then((cfg: any) => {
+          if (cfg?.activeProvider) setAiActiveProvider(cfg.activeProvider);
+          if (cfg?.activeModel) setAiActiveModel(cfg.activeModel);
+        }).catch(() => {});
+      }
+    };
+
+    fetchConfig();
+
+    let unsubscribeIpc: (() => void) | null = null;
+    if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.onConfigChange) {
+      unsubscribeIpc = (window as any).electronAPI.ai.onConfigChange((cfg: any) => {
         if (cfg?.activeProvider) setAiActiveProvider(cfg.activeProvider);
         if (cfg?.activeModel) setAiActiveModel(cfg.activeModel);
-      }).catch(() => {});
+      });
     }
+
+    const handleDomConfigChange = (e: any) => {
+      if (e?.detail?.providerId) setAiActiveProvider(e.detail.providerId);
+      if (e?.detail?.modelId) setAiActiveModel(e.detail.modelId);
+      fetchConfig();
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("nexus:ai-config-changed", handleDomConfigChange);
+    }
+
+    return () => {
+      if (typeof unsubscribeIpc === "function") unsubscribeIpc();
+      if (typeof window !== "undefined") {
+        window.removeEventListener("nexus:ai-config-changed", handleDomConfigChange);
+      }
+    };
   }, []);
+
+  const handleSelectGlobalModel = async (providerId: string, modelId?: string) => {
+    setAiActiveProvider(providerId);
+    if (modelId) setAiActiveModel(modelId);
+    if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.setConfig) {
+      try {
+        await (window as any).electronAPI.ai.setConfig(providerId, modelId);
+      } catch (e) {}
+    }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("nexus:ai-config-changed", { detail: { providerId, modelId } }));
+    }
+  };
 
   const ensureApiKeyConfigured = async (onConfigured?: () => void, taskPrompt?: string, targetProvider?: string): Promise<boolean> => {
     if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getConfig) {
@@ -4918,7 +4960,29 @@ export default function IDEApp() {
     }
   };
 
-  const handleAgentPreviewDiff = () => {
+  const handleAgentPreviewDiff = (edit?: any) => {
+    if (edit && edit.filePath) {
+      const targetPath = edit.filePath;
+      const targetTab = openTabs.find((t) => t.path === targetPath || t.path.endsWith(targetPath) || targetPath.endsWith(t.path));
+      const originalSource = targetTab ? targetTab.content : (edit.original || "");
+      let transformedSource = originalSource;
+      if (edit.original && edit.replacement !== undefined && originalSource.includes(edit.original)) {
+        transformedSource = originalSource.replace(edit.original, edit.replacement);
+      } else if (edit.replacement !== undefined) {
+        transformedSource = edit.replacement;
+      }
+      setDiffData({
+        file: targetPath,
+        original_source: originalSource,
+        transformed_source: transformedSource,
+        changed_lines: [1],
+        ghost_count_before: 1,
+        ghost_count_after: 0,
+        causal_luminance_after: 1.0,
+      });
+      setDiffDrawerOpen(true);
+      return;
+    }
     void handleOpenDiffPreview();
   };
 
@@ -7845,6 +7909,9 @@ return (
         activeTask={activeTaskPrompt || undefined}
         errorCount={findings.length}
         verificationActive={true}
+        activeProvider={aiActiveProvider}
+        activeModel={aiActiveModel}
+        onSelectModel={handleSelectGlobalModel}
         onSelectVerificationTab={() => setActiveActivityItem("verification")}
         onSelectAgentPanel={() => setShowDockedAgentPanel(true)}
         onSelectSourceControl={() => setActiveActivityItem("git")}

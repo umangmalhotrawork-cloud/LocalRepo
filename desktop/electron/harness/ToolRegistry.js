@@ -139,6 +139,7 @@ class ToolRegistry {
           error: secretFilter.sanitizeString(rawResult.error || 'Tool execution failed'),
           requiresApproval: rawResult.requiresApproval || false,
           policyDecision: rawResult.policyDecision || null,
+          changeSet: rawResult.changeSet || rawResult.result?.changeSet || null,
         };
       }
 

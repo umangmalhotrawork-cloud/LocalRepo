@@ -176,6 +176,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     discoverProviderModels: (providerId) => ipcRenderer.invoke('ai:discover-models', providerId),
     getProviderDiagnostics: (providerId) => ipcRenderer.invoke('ai:get-diagnostics', providerId),
     setActiveProviderModel: (providerId, modelId) => ipcRenderer.invoke('ai:set-config', { providerId, modelId }),
+    onConfigChange: (callback) => {
+      const handler = (_event, config) => callback(config);
+      ipcRenderer.on('ai:config-changed', handler);
+      return () => {
+        ipcRenderer.removeListener('ai:config-changed', handler);
+      };
+    },
     roles: {
       getConfig: () => ipcRenderer.invoke('ai:roles:get-config'),
       setConfig: (roleId, providerId, modelId) => ipcRenderer.invoke('ai:roles:set-config', { roleId, providerId, modelId }),

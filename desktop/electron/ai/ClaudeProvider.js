@@ -31,7 +31,11 @@ class ClaudeProvider extends AIProvider {
     return this.models;
   }
 
-  request(endpoint, method = 'GET', apiKey = '', body = null, timeoutMs = 25000) {
+  request(endpoint, method = 'GET', apiKey = '', body = null, headers = {}, timeoutMs = 25000) {
+    if (typeof headers === 'number') {
+      timeoutMs = headers;
+      headers = {};
+    }
     const parsed = new URL(`https://api.anthropic.com/v1${endpoint}`);
 
     const requestHeaders = {
@@ -39,6 +43,7 @@ class ClaudeProvider extends AIProvider {
       'anthropic-version': '2023-06-01',
       'User-Agent': 'NEXUS-Workbench-App',
       'Accept': 'application/json',
+      ...(headers && typeof headers === 'object' ? headers : {}),
     };
 
     let postData = null;
@@ -56,7 +61,7 @@ class ClaudeProvider extends AIProvider {
           path: `${parsed.pathname}${parsed.search}`,
           method,
           headers: requestHeaders,
-          timeout: timeoutMs,
+          timeout: typeof timeoutMs === 'number' ? timeoutMs : 25000,
         },
         (res) => {
           let raw = '';

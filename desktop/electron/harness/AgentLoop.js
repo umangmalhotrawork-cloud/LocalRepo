@@ -539,14 +539,35 @@ class AgentLoop {
               }
             }
 
+            // If apply_patch staged a ChangeSet, record CHANGE_SET item immediately
+            let changeSetItemId = null;
+            if (tc.toolName === 'apply_patch' && Array.isArray(tc.arguments?.edits)) {
+              const cs = execResult.changeSet || execResult.result?.changeSet;
+              if (cs) {
+                console.log(`[HARNESS-AGENTLOOP] Staged ChangeSet: ${cs.changeSetId} (${cs.files?.length || 0} files)`);
+                try {
+                  const changeSetItem = this.runtime.startItem(turnId, ITEM_TYPES.CHANGE_SET, {
+                    changeSetId: cs.changeSetId,
+                    status: cs.status || 'staged',
+                    risk: cs.risk || execResult.result?.firewall || { risk_level: 'AUTO_APPROVE', risk_score: 0 },
+                    files: cs.files,
+                    transactionId: execResult.result?.transactionId,
+                  });
+                  this.runtime.completeItem(changeSetItem.itemId);
+                  changeSetItemId = changeSetItem.itemId;
+                } catch (csErr) {}
+              }
+            }
+
             // If tool required approval and was blocked, wait for user decision unless auto mode
             if (execResult.requiresApproval && !execResult.success) {
+              console.log(`[HARNESS-AGENTLOOP] Action "${tc.callId}" (${tc.toolName}) requires approval. Transitioning to WAITING_FOR_APPROVAL.`);
               const approvalItem = this.runtime.startItem(turnId, ITEM_TYPES.APPROVAL_REQUEST, {
                 callId: tc.callId,
                 toolName: tc.toolName,
                 policyDecision: execResult.policyDecision,
                 error: execResult.error,
-                changeSet: execResult.changeSet || null,
+                changeSet: execResult.changeSet || execResult.result?.changeSet || null,
               });
               this.runtime.completeItem(approvalItem.itemId);
 
@@ -556,7 +577,8 @@ class AgentLoop {
                   this.runtime.turnManager.setWaitingForApproval(turnId);
                 } catch (e) {}
 
-                const decision = await this.waitForApproval(turnId, tc.callId);
+                const decision = await this.waitForApproval(turnId, tc.callId, payload.approvalTimeoutMs || 300000);
+                console.log(`[HARNESS-AGENTLOOP] Received approval decision for "${tc.callId}": approved=${Boolean(decision?.approved)}`);
 
                 // Resume turn to RUNNING after decision
                 try {
@@ -580,24 +602,22 @@ class AgentLoop {
               }
             }
 
-            // If apply_patch was executed, record CHANGE_SET and FILE_CHANGE items
+            // If apply_patch was executed successfully, record FILE_CHANGE items
             if (tc.toolName === 'apply_patch' && Array.isArray(tc.arguments?.edits)) {
-              if (execResult.result?.changeSet && (tc.arguments.edits.length > 1 || tc.arguments.isChangeSet || tc.arguments.changeSetId)) {
-                try {
-                  const cs = execResult.result.changeSet;
-                  const changeSetItem = this.runtime.startItem(turnId, ITEM_TYPES.CHANGE_SET, {
-                    changeSetId: cs.changeSetId,
-                    status: cs.status,
-                    risk: cs.risk,
-                    files: cs.files,
-                    transactionId: execResult.result?.transactionId,
-                  });
-                  if (execResult.success) {
+              if (!changeSetItemId) {
+                const cs = execResult.result?.changeSet || execResult.changeSet;
+                if (cs) {
+                  try {
+                    const changeSetItem = this.runtime.startItem(turnId, ITEM_TYPES.CHANGE_SET, {
+                      changeSetId: cs.changeSetId,
+                      status: cs.status || (execResult.success ? 'applied' : 'staged'),
+                      risk: cs.risk || execResult.result?.firewall || { risk_level: 'AUTO_APPROVE', risk_score: 0 },
+                      files: cs.files,
+                      transactionId: execResult.result?.transactionId,
+                    });
                     this.runtime.completeItem(changeSetItem.itemId);
-                  } else {
-                    this.runtime.failItem(changeSetItem.itemId, execResult.error || 'ChangeSet failed');
-                  }
-                } catch (csErr) {}
+                  } catch (csErr) {}
+                }
               }
 
 

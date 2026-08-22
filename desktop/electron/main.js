@@ -2455,15 +2455,27 @@ ipcMain.handle('ai:get-config', async () => {
 });
 
 ipcMain.handle('ai:set-config', async (_, { providerId, modelId }) => {
-  return aiProviderRouter.setConfig(providerId, modelId);
+  const result = aiProviderRouter.setConfig(providerId, modelId);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('ai:config-changed', aiProviderRouter.getConfig());
+  }
+  return result;
 });
 
 ipcMain.handle('ai:set-api-key', async (_, { providerId, apiKey }) => {
-  return aiProviderRouter.setApiKey(providerId, apiKey);
+  const result = await aiProviderRouter.setApiKey(providerId, apiKey);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('ai:config-changed', aiProviderRouter.getConfig());
+  }
+  return result;
 });
 
 ipcMain.handle('ai:remove-api-key', async (_, providerId) => {
-  return aiProviderRouter.removeApiKey(providerId);
+  const result = aiProviderRouter.removeApiKey(providerId);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('ai:config-changed', aiProviderRouter.getConfig());
+  }
+  return result;
 });
 
 ipcMain.handle('ai:has-api-key', async (_, providerId) => {

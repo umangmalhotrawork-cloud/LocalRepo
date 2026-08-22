@@ -4,6 +4,7 @@
  * and Patch Firewall safety verification.
  */
 
+const fs = require('fs');
 const path = require('path');
 const { transactionalPatchApplier } = require('../../transactionalPatchApplier');
 const { ChangeSet } = require('../ChangeSet');
@@ -12,13 +13,13 @@ const secretFilter = require('../../../security/secretFilter');
 
 const ApplyPatchTool = {
   name: 'apply_patch',
-  description: 'Applies transactional code replacements to workspace files with Patch Firewall protection and ChangeSet orchestration.',
+  description: 'Stages proposed code replacements into an authoritative ChangeSet for workspace files. Evaluates Patch Firewall safety, generates diffs, and requests explicit user approval before applying changes to disk.',
   inputSchema: {
     type: 'object',
     properties: {
       edits: {
         type: 'array',
-        description: 'Array of surgical edit operations to apply atomically',
+        description: 'Array of surgical edit operations to stage and apply atomically',
         items: {
           type: 'object',
           properties: {
@@ -74,8 +75,17 @@ const ApplyPatchTool = {
         };
       }
 
+      let filePathToUse = e.filePath.trim();
+      const directResolved = path.isAbsolute(filePathToUse) ? path.resolve(filePathToUse) : path.resolve(workspaceRoot, filePathToUse);
+      if (!fs.existsSync(directResolved)) {
+        const candidateInSrc = path.resolve(workspaceRoot, 'src', filePathToUse);
+        if (fs.existsSync(candidateInSrc)) {
+          filePathToUse = path.relative(workspaceRoot, candidateInSrc);
+        }
+      }
+
       changeSet.addFile({
-        filePath: e.filePath.trim(),
+        filePath: filePathToUse,
         original: typeof e.original === 'string' ? e.original : '',
         replacement: e.replacement,
       });
@@ -103,6 +113,29 @@ const ApplyPatchTool = {
         firewall: firewallResult,
         changeSet: changeSet.toJSON(),
         reason: 'FIREWALL_BLOCKED',
+      };
+    }
+
+    // If in strict or manual approval mode (or blocked by firewall), require explicit approval
+    const requiresManualApproval = (
+      context.approvalMode === 'strict' ||
+      context.approvalMode === 'manual' ||
+      risk.overallRiskLevel === 'BLOCKED' ||
+      (context.approvalMode !== 'auto' && !risk.safeToAutoApply)
+    );
+
+    if (!context.isApproved && !context.isForceApproved && requiresManualApproval) {
+      return {
+        success: false,
+        requiresApproval: true,
+        policyDecision: {
+          risk_level: risk.overallRiskLevel,
+          risk_score: risk.riskScore,
+          policy: 'MANUAL_APPROVAL_REQUIRED',
+        },
+        firewall: firewallResult,
+        changeSet: changeSet.toJSON(),
+        error: 'ChangeSet staged and waiting for user approval before applying to disk.',
       };
     }
 

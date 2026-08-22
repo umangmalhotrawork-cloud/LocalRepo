@@ -49,6 +49,11 @@ class ModelAdapter {
     lines.push('  ]');
     lines.push('}');
     lines.push('```');
+    lines.push('');
+    lines.push('## CRITICAL CODE MUTATION & PROPOSED CHANGES RULES');
+    lines.push('1. Whenever you propose, plan, or execute a code change, fix, refactor, or edit (or when the user asks to propose a fix, show a diff, or create a ChangeSet), you MUST invoke the `apply_patch` tool with your proposed edits.');
+    lines.push('2. Invoking `apply_patch` is safe and non-destructive: it stages changes into an authoritative ChangeSet, calculates diffs, evaluates Patch Firewall safety, and requests user approval before anything touches disk.');
+    lines.push('3. Do NOT output proposed code diffs solely as plain markdown text without invoking `apply_patch`. You MUST issue the `apply_patch` tool call to create the ChangeSet.');
     lines.push('When you have completed the task and have all necessary information, provide your final response directly as conversational text without any tool calls.');
 
     return lines.join('\n');
@@ -225,20 +230,35 @@ class ModelAdapter {
     let rawText = '';
     if (typeof provider.request === 'function') {
       // OpenAI-compatible endpoint (Groq, OpenAI, DeepSeek, Grok)
+      const requestPayload = {
+        model: modelId,
+        messages: fullMessages,
+        temperature: 0.1,
+        max_tokens: 3000,
+      };
+
+      if (tools && tools.length > 0) {
+        requestPayload.tools = tools.map((t) => ({
+          type: 'function',
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: t.inputSchema || { type: 'object', properties: {} },
+          },
+        }));
+        requestPayload.tool_choice = 'auto';
+      }
+
       const res = await provider.request(
         '/chat/completions',
         'POST',
         apiKey,
-        {
-          model: modelId,
-          messages: fullMessages,
-          temperature: 0.1,
-          max_tokens: 3000,
-        },
+        requestPayload,
         {},
         35000
       );
-      rawText = res.data?.choices?.[0]?.message?.content || '';
+      const choiceMessage = res.data?.choices?.[0]?.message;
+      return this.normalizeResponse(choiceMessage || res.data?.choices?.[0] || res.data?.choices?.[0]?.text || '');
     } else if (typeof provider.generateAgentPlan === 'function') {
       // General provider fallback
       const lastUserMsg = [...formattedMessages].reverse().find((m) => m.role === 'user')?.content || 'Continue task';
@@ -247,11 +267,10 @@ class ModelAdapter {
         workspacePath: options.workspacePath || process.cwd(),
       });
       rawText = planRes?.rawResponse || planRes?.summary || JSON.stringify(planRes);
+      return this.normalizeResponse(rawText);
     } else {
       throw new Error(`[HARNESS-MODELADAPTER] Provider "${provider.getId()}" does not support iterative invocation.`);
     }
-
-    return this.normalizeResponse(rawText);
   }
 
   /**
@@ -346,11 +365,25 @@ class ModelAdapter {
         const stream = provider.streamChatCompletions(apiKey, modelId, fullMessages, {
           temperature: 0.1,
           maxTokens: 3000,
+          tools,
           abortSignal: options.abortSignal,
         });
 
+        let capturedNativeToolCalls = [];
+
         for await (const chunk of stream) {
           sequence++;
+          if (chunk.toolCalls && chunk.toolCalls.length > 0) {
+            capturedNativeToolCalls = chunk.toolCalls;
+            yield {
+              type: 'tool_call_delta',
+              delta: '',
+              accumulated: accumulatedText,
+              toolCalls: capturedNativeToolCalls,
+              finishReason: chunk.finishReason || null,
+              sequence,
+            };
+          }
           if (chunk.content) {
             accumulatedText += chunk.content;
             yield {
@@ -361,6 +394,10 @@ class ModelAdapter {
               sequence,
             };
           }
+        }
+
+        if (capturedNativeToolCalls.length > 0) {
+          return;
         }
 
         // Parse accumulated text for JSON tool calls if any

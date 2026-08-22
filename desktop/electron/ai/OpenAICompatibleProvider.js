@@ -137,6 +137,18 @@ class OpenAICompatibleProvider extends AIProvider {
       ...(options.extraBody || {}),
     };
 
+    if (options.tools && options.tools.length > 0) {
+      payload.tools = options.tools.map((t) => ({
+        type: 'function',
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.inputSchema || { type: 'object', properties: {} },
+        },
+      }));
+      payload.tool_choice = 'auto';
+    }
+
     const postData = JSON.stringify(payload);
     requestHeaders['Content-Length'] = Buffer.byteLength(postData);
 
@@ -201,6 +213,8 @@ class OpenAICompatibleProvider extends AIProvider {
         }
 
         let buffer = '';
+        const accumulatedToolCalls = new Map();
+
         res.on('data', (chunk) => {
           buffer += chunk.toString('utf-8');
           const lines = buffer.split('\n');
@@ -220,10 +234,46 @@ class OpenAICompatibleProvider extends AIProvider {
                 if (choice) {
                   const delta = choice.delta || {};
                   const finishReason = choice.finish_reason || null;
+
+                  if (Array.isArray(delta.tool_calls)) {
+                    for (const tc of delta.tool_calls) {
+                      const idx = tc.index !== undefined ? tc.index : 0;
+                      if (!accumulatedToolCalls.has(idx)) {
+                        accumulatedToolCalls.set(idx, {
+                          id: tc.id || `call_${Date.now()}_${idx}`,
+                          name: tc.function?.name || '',
+                          arguments: '',
+                        });
+                      }
+                      const existing = accumulatedToolCalls.get(idx);
+                      if (tc.id) existing.id = tc.id;
+                      if (tc.function?.name) existing.name = tc.function.name;
+                      if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+                    }
+                  }
+
+                  let assembledToolCalls = null;
+                  if (finishReason === 'tool_calls' || (finishReason === 'stop' && accumulatedToolCalls.size > 0)) {
+                    assembledToolCalls = Array.from(accumulatedToolCalls.values()).map((tc) => {
+                      let args = {};
+                      try {
+                        args = JSON.parse(tc.arguments);
+                      } catch (e) {
+                        args = { raw: tc.arguments };
+                      }
+                      return {
+                        type: 'tool_call',
+                        callId: tc.id,
+                        toolName: tc.name,
+                        arguments: args,
+                      };
+                    });
+                  }
+
                   pushChunk({
                     content: delta.content || '',
                     role: delta.role || 'assistant',
-                    toolCalls: delta.tool_calls || null,
+                    toolCalls: assembledToolCalls,
                     finishReason,
                     raw: parsedData,
                   });
@@ -236,6 +286,28 @@ class OpenAICompatibleProvider extends AIProvider {
         });
 
         res.on('end', () => {
+          if (accumulatedToolCalls.size > 0) {
+            const assembled = Array.from(accumulatedToolCalls.values()).map((tc) => {
+              let args = {};
+              try {
+                args = JSON.parse(tc.arguments);
+              } catch (e) {
+                args = { raw: tc.arguments };
+              }
+              return {
+                type: 'tool_call',
+                callId: tc.id,
+                toolName: tc.name,
+                arguments: args,
+              };
+            });
+            pushChunk({
+              content: '',
+              role: 'assistant',
+              toolCalls: assembled,
+              finishReason: 'tool_calls',
+            });
+          }
           pushEnd();
         });
 

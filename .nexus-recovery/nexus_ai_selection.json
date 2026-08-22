@@ -1,4 +1,4 @@
 {
-  "activeProvider": "gemini",
-  "activeModel": "gemini-1.5-flash"
+  "activeProvider": "grok",
+  "activeModel": "grok-2-latest"
 }

@@ -35,7 +35,7 @@ class AIProviderRouter {
     this.initDefaultKeys();
   }
 
-  getVaultFilePath() {
+  getVaultCandidatePaths() {
     const candidates = [];
     if (appModule && typeof appModule.getPath === 'function') {
       try {
@@ -47,15 +47,23 @@ class AIProviderRouter {
     candidates.push(path.join(os.homedir(), 'Library', 'Application Support', 'NEXUS', 'nexus_ai_vault.json'));
     candidates.push(path.join(os.homedir(), '.config', 'NEXUS', 'nexus_ai_vault.json'));
     candidates.push(path.join(process.cwd(), '.nexus-recovery', 'nexus_ai_vault.json'));
+    return candidates;
+  }
 
-    const existing = candidates.find((p) => fs.existsSync(p));
-    return existing || candidates[0];
+  getVaultFilePath() {
+    const candidates = this.getVaultCandidatePaths();
+    for (const p of candidates) {
+      try {
+        if (fs.existsSync(p)) return p;
+      } catch (e) {}
+    }
+    return candidates[0];
   }
 
   saveKeyToVault(providerId, apiKey) {
     const candidatePaths = [
       this.getVaultFilePath(),
-      path.join(process.cwd(), '.nexus-recovery', 'nexus_ai_vault.json'),
+      ...this.getVaultCandidatePaths(),
     ];
 
     let saved = false;
@@ -103,30 +111,41 @@ class AIProviderRouter {
   }
 
   loadKeysFromVault() {
-    const vaultPath = this.getVaultFilePath();
-    if (!vaultPath || !fs.existsSync(vaultPath)) return;
-    try {
-      const raw = fs.readFileSync(vaultPath, 'utf8');
-      const vault = JSON.parse(raw) || {};
-      for (const [pId, val] of Object.entries(vault)) {
-        if (!val || typeof val !== 'object') continue;
-        let decrypted = null;
-        if (val.enc && safeStorageModule && typeof safeStorageModule.isEncryptionAvailable === 'function' && safeStorageModule.isEncryptionAvailable()) {
-          try {
-            decrypted = safeStorageModule.decryptString(Buffer.from(val.enc, 'hex'));
-          } catch (e) {}
-        } else if (val.b64) {
-          try {
-            decrypted = Buffer.from(val.b64, 'base64').toString('utf8');
-          } catch (e) {}
+    const candidatePaths = [
+      this.getVaultFilePath(),
+      ...this.getVaultCandidatePaths(),
+    ];
+    for (const vaultPath of candidatePaths) {
+      if (!vaultPath) continue;
+      try {
+        if (!fs.existsSync(vaultPath)) continue;
+        const raw = fs.readFileSync(vaultPath, 'utf8');
+        const vault = JSON.parse(raw) || {};
+        let loadedAny = false;
+        for (const [pId, val] of Object.entries(vault)) {
+          if (!val || typeof val !== 'object') continue;
+          let decrypted = null;
+          if (val.enc && safeStorageModule && typeof safeStorageModule.isEncryptionAvailable === 'function' && safeStorageModule.isEncryptionAvailable()) {
+            try {
+              decrypted = safeStorageModule.decryptString(Buffer.from(val.enc, 'hex'));
+            } catch (e) {}
+          } else if (val.b64) {
+            try {
+              decrypted = Buffer.from(val.b64, 'base64').toString('utf8');
+            } catch (e) {}
+          }
+          if (decrypted && decrypted.trim()) {
+            this.apiKeys.set(pId, decrypted.trim());
+            this.keyValidationStatus.set(pId, PROVIDER_STATUS.CONNECTED);
+            loadedAny = true;
+          }
         }
-        if (decrypted && decrypted.trim()) {
-          this.apiKeys.set(pId, decrypted.trim());
-          this.keyValidationStatus.set(pId, PROVIDER_STATUS.CONNECTED);
+        if (loadedAny) {
+          break;
         }
+      } catch (e) {
+        // Try next candidate
       }
-    } catch (e) {
-      console.warn('[AI-VAULT] Failed to load keys from vault:', e.message);
     }
   }
 
@@ -218,8 +237,7 @@ class AIProviderRouter {
           if (data && data.activeProvider && this.providers.has(data.activeProvider)) {
             this.activeProviderId = data.activeProvider;
             const provider = this.providers.get(data.activeProvider);
-            const validModels = provider.getModels().map((m) => (typeof m === 'string' ? m : m.id));
-            if (data.activeModel && validModels.includes(data.activeModel)) {
+            if (data.activeModel) {
               this.activeModelId = data.activeModel;
             } else {
               this.activeModelId = provider.getDefaultModel();

@@ -152,6 +152,7 @@ async function runAgentLoopTests() {
       threadId: thread1.threadId,
       userInput: 'Refactor cart calculator and run tests',
       workspacePath: testWorkspaceDir,
+      approvalMode: 'auto',
       modelHandler: async (messages, tools) => {
         turn3ModelCalls++;
         if (turn3ModelCalls === 1) {
@@ -200,8 +201,9 @@ async function runAgentLoopTests() {
     assert(turn3ModelCalls === 5, `Expected 5 model iterations, got ${turn3ModelCalls}`);
 
     const turn3 = runtime.getTurn(res3.turnId);
-    // Expected items: USER_MESSAGE (1) + (TOOL_CALL + TOOL_RESULT) * 4 (8) + FILE_CHANGE (1) + AGENT_MESSAGE (1) = 11 items
-    assert(turn3.items.length === 11, `Expected 11 items in turn 3, got ${turn3.items.length}`);
+    // Expected items: USER_MESSAGE (1) + (TOOL_CALL + TOOL_RESULT) * 4 (8) + CHANGE_SET (1) + FILE_CHANGE (1) + AGENT_MESSAGE (1) = 12 items
+    assert(turn3.items.length === 12, `Expected 12 items in turn 3, got ${turn3.items.length}`);
+    assert(turn3.items.some((i) => i.type === ITEM_TYPES.CHANGE_SET), 'Turn 3 must contain CHANGE_SET item');
     assert(turn3.items.some((i) => i.type === ITEM_TYPES.FILE_CHANGE), 'Turn 3 must contain FILE_CHANGE item');
     const toolCallItems = turn3.items.filter((i) => i.type === ITEM_TYPES.TOOL_CALL);
     const toolResultItems = turn3.items.filter((i) => i.type === ITEM_TYPES.TOOL_RESULT);
@@ -399,6 +401,7 @@ async function runAgentLoopTests() {
       ],
     }, {
       workspacePath: testWorkspaceDir,
+      approvalMode: 'auto',
     });
     assert(badPatchRes.success === false, 'Invalid patch original substring must fail');
     assert(badPatchRes.result.rolledBack === true, 'Failed transaction must roll back');
@@ -553,6 +556,7 @@ async function runAgentLoopTests() {
       threadId: simThread20.threadId,
       userInput: 'Remove the redundant operations in cart_calculator.py',
       workspacePath: testWorkspaceDir,
+      approvalMode: 'auto',
       modelHandler: async (messages) => {
         sim20Calls++;
         if (sim20Calls === 1) {

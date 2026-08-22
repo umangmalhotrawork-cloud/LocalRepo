@@ -35,9 +35,17 @@ const ReadFileTool = {
     }
 
     const workspaceRoot = path.resolve(context.workspacePath || process.cwd());
-    const resolvedPath = path.isAbsolute(targetRelPath)
+    let resolvedPath = path.isAbsolute(targetRelPath)
       ? path.resolve(targetRelPath)
       : path.resolve(workspaceRoot, targetRelPath);
+
+    // If direct path does not exist, check subdirectories like src/
+    if (!fs.existsSync(resolvedPath)) {
+      const candidateInSrc = path.resolve(workspaceRoot, 'src', targetRelPath);
+      if (fs.existsSync(candidateInSrc)) {
+        resolvedPath = candidateInSrc;
+      }
+    }
 
     // Path traversal defense
     if (!resolvedPath.startsWith(workspaceRoot + path.sep) && resolvedPath !== workspaceRoot) {

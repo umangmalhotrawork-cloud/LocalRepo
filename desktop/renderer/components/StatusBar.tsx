@@ -16,6 +16,9 @@ interface StatusBarProps {
   onSelectVerificationTab?: () => void;
   onSelectAgentPanel?: () => void;
   onSelectSourceControl?: () => void;
+  activeProvider?: string;
+  activeModel?: string;
+  onSelectModel?: (providerId: string, modelId?: string) => void;
 }
 
 export default function StatusBar({
@@ -30,6 +33,9 @@ export default function StatusBar({
   onSelectVerificationTab,
   onSelectAgentPanel,
   onSelectSourceControl,
+  activeProvider,
+  activeModel,
+  onSelectModel,
 }: StatusBarProps) {
   const [aiConfig, setAiConfig] = useState<any>(null);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
@@ -64,9 +70,33 @@ export default function StatusBar({
 
   useEffect(() => {
     fetchAiConfig();
+
+    let unsubscribeIpc: (() => void) | null = null;
+    if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.onConfigChange) {
+      unsubscribeIpc = (window as any).electronAPI.ai.onConfigChange((cfg: any) => {
+        if (cfg) setAiConfig(cfg);
+      });
+    }
+
+    const handleDomConfigChange = () => {
+      fetchAiConfig();
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("nexus:ai-config-changed", handleDomConfigChange);
+    }
+
+    return () => {
+      if (typeof unsubscribeIpc === "function") unsubscribeIpc();
+      if (typeof window !== "undefined") {
+        window.removeEventListener("nexus:ai-config-changed", handleDomConfigChange);
+      }
+    };
   }, []);
 
   const handleSelectModel = async (providerId: string, modelId?: string) => {
+    if (onSelectModel) {
+      onSelectModel(providerId, modelId);
+    }
     if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.setConfig) {
       try {
         await (window as any).electronAPI.ai.setConfig(providerId, modelId);
@@ -74,6 +104,9 @@ export default function StatusBar({
       } catch (e) {
         console.error("[STATUS-BAR] Failed to set model config:", e);
       }
+    }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("nexus:ai-config-changed", { detail: { providerId, modelId } }));
     }
     setShowModelDropdown(false);
   };
@@ -122,11 +155,12 @@ export default function StatusBar({
     }
   };
 
-  const activeProvider = aiConfig?.providers?.find((p: any) => p.id === aiConfig.activeProvider);
-  const activeModelId = aiConfig?.activeModel || "gemini-1.5-flash";
-  const displayModelName = activeProvider 
-    ? `${activeProvider.name} (${activeModelId.split('/').pop()?.replace(/^models\//, '') || activeModelId})` 
-    : "Gemini (1.5-flash)";
+  const currentProviderId = activeProvider || aiConfig?.activeProvider || "groq";
+  const currentModelId = activeModel || aiConfig?.activeModel || "openai/gpt-oss-120b";
+  const activeProviderObj = aiConfig?.providers?.find((p: any) => p.id === currentProviderId);
+  const displayModelName = activeProviderObj 
+    ? `${activeProviderObj.name} (${currentModelId.split('/').pop()?.replace(/^models\//, '') || currentModelId})` 
+    : `Groq (${currentModelId.split('/').pop()?.replace(/^models\//, '') || currentModelId})`;
 
   const targetKeyProvider = aiConfig?.providers?.find((p: any) => p.id === selectedKeyProviderId) || {
     id: selectedKeyProviderId,
@@ -290,8 +324,8 @@ export default function StatusBar({
                       {Array.isArray(provider.models) && provider.models.length > 0 && isSelected && (
                         <div className="mt-1.5 pt-1.5 border-t border-[#181824] space-y-1">
                           <div className="text-[9px] text-zinc-500 font-bold uppercase">Active Model:</div>
-                          <div className="grid grid-cols-1 gap-1">
-                            {provider.models.slice(0, 5).map((m: any) => {
+                          <div className="grid grid-cols-1 gap-1 max-h-40 overflow-y-auto pr-0.5">
+                            {provider.models.map((m: any) => {
                               const isMSelected = aiConfig?.activeModel === m.id;
                               return (
                                 <button

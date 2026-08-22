@@ -194,6 +194,31 @@ export default function TaskHome({
   useEffect(() => {
     fetchRecentSessions();
     fetchAiConfig();
+
+    let unsubscribeIpc: (() => void) | null = null;
+    if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.onConfigChange) {
+      unsubscribeIpc = (window as any).electronAPI.ai.onConfigChange((cfg: any) => {
+        if (cfg?.activeProvider) setActiveProvider(cfg.activeProvider);
+        if (cfg?.activeModel) setActiveModel(cfg.activeModel);
+      });
+    }
+
+    const handleDomConfigChange = (e: any) => {
+      if (e?.detail?.providerId) setActiveProvider(e.detail.providerId);
+      if (e?.detail?.modelId) setActiveModel(e.detail.modelId);
+      fetchAiConfig();
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("nexus:ai-config-changed", handleDomConfigChange);
+    }
+
+    return () => {
+      if (typeof unsubscribeIpc === "function") unsubscribeIpc();
+      if (typeof window !== "undefined") {
+        window.removeEventListener("nexus:ai-config-changed", handleDomConfigChange);
+      }
+    };
   }, [workspacePath]);
 
   const handlePresetClick = (presetPrompt: string) => {
@@ -205,6 +230,9 @@ export default function TaskHome({
     if (modelId) setActiveModel(modelId);
     if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.setConfig) {
       (window as any).electronAPI.ai.setConfig(providerId, modelId);
+    }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("nexus:ai-config-changed", { detail: { providerId, modelId } }));
     }
   };
 

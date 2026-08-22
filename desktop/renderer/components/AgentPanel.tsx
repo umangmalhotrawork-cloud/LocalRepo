@@ -191,6 +191,8 @@ export default function AgentPanel({
     toolName: string;
     policyDecision?: any;
     error?: string;
+    changeSet?: any;
+    turnId?: string | null;
   } | null>(null);
 
   const swarmActivity = useSwarmActivity({
@@ -220,6 +222,13 @@ export default function AgentPanel({
           setLoading(true);
           setActiveTurnId(turnId);
           setAutonomousState((prev) => ({ ...prev, stage: "PLANNING" }));
+        } else if (type === "TURN_UPDATED") {
+          const st = payload?.status || payload?.turn?.status;
+          if (st === "WAITING_FOR_APPROVAL") {
+            setAutonomousState((prev) => ({ ...prev, stage: "WAITING_FOR_APPROVAL" }));
+          } else if (st === "RUNNING") {
+            setAutonomousState((prev) => ({ ...prev, stage: "RUNNING" }));
+          }
         } else if (type === "ITEM_STARTED" || type === "ITEM_UPDATED" || type === "ITEM_COMPLETED") {
           const item = payload?.item || {};
           if (item.type === "TOOL_CALL") {
@@ -253,6 +262,34 @@ export default function AgentPanel({
                 return s;
               })
             );
+          } else if (item.type === "CHANGE_SET") {
+            const cs = item.payload || {};
+            if (Array.isArray(cs.files) && cs.files.length > 0) {
+              const newSteps: AgentStep[] = cs.files.map((f: any, fIdx: number) => {
+                const stepId = `${item.itemId || cs.changeSetId || 'cs'}_file_${fIdx}`;
+                const edit: ProposedEdit = {
+                  filePath: f.filePath,
+                  original: f.original || f.originalContent || "",
+                  replacement: f.replacement || f.content || "",
+                };
+                return {
+                  id: stepId,
+                  title: `Stage ChangeSet: ${f.filePath}`,
+                  reasoning: `Staged in ChangeSet ${cs.changeSetId || ''} (${f.changeType || 'MODIFY'}) — Pending approval before applying to disk.`,
+                  filesRead: [f.filePath],
+                  proposedEdits: [edit],
+                  firewallResult: f.firewallResult || cs.risk || { risk_level: 'AUTO_APPROVE', risk_score: 0, safe_to_auto_apply: true },
+                  status: cs.status === 'applied' ? ('applied' as const) : ('pending' as const),
+                };
+              });
+              setSteps((prev) => {
+                const filtered = prev.filter((s) => !s.id.startsWith(item.itemId || cs.changeSetId || 'cs'));
+                return [...filtered, ...newSteps];
+              });
+              const expUpdates: Record<string, boolean> = {};
+              newSteps.forEach((s: AgentStep) => (expUpdates[s.id] = true));
+              setExpandedSteps((prev) => ({ ...prev, ...expUpdates }));
+            }
           } else if (item.type === "FILE_CHANGE") {
             const fc = item.payload || {};
             if (fc.filePath) {
@@ -262,29 +299,22 @@ export default function AgentPanel({
                 replacement: fc.replacement || "",
               };
               setSteps((prev) => {
-                if (prev.length === 0) {
-                  return [
-                    {
-                      id: item.itemId || `change_${Date.now()}`,
-                      title: `Apply Patch on ${fc.filePath}`,
-                      reasoning: "Transactional code modification applied",
-                      filesRead: [fc.filePath],
-                      proposedEdits: [newEdit],
-                      firewallResult: fc.firewall,
-                      status: "applied",
-                    },
-                  ];
+                const matched = prev.find((s) => s.proposedEdits?.some((e) => e.filePath === fc.filePath));
+                if (matched) {
+                  return prev.map((s) => (s.id === matched.id ? { ...s, status: 'applied' as const, firewallResult: fc.firewall || s.firewallResult } : s));
                 }
-                return prev.map((s, idx) =>
-                  idx === prev.length - 1
-                    ? {
-                        ...s,
-                        proposedEdits: [...(s.proposedEdits || []), newEdit],
-                        firewallResult: fc.firewall || s.firewallResult,
-                        status: "applied",
-                      }
-                    : s
-                );
+                return [
+                  ...prev,
+                  {
+                    id: item.itemId || `change_${Date.now()}`,
+                    title: `Apply Patch on ${fc.filePath}`,
+                    reasoning: "Transactional code modification applied",
+                    filesRead: [fc.filePath],
+                    proposedEdits: [newEdit],
+                    firewallResult: fc.firewall,
+                    status: "applied" as const,
+                  },
+                ];
               });
             }
           } else if (item.type === "APPROVAL_REQUEST") {
@@ -294,8 +324,37 @@ export default function AgentPanel({
               toolName: ar.toolName,
               policyDecision: ar.policyDecision,
               error: ar.error,
+              changeSet: ar.changeSet,
+              turnId: turnId || activeTurnId,
             });
-            setAutonomousState((prev) => ({ ...prev, stage: "REVIEW" }));
+            setAutonomousState((prev) => ({ ...prev, stage: "WAITING_FOR_APPROVAL" }));
+            if (ar.changeSet?.files && Array.isArray(ar.changeSet.files) && ar.changeSet.files.length > 0) {
+              const newSteps: AgentStep[] = ar.changeSet.files.map((f: any, fIdx: number) => {
+                const stepId = `approval_cs_file_${fIdx}`;
+                const edit: ProposedEdit = {
+                  filePath: f.filePath,
+                  original: f.original || f.originalContent || "",
+                  replacement: f.replacement || f.content || "",
+                };
+                return {
+                  id: stepId,
+                  title: `Proposed Change: ${f.filePath}`,
+                  reasoning: `ChangeSet ${ar.changeSet.changeSetId || ''} staged — Authorization required to apply.`,
+                  filesRead: [f.filePath],
+                  proposedEdits: [edit],
+                  firewallResult: f.firewallResult || ar.policyDecision || { risk_level: 'MANUAL_APPROVAL_REQUIRED', risk_score: 50 },
+                  status: 'pending' as const,
+                };
+              });
+              setSteps((prev) => {
+                const hasEdits = prev.some((s) => s.proposedEdits?.length > 0);
+                if (hasEdits) return prev;
+                return [...prev, ...newSteps];
+              });
+              const expUpdates: Record<string, boolean> = {};
+              newSteps.forEach((s: AgentStep) => (expUpdates[s.id] = true));
+              setExpandedSteps((prev) => ({ ...prev, ...expUpdates }));
+            }
           } else if (item.type === "AGENT_MESSAGE") {
             const am = item.payload || {};
             const textContent = am.text || am.summary || payload?.text || "";
@@ -464,12 +523,37 @@ export default function AgentPanel({
     if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getConfig) {
       try {
         const config = await (window as any).electronAPI.ai.getConfig();
-        setAiConfig(config);
+        if (config) setAiConfig(config);
       } catch (e) {
         console.error("[AGENT-PANEL] Failed to fetch AI config:", e);
       }
     }
   };
+
+  useEffect(() => {
+    fetchAiConfig();
+
+    let unsubscribeIpc: (() => void) | null = null;
+    if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.onConfigChange) {
+      unsubscribeIpc = (window as any).electronAPI.ai.onConfigChange((cfg: any) => {
+        if (cfg) setAiConfig(cfg);
+      });
+    }
+
+    const handleDomConfigChange = () => {
+      fetchAiConfig();
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("nexus:ai-config-changed", handleDomConfigChange);
+    }
+
+    return () => {
+      if (typeof unsubscribeIpc === "function") unsubscribeIpc();
+      if (typeof window !== "undefined") {
+        window.removeEventListener("nexus:ai-config-changed", handleDomConfigChange);
+      }
+    };
+  }, []);
 
   const handleSelectModel = async (providerId: string, modelId?: string) => {
     if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.setConfig) {
@@ -479,6 +563,9 @@ export default function AgentPanel({
       } catch (e) {
         console.error("[AGENT-PANEL] Failed to set model config:", e);
       }
+    }
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("nexus:ai-config-changed", { detail: { providerId, modelId } }));
     }
     setShowModelDropdown(false);
   };
@@ -973,8 +1060,8 @@ export default function AgentPanel({
 
                           {/* Sub-models list when provider is selected */}
                           {isSelected && Array.isArray(provider.models) && provider.models.length > 0 && (
-                            <div className="mt-1 pt-1 border-t border-[#181824] space-y-0.5">
-                              {provider.models.slice(0, 5).map((m: any) => {
+                            <div className="mt-1 pt-1 border-t border-[#181824] space-y-0.5 max-h-40 overflow-y-auto pr-0.5">
+                              {provider.models.map((m: any) => {
                                 const isMSelected = aiConfig?.activeModel === m.id;
                                 return (
                                   <button
@@ -1241,11 +1328,38 @@ export default function AgentPanel({
             <p className="text-[10.5px] text-amber-100/80 leading-relaxed">
               {pendingApproval.error || pendingApproval.policyDecision?.reason || "This operation requires explicit user authorization under current safety policy."}
             </p>
+
+            {/* Staged ChangeSet Diff / Proposed Changes in Banner */}
+            {steps.filter((s) => s.proposedEdits && s.proposedEdits.length > 0).length > 0 && (
+              <div className="p-2 rounded bg-[#0d0d12] border border-amber-500/30 space-y-2 my-1">
+                <div className="flex items-center justify-between text-[10px] text-amber-300 font-bold">
+                  <span>Staged ChangeSet ({steps.reduce((acc, s) => acc + (s.proposedEdits?.length || 0), 0)} file edits)</span>
+                  <span className="text-emerald-400">Risk: {pendingApproval.policyDecision?.risk_level || "AUTO_APPROVE"}</span>
+                </div>
+                {steps.map((st) => (
+                  <div key={st.id} className="space-y-1">
+                    {st.proposedEdits.map((pe, peIdx) => (
+                      <div key={peIdx} className="flex items-center justify-between text-[10px] bg-[#07070a] p-1.5 rounded border border-zinc-800">
+                        <span className="text-cyan-300 font-mono">{pe.filePath}</span>
+                        <button
+                          onClick={() => onPreviewDiff && onPreviewDiff(pe)}
+                          className="px-2 py-0.5 rounded bg-[#101422] hover:bg-[#182034] border border-cyan-500/40 text-cyan-300 font-bold text-[9.5px] flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <FileCode className="w-3 h-3" />
+                          <span>Review Diff</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="flex items-center gap-2 pt-1">
               <button
                 onClick={async () => {
                   if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.approveAction) {
-                    await (window as any).electronAPI.harness.approveAction({ turnId: activeTurnId, callId: pendingApproval.callId });
+                    await (window as any).electronAPI.harness.approveAction({ turnId: pendingApproval.turnId || activeTurnId, callId: pendingApproval.callId });
                     setPendingApproval(null);
                   }
                 }}
@@ -1256,7 +1370,7 @@ export default function AgentPanel({
               <button
                 onClick={async () => {
                   if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.rejectAction) {
-                    await (window as any).electronAPI.harness.rejectAction({ turnId: activeTurnId, callId: pendingApproval.callId, reason: "Rejected by user" });
+                    await (window as any).electronAPI.harness.rejectAction({ turnId: pendingApproval.turnId || activeTurnId, callId: pendingApproval.callId, reason: "Rejected by user" });
                     setPendingApproval(null);
                   }
                 }}
