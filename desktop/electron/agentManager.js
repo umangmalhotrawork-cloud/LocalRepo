@@ -351,7 +351,7 @@ Format strictly as JSON:
       generationConfig: { temperature: 0.1, maxOutputTokens: 3000 },
     });
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
     return new Promise((resolve, reject) => {
       const parsedUrl = new URL(url);
@@ -371,12 +371,30 @@ Format strictly as JSON:
         res.on('end', async () => {
           try {
             if (res.statusCode >= 400) {
-              return resolve(await this.runDeterministicAgent(task, workspacePath, maxSteps, continuumContextText, activeFilePath, targetFile));
+              let errMsg = `Provider returned HTTP ${res.statusCode}`;
+              try {
+                const errParsed = JSON.parse(rawData);
+                if (errParsed?.error?.message) errMsg = errParsed.error.message;
+              } catch (e) {}
+              return resolve({
+                success: false,
+                statusCode: res.statusCode,
+                error: errMsg,
+                task,
+                steps: [],
+                summary: `Error from AI provider: ${errMsg}`,
+              });
             }
             const parsed = JSON.parse(rawData);
             const textResponse = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
             if (!textResponse) {
-              return resolve(await this.runDeterministicAgent(task, workspacePath, maxSteps, continuumContextText, activeFilePath, targetFile));
+              return resolve({
+                success: false,
+                error: 'AI provider returned empty response',
+                task,
+                steps: [],
+                summary: 'AI provider returned empty response',
+              });
             }
 
             const cleanJson = textResponse.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim();
@@ -385,13 +403,25 @@ Format strictly as JSON:
             const enriched = await this.enrichStepsWithFirewallAndDrift(planObj, workspacePath, task, maxSteps);
             resolve(enriched);
           } catch (e) {
-            resolve(await this.runDeterministicAgent(task, workspacePath, maxSteps, continuumContextText, activeFilePath, targetFile));
+            resolve({
+              success: false,
+              error: e.message || 'Failed to parse AI provider response',
+              task,
+              steps: [],
+              summary: `Failed to parse AI provider response: ${e.message}`,
+            });
           }
         });
       });
 
-      req.on('error', async () => {
-        resolve(await this.runDeterministicAgent(task, workspacePath, maxSteps, continuumContextText, activeFilePath, targetFile));
+      req.on('error', async (err) => {
+        resolve({
+          success: false,
+          error: err?.message || 'Network error contacting AI provider',
+          task,
+          steps: [],
+          summary: `Network error contacting AI provider: ${err?.message || 'Connection failed'}`,
+        });
       });
 
       req.write(requestBody);

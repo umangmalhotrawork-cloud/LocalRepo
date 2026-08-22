@@ -24,6 +24,16 @@ const DEFAULT_BUDGETS = Object.freeze({
   recentItemLimit: 30,            // Max recent items retained before older compaction
 });
 
+// Bounded & Compact Context Budgets for Coding Tasks (e.g. Groq with 8000 TPM limit)
+const CODING_TASK_BUDGETS = Object.freeze({
+  totalBudgetTokens: 1800,        // ~7,200 chars total ceiling (avoids 429s on 8k TPM)
+  historyBudgetTokens: 500,       // ~2,000 chars history ceiling
+  toolResultBudgetChars: 900,     // 900 chars max per tool result representation
+  workspaceBudgetChars: 350,      // 350 chars max for workspace & file state
+  systemBudgetChars: 750,         // 750 chars max for system prompt & instructions
+  recentItemLimit: 5,             // Max 5 recent items retained before older compaction
+});
+
 class ContextEngine {
   constructor(options = {}) {
     this.eventBus = options.eventBus || null;
@@ -89,28 +99,48 @@ class ContextEngine {
       const lines = content.split('\n');
       const totalLines = lines.length;
 
+      if (totalLines <= 35 && str.length <= limit) {
+        return sanitized;
+      }
+
       // Keep head and tail lines within character limit
-      const headLines = lines.slice(0, 35).join('\n');
-      const tailLines = lines.slice(-15).join('\n');
-      const snippet = `${headLines}\n\n... [TRUNCATED ${totalLines - 50} lines (${str.length - limit} chars)] ...\n\n${tailLines}`;
+      const headLines = lines.slice(0, 25).join('\n');
+      const tailLines = lines.slice(-10).join('\n');
+      const snippet = `${headLines}\n\n... [TRUNCATED ${Math.max(0, totalLines - 35)} lines] ...\n\n${tailLines}`;
 
       return {
         ...metadata,
+        path: sanitized.path || sanitized.relPath,
         totalLines,
         content: secretFilter.sanitizeString(snippet),
+      };
+    }
+
+    if (toolName === 'apply_patch') {
+      const cs = sanitized.changeSet || sanitized.result || sanitized;
+      return {
+        ...metadata,
+        changeSetId: cs.changeSetId || sanitized.changeSetId || 'cs_current',
+        status: cs.status || sanitized.status || 'WAITING_FOR_APPROVAL',
+        filesCount: cs.files?.length || cs.filesCount || (sanitized.edits?.length || 1),
+        riskLevel: cs.risk?.overallRiskLevel || sanitized.riskLevel || 'AUTO_APPROVE',
+        summary: sanitized.summary || `ChangeSet staged with ${cs.files?.length || 1} file edit(s).`,
       };
     }
 
     if (toolName === 'search_workspace') {
       const matches = sanitized.matches || sanitized.result?.matches || [];
       const totalMatches = matches.length;
-      const topMatches = matches.slice(0, 8);
+      const topMatches = matches.slice(0, 4).map((m) => ({
+        file: m.file || m.path,
+        line: m.line || m.lineNumber,
+        snippet: typeof m.content === 'string' ? m.content.trim().slice(0, 80) : undefined,
+      }));
 
       return {
         ...metadata,
         totalMatches,
         matches: topMatches,
-        notice: `Showing top ${topMatches.length} of ${totalMatches} matches (truncated for context budget).`,
       };
     }
 
@@ -452,8 +482,10 @@ class ContextEngine {
       options = {},
     } = params;
 
+    const isCodingTask = intent === 'MUTATION' || intent === 'READ_ONLY' || options.isCodingTask !== false;
+    const baseBudget = isCodingTask ? CODING_TASK_BUDGETS : this.budgets;
     const budgets = {
-      ...this.budgets,
+      ...baseBudget,
       ...(options.budgets || {}),
     };
 
@@ -833,19 +865,20 @@ class ContextEngine {
     }
     sections.projectCapabilitiesTokens = this.estimateTokens(projectCapabilitiesText);
 
-    // 8. Build Base System Prompt
+    // 8. Build Base System Prompt (Concise & Focused)
+    const baseInstruction = isCodingTask
+      ? 'You are NEXUS, an autonomous software engineering assistant. Use tools iteratively to inspect code (read_file) and propose changesets (apply_patch). Keep explanations concise.'
+      : 'You are NEXUS, an autonomous software engineering pair programmer. Analyze directives and use tools iteratively to inspect files, search code, apply verified surgical patches, and run unit tests.';
+
     const systemPromptComponents = [
-      'You are NEXUS, an autonomous software engineering pair programmer.',
-      'Analyze directives and use tools iteratively to inspect files, search code, apply verified surgical patches, and run unit tests.',
-      projectCapabilitiesText ? `\n--- PROJECT CAPABILITIES ---\n${projectCapabilitiesText}` : null,
+      baseInstruction,
+      // Only include capabilities text if native tools schema is not being supplied
+      (!capabilities || capabilities.length === 0) && capabilitiesText ? `\n--- PERMITTED CAPABILITIES ---\n${capabilitiesText}` : null,
       skillsText ? `\n--- ACTIVE SKILLS ---\n${skillsText}` : null,
-      capabilitiesText ? `\n--- PERMITTED CAPABILITIES ---\n${capabilitiesText}` : null,
       handoffText ? `\n--- ACTIVE TASK HANDOFF ---\n${handoffText}` : null,
       editorContextText ? `\n--- ACTIVE EDITOR CONTEXT ---\n${editorContextText}` : null,
       gitContextText ? `\n--- CURRENT GIT CONTEXT ---\n${gitContextText}` : null,
-      gitHunkText ? `\n--- ACTIVE GIT HUNK ---\n${gitHunkText}` : null,
       debuggingContextText ? `\n--- CURRENT DEBUGGING CONTEXT ---\n${debuggingContextText}` : null,
-      debugSessionText ? `\n--- ACTIVE DEBUG SESSION ---\n${debugSessionText}` : null,
       problemsText ? `\n--- ACTIVE PROBLEMS ---\n${problemsText}` : null,
       continuumText ? `\n--- CONTINUUM REPOSITORY CONTEXT ---\n${continuumText}` : null,
       workspaceText ? `\n--- WORKSPACE & TARGET STATE ---\n${workspaceText}` : null,
@@ -855,7 +888,7 @@ class ContextEngine {
 
     let systemPrompt = systemPromptComponents.join('\n\n');
     if (systemPrompt.length > budgets.systemBudgetChars) {
-      systemPrompt = secretFilter.sanitizeString(systemPrompt.slice(0, budgets.systemBudgetChars - 100) + '\n\n... [System Context Truncated]');
+      systemPrompt = secretFilter.sanitizeString(systemPrompt.slice(0, budgets.systemBudgetChars - 50) + '\n... [System Context Truncated]');
       truncatedSections.push('systemPrompt');
     } else {
       systemPrompt = secretFilter.sanitizeString(systemPrompt);

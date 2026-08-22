@@ -33,3 +33,4 @@ __pycache__/
 tsconfig.tsbuildinfo
 demo-workspaces/**/exports/
 .echo-nullity-*
+.nexus-recovery/

@@ -84,7 +84,7 @@ If your response proposes replacement code for the selection, ensure the replace
       },
     });
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
     const responseText = await new Promise((resolve, reject) => {
       const req = https.request(

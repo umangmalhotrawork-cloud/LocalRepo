@@ -23,7 +23,7 @@ export default function CodexBottomComposer({
   workspaceName = "NEXUS",
   gitBranch = "main",
   activeProvider = "gemini",
-  activeModel = "gemini-1.5-flash",
+  activeModel = "gemini-2.5-flash",
   onSelectModel,
   onSubmitTask,
   onOpenContinuum,
@@ -227,7 +227,11 @@ export default function CodexBottomComposer({
                   className="px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 cursor-pointer max-w-[180px]"
                 >
                   <Cpu className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                  <span className="truncate capitalize">{activeProvider} ({activeModel.split('/').pop()?.replace(/^models\//, '') || activeModel})</span>
+                  <span className="truncate capitalize">
+                    {activeProvider.startsWith("nexus") 
+                      ? (activeProvider === "nexus6" ? "NEXUS 6 (Groq)" : `NEXUS ${activeProvider.replace("nexus", "")} (Gemini)`) 
+                      : `${activeProvider} (${activeModel.split('/').pop()?.replace(/^models\//, '') || activeModel})`}
+                  </span>
                   <ChevronDown className="w-3 h-3 text-zinc-500 shrink-0" />
                 </button>
 
@@ -241,18 +245,14 @@ export default function CodexBottomComposer({
                     className="absolute left-0 bottom-9 w-64 border rounded-xl shadow-2xl z-50 p-1.5 space-y-1 text-xs max-h-56 overflow-y-auto"
                   >
                     {[
-                      { id: "groq", name: "Groq", modelId: "openai/gpt-oss-120b", label: "Groq (OpenAI GPT-OSS 120B - Active)" },
-                      { id: "groq", name: "Groq", modelId: "openai/gpt-oss-20b", label: "Groq (OpenAI GPT-OSS 20B)" },
-                      { id: "groq", name: "Groq", modelId: "groq/compound", label: "Groq (Compound)" },
-                      { id: "groq", name: "Groq", modelId: "groq/compound-mini", label: "Groq (Compound Mini)" },
-                      { id: "groq", name: "Groq", modelId: "qwen/qwen3.6-27b", label: "Groq (Qwen 3.6 27B)" },
-                      { id: "gemini", name: "Gemini", modelId: "gemini-1.5-flash", label: "Gemini (1.5 Flash)" },
-                      { id: "openai", name: "OpenAI", modelId: "gpt-4o", label: "OpenAI (GPT-4o)" },
-                      { id: "claude", name: "Claude", modelId: "claude-3-5-sonnet-20241022", label: "Claude (3.5 Sonnet)" },
-                      { id: "deepseek", name: "DeepSeek", modelId: "deepseek-coder", label: "DeepSeek (Coder)" },
-                      { id: "grok", name: "Grok", modelId: "grok-2-latest", label: "Grok (2 Latest)" },
+                      { id: "nexus1", name: "NEXUS 1", modelId: "gemini-2.5-flash", label: "NEXUS 1 (Gemini 2.5 Flash)" },
+                      { id: "nexus2", name: "NEXUS 2", modelId: "gemini-3.5-flash", label: "NEXUS 2 (Gemini 3.5 Flash)" },
+                      { id: "nexus3", name: "NEXUS 3", modelId: "gemini-3.5-flash", label: "NEXUS 3 (Gemini 3.5 Flash)" },
+                      { id: "nexus4", name: "NEXUS 4", modelId: "gemini-3.5-flash", label: "NEXUS 4 (Gemini 3.5 Flash)" },
+                      { id: "nexus5", name: "NEXUS 5", modelId: "gemini-3.5-flash", label: "NEXUS 5 (Gemini 3.5 Flash)" },
+                      { id: "nexus6", name: "NEXUS 6", modelId: "openai/gpt-oss-120b", label: "NEXUS 6 (Groq GPT-OSS 120B)" },
                     ].map((p, idx) => {
-                      const isSel = activeProvider === p.id && activeModel === p.modelId;
+                      const isSel = activeProvider === p.id && (activeModel === p.modelId || (!activeModel && idx === 0));
                       return (
                         <button
                           key={`${p.id}-${p.modelId}-${idx}`}

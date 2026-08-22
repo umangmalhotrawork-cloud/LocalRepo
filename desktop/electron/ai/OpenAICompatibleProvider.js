@@ -85,6 +85,10 @@ class OpenAICompatibleProvider extends AIProvider {
               const errMsg = json?.error?.message || json?.message || raw || `HTTP ${res.statusCode}`;
               const err = new Error(errMsg);
               err.statusCode = res.statusCode;
+              err.isRateLimit = res.statusCode === 429;
+              err.retryAfter = res.headers['retry-after'] || res.headers['retry-after-ms'] || null;
+              err.providerId = this.id;
+              err.modelId = (typeof body === 'object' ? body?.model : null) || options?.modelId || '';
               err.data = json;
               reject(err);
             }
@@ -132,7 +136,7 @@ class OpenAICompatibleProvider extends AIProvider {
       model,
       messages,
       temperature: options.temperature ?? 0.1,
-      max_tokens: options.maxTokens ?? 3000,
+      max_tokens: options.maxTokens ?? 1500,
       stream: true,
       ...(options.extraBody || {}),
     };
@@ -207,7 +211,17 @@ class OpenAICompatibleProvider extends AIProvider {
           let errBody = '';
           res.on('data', (d) => (errBody += d));
           res.on('end', () => {
-            pushError(new Error(`HTTP ${res.statusCode}: ${errBody || res.statusMessage}`));
+            let json = null;
+            try { json = JSON.parse(errBody); } catch (_) {}
+            const errMsg = json?.error?.message || json?.message || errBody || `HTTP ${res.statusCode}`;
+            const err = new Error(errMsg);
+            err.statusCode = res.statusCode;
+            err.isRateLimit = res.statusCode === 429;
+            err.retryAfter = res.headers['retry-after'] || res.headers['retry-after-ms'] || null;
+            err.providerId = this.id;
+            err.modelId = payload.model || options?.modelId || '';
+            err.data = json;
+            pushError(err);
           });
           return;
         }

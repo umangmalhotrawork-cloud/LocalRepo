@@ -222,9 +222,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   harness: {
     createThread: (options) => ipcRenderer.invoke('harness:create-thread', options),
-    getThread: (threadId) => ipcRenderer.invoke('harness:get-thread', threadId),
+    getThread: (threadId, workspacePath) => ipcRenderer.invoke('harness:get-thread', { threadId, workspacePath }),
     listThreads: (filter) => ipcRenderer.invoke('harness:list-threads', filter),
+    pinThread: (threadId, pinned, workspacePath) => ipcRenderer.invoke('harness:pin-thread', { threadId, pinned, workspacePath }),
+    renameThread: (threadId, title, workspacePath) => ipcRenderer.invoke('harness:rename-thread', { threadId, title, workspacePath }),
+    deleteThread: (threadId, workspacePath) => ipcRenderer.invoke('harness:delete-thread', { threadId, workspacePath }),
+    searchThreads: (query, workspacePath) => ipcRenderer.invoke('harness:search-threads', { query, workspacePath }),
     archiveThread: (threadId) => ipcRenderer.invoke('harness:archive-thread', threadId),
+    onThreadsChange: (callback) => {
+      const handler = (_event, data) => callback(data);
+      ipcRenderer.on('harness:threads-changed', handler);
+      return () => {
+        ipcRenderer.removeListener('harness:threads-changed', handler);
+      };
+    },
     startTurn: (payload) => ipcRenderer.invoke('harness:start-turn', payload),
     getTurn: (turnId) => ipcRenderer.invoke('harness:get-turn', turnId),
     completeTurn: (payload) => ipcRenderer.invoke('harness:complete-turn', payload),

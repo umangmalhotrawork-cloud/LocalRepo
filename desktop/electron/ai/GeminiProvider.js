@@ -5,23 +5,32 @@
 const https = require('https');
 const path = require('path');
 const fs = require('fs');
-const AIProvider = require('./AIProvider');
+const OpenAICompatibleProvider = require('./OpenAICompatibleProvider');
 const { PROVIDER_IDS, DEFAULT_MODELS } = require('./types');
 
-class GeminiProvider extends AIProvider {
-  constructor() {
+class GeminiProvider extends OpenAICompatibleProvider {
+  constructor(
+    id = PROVIDER_IDS.GEMINI,
+    name = 'Google Gemini',
+    staticModels = [
+      { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
+      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
+    ],
+    defaultModel = 'gemini-2.5-flash',
+    options = {}
+  ) {
     super(
-      PROVIDER_IDS.GEMINI,
-      'Gemini',
-      [
-        { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash' },
-        { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' },
-        { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
-        { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-      ],
-      DEFAULT_MODELS[PROVIDER_IDS.GEMINI] || 'gemini-1.5-flash'
+      id,
+      name,
+      'https://generativelanguage.googleapis.com/v1beta/openai',
+      staticModels,
+      defaultModel || 'gemini-2.5-flash',
+      options
     );
-    this.dynamicModels = null;
+    this.slotIndex = options.slotIndex || null;
+    this.secondaryName = options.secondaryName || 'Gemini';
   }
 
   getModels() {
@@ -46,23 +55,33 @@ class GeminiProvider extends AIProvider {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey.trim())}`;
       const responseText = await new Promise((resolve, reject) => {
-        const req = https.get(url, { timeout: 12000 }, (res) => {
-          let data = '';
-          res.on('data', (c) => (data += c));
-          res.on('end', () => {
-            if (res.statusCode >= 200 && res.statusCode < 300) {
-              resolve(data);
-            } else if (res.statusCode === 400 || res.statusCode === 403) {
-              const err = new Error('Invalid Gemini API key. Please check your credentials at Google AI Studio.');
-              err.statusCode = res.statusCode;
-              reject(err);
-            } else {
-              const err = new Error(`Gemini API returned status ${res.statusCode}`);
-              err.statusCode = res.statusCode;
-              reject(err);
-            }
-          });
-        });
+        const req = https.get(
+          url,
+          {
+            headers: {
+              'x-goog-api-key': apiKey.trim(),
+              'User-Agent': 'NEXUS-Workbench-App',
+            },
+            timeout: 12000,
+          },
+          (res) => {
+            let data = '';
+            res.on('data', (c) => (data += c));
+            res.on('end', () => {
+              if (res.statusCode >= 200 && res.statusCode < 300) {
+                resolve(data);
+              } else if (res.statusCode === 400 || res.statusCode === 401 || res.statusCode === 403) {
+                const err = new Error(`Invalid or unauthorized Gemini API key (HTTP ${res.statusCode}). Please check your credentials at Google AI Studio.`);
+                err.statusCode = res.statusCode;
+                reject(err);
+              } else {
+                const err = new Error(`Gemini API returned status ${res.statusCode}`);
+                err.statusCode = res.statusCode;
+                reject(err);
+              }
+            });
+          }
+        );
         req.on('error', reject);
         req.on('timeout', () => {
           req.destroy();
@@ -140,7 +159,6 @@ class GeminiProvider extends AIProvider {
     }
 
     const selectedModel = model || this.getDefaultModel();
-    await this.validateModelAvailability(apiKey, selectedModel);
 
     const {
       task = '',
@@ -233,6 +251,8 @@ Format strictly as JSON:
           headers: {
             'Content-Type': 'application/json',
             'Content-Length': Buffer.byteLength(requestBody),
+            'x-goog-api-key': apiKey.trim(),
+            'User-Agent': 'NEXUS-Workbench-App',
           },
           timeout: 25000,
         },
@@ -244,8 +264,10 @@ Format strictly as JSON:
           res.on('end', () => {
             if (res.statusCode >= 200 && res.statusCode < 300) {
               resolve(data);
-            } else if (res.statusCode === 400 || res.statusCode === 403) {
-              reject(new Error('Invalid Gemini API key or request parameters'));
+            } else if (res.statusCode === 400 || res.statusCode === 401 || res.statusCode === 403) {
+              reject(new Error(`Invalid or unauthorized Gemini API key (HTTP ${res.statusCode})`));
+            } else if (res.statusCode === 404) {
+              reject(new Error(`Gemini model "${cleanModelName}" not found or unavailable (HTTP 404)`));
             } else if (res.statusCode === 429) {
               reject(new Error('Gemini API rate limit exceeded'));
             } else {
@@ -325,7 +347,6 @@ Format strictly as JSON:
     } = payload;
 
     const selectedModel = model || this.getDefaultModel();
-    await this.validateModelAvailability(apiKey, selectedModel);
     const cleanModelName = selectedModel.replace(/^models\//, '');
     const contextPrefix = continuumContextText ? `${continuumContextText}\n\n---\n\n` : '';
     const systemPrompt = `${contextPrefix}You are an expert AI code assistant integrated into NEXUS Workbench.
@@ -368,6 +389,8 @@ If your response proposes replacement code for the selection, ensure the replace
           headers: {
             'Content-Type': 'application/json',
             'Content-Length': Buffer.byteLength(requestBody),
+            'x-goog-api-key': apiKey.trim(),
+            'User-Agent': 'NEXUS-Workbench-App',
           },
           timeout: 20000,
         },
@@ -377,8 +400,10 @@ If your response proposes replacement code for the selection, ensure the replace
           res.on('end', () => {
             if (res.statusCode >= 200 && res.statusCode < 300) {
               resolve(data);
-            } else if (res.statusCode === 400 || res.statusCode === 403) {
-              reject(new Error('Invalid Gemini API key or request parameters'));
+            } else if (res.statusCode === 400 || res.statusCode === 401 || res.statusCode === 403) {
+              reject(new Error(`Invalid or unauthorized Gemini API key (HTTP ${res.statusCode})`));
+            } else if (res.statusCode === 404) {
+              reject(new Error(`Gemini model "${cleanModelName}" not found or unavailable (HTTP 404)`));
             } else if (res.statusCode === 429) {
               reject(new Error('Gemini API rate limit exceeded'));
             } else {
@@ -421,6 +446,7 @@ If your response proposes replacement code for the selection, ensure the replace
       provider: this.getId(),
     };
   }
+
 }
 
 module.exports = GeminiProvider;

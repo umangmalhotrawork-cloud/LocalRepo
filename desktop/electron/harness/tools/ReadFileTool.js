@@ -20,6 +20,14 @@ const ReadFileTool = {
         type: 'string',
         description: 'Relative path to the file within the workspace (e.g. "src/cart.py")',
       },
+      startLine: {
+        type: 'integer',
+        description: 'Optional 1-based start line number to read a specific slice',
+      },
+      endLine: {
+        type: 'integer',
+        description: 'Optional 1-based end line number to read a specific slice',
+      },
     },
     required: ['path'],
   },
@@ -91,6 +99,16 @@ const ReadFileTool = {
       }
 
       const lines = content.split(/\r?\n/);
+      let outputContent = content;
+      let lineRange = null;
+
+      if (typeof args.startLine === 'number' || typeof args.endLine === 'number') {
+        const start = Math.max(1, args.startLine || 1);
+        const end = Math.min(lines.length, args.endLine || lines.length);
+        outputContent = lines.slice(start - 1, end).join('\n');
+        lineRange = `${start}-${end}`;
+      }
+
       const relPath = path.relative(workspaceRoot, resolvedPath);
 
       return {
@@ -99,8 +117,9 @@ const ReadFileTool = {
         relPath,
         size: stat.size,
         linesCount: lines.length,
+        lineRange,
         truncated,
-        content,
+        content: outputContent,
       };
     } catch (readErr) {
       return {

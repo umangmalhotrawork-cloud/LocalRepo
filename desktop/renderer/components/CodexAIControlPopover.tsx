@@ -23,7 +23,7 @@ export default function CodexAIControlPopover({
   onClose,
   triggerRef,
   activeProvider = "gemini",
-  activeModel = "gemini-1.5-flash",
+  activeModel = "gemini-2.5-flash",
   onSelectModel,
   onOpenApiKeyModal,
   agentStatus = "Idle",
@@ -83,12 +83,7 @@ export default function CodexAIControlPopover({
   if (!isOpen) return null;
 
   const providers = aiConfig?.providers || [
-    { id: "gemini", name: "Gemini", models: [{ id: "gemini-1.5-flash", name: "Gemini 1.5 Flash" }], isConfigured: true },
-    { id: "groq", name: "Groq", models: [{ id: "llama-3.1-8b-instant", name: "Llama 3.1 8B Instant" }, { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B" }], isConfigured: false },
-    { id: "openai", name: "OpenAI", models: [{ id: "gpt-4o", name: "GPT-4o" }], isConfigured: false },
-    { id: "claude", name: "Claude", models: [{ id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet" }], isConfigured: false },
-    { id: "deepseek", name: "DeepSeek", models: [{ id: "deepseek-coder", name: "DeepSeek Coder" }], isConfigured: false },
-    { id: "grok", name: "Grok", models: [{ id: "grok-2-latest", name: "Grok 2" }], isConfigured: false },
+    ...[1, 2, 3, 4, 5, 6].map((slot) => ({ id: `nexus${slot}`, name: `NEXUS ${slot}`, secondaryName: "Gemini", models: [{ id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" }], isConfigured: slot === 1 })),
   ];
 
   const currentProvider = providers.find((p: any) => p.id === selectedProviderTab) || providers[0];
@@ -176,10 +171,23 @@ export default function CodexAIControlPopover({
                   className="px-2 py-0.5 rounded bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/30 text-cyan-300 text-[9.5px] font-bold flex items-center gap-1 cursor-pointer"
                 >
                   <Key className="w-2.5 h-2.5" />
-                  <span>{currentProvider.isConfigured ? "Update Key" : "Set Key"}</span>
+                  <span>{currentProvider.isConfigured ? "Update Key" : "Configure Key"}</span>
                 </button>
               </div>
             </div>
+
+            {/* Unconfigured Slot Callout */}
+            {!currentProvider.isConfigured && (
+              <div className="p-2 rounded-lg bg-cyan-950/40 border border-cyan-500/30 flex items-center justify-between">
+                <span className="text-[10px] text-cyan-300">No API key set for {currentProvider.name}</span>
+                <button
+                  onClick={() => onOpenApiKeyModal(currentProvider.id)}
+                  className="px-2 py-0.5 rounded bg-cyan-900 hover:bg-cyan-800 text-white text-[9.5px] font-bold cursor-pointer"
+                >
+                  Configure API Key
+                </button>
+              </div>
+            )}
 
             {/* Diagnostics Summary Card */}
             {diagnostics && (

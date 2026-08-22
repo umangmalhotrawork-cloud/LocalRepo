@@ -282,6 +282,12 @@ function createWindow() {
       mainWindow.focus();
     }
 
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('ai:config-changed', aiProviderRouter.getConfig());
+      }
+    } catch (e) {}
+
     if (process.env.ELECTRON_AUTO_SCREENSHOT === 'true') {
       setTimeout(async () => {
         try {
@@ -807,6 +813,12 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  try {
+    aiProviderRouter.initDefaultKeys();
+  } catch (e) {
+    console.error('[ELECTRON] Failed to re-init AI provider keys on app ready:', e);
+  }
+
   if (protocol && protocol.handle) {
     protocol.handle('app', (request) => {
       try {
@@ -2865,19 +2877,57 @@ ipcMain.handle('continuum:import-capsule', async (_, payload = {}) => {
 
 // Harness Core IPC Handlers (Codex-style Harness Foundation)
 ipcMain.handle('harness:create-thread', async (_, options) => {
-  return harnessRuntime.createThread(options);
+  const result = harnessRuntime.createThread(options);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('harness:threads-changed', { action: 'create', threadId: result.threadId });
+  }
+  return result;
 });
 
-ipcMain.handle('harness:get-thread', async (_, threadId) => {
-  return harnessRuntime.getThread(threadId);
+ipcMain.handle('harness:get-thread', async (_, payload) => {
+  const threadId = typeof payload === 'string' ? payload : payload?.threadId;
+  const workspacePath = typeof payload === 'object' ? payload?.workspacePath : '';
+  return harnessRuntime.getThread(threadId, workspacePath);
 });
 
 ipcMain.handle('harness:list-threads', async (_, filter) => {
   return harnessRuntime.listThreads(filter);
 });
 
+ipcMain.handle('harness:pin-thread', async (_, { threadId, pinned, workspacePath }) => {
+  const result = harnessRuntime.pinThread(threadId, pinned, workspacePath);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('harness:threads-changed', { action: 'pin', threadId, pinned });
+  }
+  return result;
+});
+
+ipcMain.handle('harness:rename-thread', async (_, { threadId, title, workspacePath }) => {
+  const result = harnessRuntime.renameThread(threadId, title, workspacePath);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('harness:threads-changed', { action: 'rename', threadId, title });
+  }
+  return result;
+});
+
+ipcMain.handle('harness:delete-thread', async (_, { threadId, workspacePath }) => {
+  const result = harnessRuntime.deleteThread(threadId, workspacePath);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('harness:threads-changed', { action: 'delete', threadId });
+  }
+  return result;
+});
+
+ipcMain.handle('harness:search-threads', async (_, { query, workspacePath }) => {
+  return harnessRuntime.searchThreads(query, workspacePath);
+});
+
 ipcMain.handle('harness:archive-thread', async (_, threadId) => {
-  return harnessRuntime.archiveThread(threadId);
+  const result = harnessRuntime.archiveThread(threadId);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('harness:threads-changed', { action: 'archive', threadId });
+  }
+  return result;
 });
 
 ipcMain.handle('harness:start-turn', async (_, { threadId, userInput, metadata, options }) => {

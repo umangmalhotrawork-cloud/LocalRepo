@@ -39,9 +39,10 @@ class ContinuumManager {
       if (!fs.existsSync(defaultDir)) {
         fs.mkdirSync(defaultDir, { recursive: true });
       }
+      fs.accessSync(defaultDir, fs.constants.W_OK | fs.constants.R_OK);
       return defaultDir;
     } catch (e) {
-      const fallback = path.join(process.cwd(), '.nexus-continuum');
+      const fallback = path.join(process.cwd(), '.nexus-recovery', 'continuum-storage');
       try { fs.mkdirSync(fallback, { recursive: true }); } catch (_) {}
       return fallback;
     }
@@ -228,6 +229,7 @@ class ContinuumManager {
             const result = continuumEngine.deserializeSnapshot(raw);
             if (result.success && result.snapshot) {
               const snap = result.snapshot;
+              const harnessThread = snap.metadata?.harness?.thread;
               summaries.push({
                 snapshotId: snap.metadata.sessionId,
                 sessionId: snap.metadata.sessionId,
@@ -235,8 +237,14 @@ class ContinuumManager {
                 sequenceNumber: snap.metadata.sequenceNumber,
                 createdAt: snap.metadata.createdAt,
                 updatedAt: snap.metadata.updatedAt,
-                workspaceName: snap.project.workspaceName,
-                userGoal: snap.task?.userGoal || '',
+                workspaceName: snap.project?.workspaceName || 'workspace',
+                workspacePath: snap.project?.workspacePath || activeWorkspace,
+                userGoal: snap.task?.userGoal || harnessThread?.metadata?.title || 'Session',
+                title: harnessThread?.metadata?.title || snap.task?.userGoal || 'Session',
+                pinned: Boolean(harnessThread?.metadata?.pinned),
+                status: harnessThread?.status || 'ACTIVE',
+                providerId: harnessThread?.metadata?.providerId || 'groq',
+                modelId: harnessThread?.metadata?.modelId || 'openai/gpt-oss-120b',
                 activeTargetNodeId: snap.codeState?.activeTargetNodeId || null,
               });
             }

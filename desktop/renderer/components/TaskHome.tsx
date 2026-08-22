@@ -4,7 +4,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { 
   Sparkles, Play, ShieldAlert, Clock, ArrowRight, 
   FileCode, CheckCircle2, Zap, GitBranch, FolderOpen, RefreshCw, Trash2,
-  Layers, Plus, Cpu, Send, ShieldCheck, Bot, User, Loader2
+  Layers, Plus, Cpu, Send, ShieldCheck, Bot, User, Loader2,
+  AlertTriangle, RotateCcw
 } from "lucide-react";
 import CodexBottomComposer from "./CodexBottomComposer";
 
@@ -28,6 +29,14 @@ interface ChatMessage {
   content: string;
   timestamp: number;
   isStreaming?: boolean;
+  isRateLimit?: boolean;
+  rateInfo?: {
+    providerId?: string;
+    modelId?: string;
+    message?: string;
+    retryAfter?: string;
+    retryAfterMs?: number;
+  };
   execution?: {
     providerId: string;
     modelId: string;
@@ -37,6 +46,7 @@ interface ChatMessage {
 
 interface TaskHomeProps {
   workspacePath: string;
+  activeThreadId?: string | null;
   onStartTask: (prompt: string, providerId?: string, modelId?: string) => void;
   onContinueSession: (sessionId: string, userGoal?: string, providerId?: string) => void;
   onOpenFolder: () => void;
@@ -118,6 +128,7 @@ function isCodeTask(text: string): boolean {
 
 export default function TaskHome({
   workspacePath,
+  activeThreadId,
   onStartTask,
   onContinueSession,
   onOpenFolder,
@@ -127,8 +138,8 @@ export default function TaskHome({
 }: TaskHomeProps) {
   const [recentSessions, setRecentSessions] = useState<ContinuumSnapshot[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
-  const [activeProvider, setActiveProvider] = useState("groq");
-  const [activeModel, setActiveModel] = useState("openai/gpt-oss-120b");
+  const [activeProvider, setActiveProvider] = useState("nexus1");
+  const [activeModel, setActiveModel] = useState("gemini-2.5-flash");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -322,6 +333,7 @@ export default function TaskHome({
         }
 
         const res = await (window as any).electronAPI.harness.handleRequest({
+          threadId: activeThreadId || undefined,
           userInput: promptText.trim(),
           workspacePath,
           activeFilePath: null,
@@ -329,33 +341,51 @@ export default function TaskHome({
           modelId: activeModel,
         });
 
+        const is429 = Boolean(
+          res?.isRateLimit ||
+          res?.statusCode === 429 ||
+          /429|rate\s*limit/i.test(res?.error || "")
+        );
+        const actualProvider = res?.rateInfo?.providerId || res?.execution?.providerId || res?.providerId || activeProvider;
+        const actualModel = res?.rateInfo?.modelId || res?.execution?.modelId || res?.modelId || activeModel;
+        const rateInfo = res?.rateInfo ? {
+          ...res.rateInfo,
+          providerId: res.rateInfo.providerId || actualProvider,
+          modelId: res.rateInfo.modelId || actualModel,
+        } : (is429 ? {
+          providerId: actualProvider,
+          modelId: actualModel,
+          message: res?.error || `Rate limit reached on ${actualProvider}. Please wait before trying again.`,
+          retryAfter: res?.retryAfter || "5s",
+        } : undefined);
+
         const finalContent = res?.response || res?.summary || (res?.error ? `Error: ${res.error}` : (res?.success === false ? "AI provider request failed." : "No response generated."));
         setChatMessages((prev) => {
           const exists = prev.some((m) => m.id === agentMsgId);
+          const msgPayload: ChatMessage = {
+            id: agentMsgId,
+            role: "agent",
+            content: finalContent,
+            timestamp: Date.now(),
+            isStreaming: false,
+            isRateLimit: is429,
+            rateInfo,
+            execution: {
+              providerId: actualProvider,
+              modelId: actualModel,
+            },
+          };
           if (exists) {
             return prev.map((m) =>
-              m.id === agentMsgId
-                ? {
-                    ...m,
-                    content: m.content ? m.content : finalContent,
-                    isStreaming: false,
-                    execution: res?.execution || m.execution,
-                  }
-                : m
+              m.id === agentMsgId ? msgPayload : m
             );
           }
-          return [
-            ...prev,
-            {
-              id: agentMsgId,
-              role: "agent",
-              content: finalContent,
-              timestamp: Date.now(),
-              isStreaming: false,
-              execution: res?.execution,
-            },
-          ];
+          return [...prev, msgPayload];
         });
+
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("nexus:threads-changed", { detail: { threadId: res?.threadId } }));
+        }
       } else if (typeof window !== "undefined" && (window as any).electronAPI?.agent?.run) {
         const res = await (window as any).electronAPI.agent.run({
           task: promptText.trim(),
@@ -528,6 +558,42 @@ export default function TaskHome({
                 </div>
               ) : (
                 <div className="flex justify-start">
+                  {msg.isRateLimit ? (
+                    <div className="max-w-[90%] p-4 rounded-2xl bg-amber-950/20 border border-amber-500/40 text-zinc-200 font-sans text-[13px] shadow-md space-y-3 leading-relaxed">
+                      <div className="flex items-center justify-between border-b border-amber-500/20 pb-2 text-[11px]">
+                        <div className="flex items-center gap-2 text-amber-400 font-bold">
+                          <AlertTriangle className="w-4 h-4 text-amber-400" />
+                          <span>Rate Limit Exceeded (HTTP 429)</span>
+                        </div>
+                        <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/30 text-[10px] font-mono">
+                          {msg.rateInfo?.providerId || msg.execution?.providerId || activeProvider} • {msg.rateInfo?.modelId || msg.execution?.modelId || activeModel}
+                        </span>
+                      </div>
+
+                      <p className="text-amber-200/90 text-xs">
+                        {msg.rateInfo?.message || msg.content}
+                      </p>
+
+                      <div className="flex items-center justify-between pt-1">
+                        <div className="text-[11px] font-mono text-zinc-400 flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Retry recommended after: <strong className="text-amber-300">{msg.rateInfo?.retryAfter || "5s"}</strong></span>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            const lastUserPrompt = chatMessages.slice().reverse().find((m) => m.role === "user")?.content;
+                            if (lastUserPrompt) handleComposerSubmit(lastUserPrompt);
+                          }}
+                          disabled={chatLoading}
+                          className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-mono text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Retry Task</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
                   <div className="max-w-[90%] p-4 rounded-2xl bg-[#0a0a12] border border-[#1e1e2e] text-zinc-200 font-sans text-[13px] shadow-md space-y-2 leading-relaxed">
                     <div className="flex items-center justify-between border-b border-[#181826] pb-2 text-[11px]">
                       <div className="flex items-center gap-2 text-cyan-400 font-bold">
@@ -544,6 +610,7 @@ export default function TaskHome({
                       {msg.content}
                     </div>
                   </div>
+                  )}
                 </div>
               )}
             </div>

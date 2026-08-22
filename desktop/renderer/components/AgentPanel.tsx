@@ -26,6 +26,7 @@ import {
   Settings,
   Code2,
   FileText,
+  Clock,
 } from "lucide-react";
 import { useOutsideClick } from "../hooks/useOutsideClick";
 import SwarmActivityPanel from "./SwarmActivityPanel";
@@ -85,6 +86,14 @@ export type AgentMessage = {
   };
   steps?: AgentStep[];
   proposedEdits?: ProposedEdit[];
+  isRateLimit?: boolean;
+  rateInfo?: {
+    providerId?: string;
+    modelId?: string;
+    message?: string;
+    retryAfter?: string;
+    retryAfterMs?: number;
+  };
 };
 
 interface AgentPanelProps {
@@ -649,7 +658,7 @@ export default function AgentPanel({
               status: turn.status || "VERIFIED",
               execution: {
                 providerId: turn.providerId || currentSnapshot?.aiState?.provider || "gemini",
-                modelId: turn.modelId || currentSnapshot?.aiState?.modelName || "gemini-1.5-flash",
+                modelId: turn.modelId || currentSnapshot?.aiState?.modelName || "gemini-2.5-flash",
                 isFallback: false,
               },
             });
@@ -743,7 +752,7 @@ export default function AgentPanel({
     if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getConfig) {
       try {
         const config = await (window as any).electronAPI.ai.getConfig();
-        const activeProvider = config?.activeProvider || aiConfig?.activeProvider || "groq";
+        const activeProvider = config?.activeProvider || aiConfig?.activeProvider || "nexus1";
         const providerConfig = config?.providers?.find((p: any) => p.id === activeProvider);
         const isConfigured = Boolean(providerConfig?.isConfigured && providerConfig?.status === "CONNECTED");
 
@@ -785,14 +794,16 @@ export default function AgentPanel({
     try {
       let res: AgentTaskResult;
       if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.runTurn) {
-        let threadIdToUse = harnessThreadId;
+        let threadIdToUse = harnessThreadId || activeSessionId;
         if (!threadIdToUse && (window as any).electronAPI?.harness?.createThread) {
           try {
             const newThread = await (window as any).electronAPI.harness.createThread({
-              metadata: { workspacePath, activeFilePath, activeSessionId },
+              userInput: activeTask,
+              workspacePath,
+              metadata: { workspacePath, activeFilePath, activeSessionId, providerId: aiConfig?.activeProvider, modelId: aiConfig?.activeModel },
             });
             threadIdToUse = newThread?.threadId;
-            setHarnessThreadId(threadIdToUse);
+            setHarnessThreadId(threadIdToUse || null);
           } catch (e) {}
         }
 
@@ -823,13 +834,51 @@ export default function AgentPanel({
             summary: harnessRes.finalResponse || "Task completed successfully via Codex Harness.",
             steps: steps,
             execution: {
-              providerId: aiConfig?.activeProvider || "groq",
-              modelId: aiConfig?.activeModel || "llama-3.3-70b-versatile",
+              providerId: aiConfig?.activeProvider || "nexus1",
+              modelId: aiConfig?.activeModel || "gemini-2.5-flash",
             },
           };
           setResult(res);
         } else {
-          throw new Error(harnessRes?.error || "Harness turn failed");
+          const is429 = Boolean(
+            harnessRes?.isRateLimit ||
+            harnessRes?.statusCode === 429 ||
+            /429|rate\s*limit/i.test(harnessRes?.error || '')
+          );
+          const actualProvider = harnessRes?.rateInfo?.providerId || harnessRes?.providerId || harnessRes?.execution?.providerId || aiConfig?.activeProvider || "nexus1";
+          const actualModel = harnessRes?.rateInfo?.modelId || harnessRes?.modelId || harnessRes?.execution?.modelId || aiConfig?.activeModel || "";
+          const rateInfo = harnessRes?.rateInfo ? {
+            ...harnessRes.rateInfo,
+            providerId: harnessRes.rateInfo.providerId || actualProvider,
+            modelId: harnessRes.rateInfo.modelId || actualModel,
+          } : (is429 ? {
+            providerId: actualProvider,
+            modelId: actualModel,
+            message: harnessRes?.error || `Rate limit reached on ${actualProvider}. Please wait before trying again.`,
+            retryAfter: harnessRes?.retryAfter || "5s",
+          } : undefined);
+
+          const errorMsg: AgentMessage = {
+            id: agentMsgId,
+            role: "agent",
+            content: harnessRes?.error || "Failed to execute agent task",
+            timestamp: Date.now(),
+            status: "ERROR",
+            isRateLimit: is429,
+            rateInfo,
+            turnId: harnessRes?.turnId,
+            execution: {
+              providerId: actualProvider,
+              modelId: actualModel,
+            },
+          };
+
+          setMessages((prev) => {
+            const filtered = prev.filter((m) => m.id !== agentMsgId);
+            return [...filtered, errorMsg];
+          });
+          setLoading(false);
+          return;
         }
       } else if (typeof window !== "undefined" && (window as any).electronAPI?.agent?.run) {
         res = await (window as any).electronAPI.agent.run({
@@ -882,7 +931,7 @@ export default function AgentPanel({
           ],
           execution: {
             providerId: "gemini",
-            modelId: "gemini-1.5-flash",
+            modelId: "gemini-2.5-flash",
             isFallback: false,
           },
         };
@@ -1182,6 +1231,42 @@ export default function AgentPanel({
               </div>
             ) : (
               <div className="space-y-2">
+                {msg.isRateLimit ? (
+                  <div className="p-3.5 rounded-xl bg-amber-950/20 border border-amber-500/40 space-y-2.5 shadow-md">
+                    <div className="flex items-center justify-between border-b border-amber-500/20 pb-1.5 text-[10px]">
+                      <div className="flex items-center gap-1.5 text-amber-400 font-bold">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Rate Limit Reached (HTTP 429)</span>
+                      </div>
+                      <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 text-[9.5px] font-mono">
+                        {msg.rateInfo?.providerId || msg.execution?.providerId || "groq"} • {msg.rateInfo?.modelId || msg.execution?.modelId || "model"}
+                      </span>
+                    </div>
+
+                    <p className="text-amber-200/90 text-[11px] leading-relaxed">
+                      {msg.rateInfo?.message || msg.content}
+                    </p>
+
+                    <div className="flex items-center justify-between pt-1 text-[10px]">
+                      <div className="text-zinc-400 font-mono flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Retry after: <strong className="text-amber-300">{msg.rateInfo?.retryAfter || "5s"}</strong></span>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          const lastUserPrompt = messages.slice().reverse().find((m) => m.role === "user")?.content || initialTask || taskInput;
+                          if (lastUserPrompt) handleRunAgent(lastUserPrompt);
+                        }}
+                        disabled={loading}
+                        className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-[10.5px] flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Retry Task</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
                 <div className="p-3 rounded-xl bg-[#0a0a10] border border-[#181826] space-y-2.5 shadow-sm">
                   {/* Agent Header Badge */}
                   <div className="flex items-center justify-between border-b border-[#141420] pb-1.5 text-[10px]">
@@ -1313,6 +1398,7 @@ export default function AgentPanel({
                     )}
                   </div>
                 </div>
+                )}
               </div>
             )}
           </div>

@@ -14,6 +14,15 @@ const ClaudeProvider = require('./ClaudeProvider');
 const DeepSeekProvider = require('./DeepSeekProvider');
 const GrokProvider = require('./GrokProvider');
 
+const NEXUS_SLOT_IDS = [
+  PROVIDER_IDS.NEXUS_1,
+  PROVIDER_IDS.NEXUS_2,
+  PROVIDER_IDS.NEXUS_3,
+  PROVIDER_IDS.NEXUS_4,
+  PROVIDER_IDS.NEXUS_5,
+  PROVIDER_IDS.NEXUS_6,
+];
+
 let appModule = null;
 let safeStorageModule = null;
 try {
@@ -27,12 +36,58 @@ class AIProviderRouter {
     this.providers = new Map();
     this.apiKeys = new Map();
     this.keyValidationStatus = new Map();
+    this.slotDiagnostics = new Map();
 
-    this.activeProviderId = PROVIDER_IDS.GROQ;
-    this.activeModelId = DEFAULT_MODELS[PROVIDER_IDS.GROQ];
+    this.activeProviderId = PROVIDER_IDS.NEXUS_1;
+    this.activeModelId = DEFAULT_MODELS[PROVIDER_IDS.NEXUS_1];
+    this.slotModelIds = new Map();
 
     this.registerProviders();
+    this.initializeSlotModels();
     this.initDefaultKeys();
+  }
+
+  isNexusSlot(providerId) {
+    return NEXUS_SLOT_IDS.includes(providerId);
+  }
+
+  getValidModelId(providerId, requestedModelId) {
+    const provider = this.providers.get(providerId);
+    if (!provider) return '';
+
+    const models = (typeof provider.getModels === 'function' ? provider.getModels() : provider.models) || [];
+    const ids = models.map((model) => (typeof model === 'string' ? model : model?.id || '')).filter(Boolean);
+    const defaultModel = typeof provider.getDefaultModel === 'function'
+      ? provider.getDefaultModel()
+      : (DEFAULT_MODELS[providerId] || ids[0] || '');
+
+    if (requestedModelId && (ids.includes(requestedModelId) || ids.length === 0)) return requestedModelId;
+    if (ids.includes(defaultModel) || ids.length === 0) return defaultModel;
+    return ids[0] || defaultModel;
+  }
+
+  initializeSlotModels(savedSlotModels = {}) {
+    for (const providerId of NEXUS_SLOT_IDS) {
+      this.slotModelIds.set(providerId, this.getValidModelId(providerId, savedSlotModels[providerId]));
+    }
+  }
+
+  getSelectedModelId(providerId) {
+    if (this.isNexusSlot(providerId)) {
+      return this.getValidModelId(providerId, this.slotModelIds.get(providerId));
+    }
+    return this.getValidModelId(providerId, providerId === this.activeProviderId ? this.activeModelId : undefined);
+  }
+
+  synchronizeSlotModel(providerId, requestedModelId, persist = false) {
+    const modelId = this.getValidModelId(providerId, requestedModelId);
+    if (this.isNexusSlot(providerId)) {
+      const changed = this.slotModelIds.get(providerId) !== modelId;
+      this.slotModelIds.set(providerId, modelId);
+      if (providerId === this.activeProviderId) this.activeModelId = modelId;
+      if (persist && changed) this.saveActiveSelection(this.activeProviderId, this.activeModelId);
+    }
+    return modelId;
   }
 
   getVaultCandidatePaths() {
@@ -43,30 +98,54 @@ class AIProviderRouter {
         if (userData) candidates.push(path.join(userData, 'nexus_ai_vault.json'));
       } catch (e) {}
     }
-    const os = require('os');
-    candidates.push(path.join(os.homedir(), 'Library', 'Application Support', 'NEXUS', 'nexus_ai_vault.json'));
-    candidates.push(path.join(os.homedir(), '.config', 'NEXUS', 'nexus_ai_vault.json'));
+    const { getProjectRoot } = require('../envLoader');
+    let projectRoot = path.resolve(__dirname, '..', '..');
+    try {
+      if (typeof getProjectRoot === 'function') projectRoot = getProjectRoot();
+    } catch (e) {}
+
+    candidates.push(path.join(projectRoot, '.nexus-recovery', 'nexus_ai_vault.json'));
+    candidates.push(path.join(path.resolve(__dirname, '..', '..'), '.nexus-recovery', 'nexus_ai_vault.json'));
+    candidates.push(path.join(path.resolve(__dirname, '..', '..', '..'), '.nexus-recovery', 'nexus_ai_vault.json'));
     candidates.push(path.join(process.cwd(), '.nexus-recovery', 'nexus_ai_vault.json'));
-    return candidates;
+    const os = require('os');
+    try {
+      candidates.push(path.join(os.homedir(), 'Library', 'Application Support', 'NEXUS', 'nexus_ai_vault.json'));
+      candidates.push(path.join(os.homedir(), 'Library', 'Application Support', 'Echo Nullity', 'nexus_ai_vault.json'));
+      candidates.push(path.join(os.homedir(), 'Library', 'Application Support', 'echo-nullity', 'nexus_ai_vault.json'));
+      candidates.push(path.join(os.homedir(), '.config', 'NEXUS', 'nexus_ai_vault.json'));
+      candidates.push(path.join(os.homedir(), '.config', 'echo-nullity', 'nexus_ai_vault.json'));
+    } catch (e) {}
+    return Array.from(new Set(candidates));
   }
 
   getVaultFilePath() {
     const candidates = this.getVaultCandidatePaths();
     for (const p of candidates) {
       try {
-        if (fs.existsSync(p)) return p;
+        if (fs.existsSync(p)) {
+          fs.accessSync(p, fs.constants.R_OK | fs.constants.W_OK);
+          return p;
+        }
+      } catch (e) {}
+    }
+    for (const p of candidates) {
+      try {
+        const dir = path.dirname(p);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        fs.accessSync(dir, fs.constants.R_OK | fs.constants.W_OK);
+        return p;
       } catch (e) {}
     }
     return candidates[0];
   }
 
   saveKeyToVault(providerId, apiKey) {
-    const candidatePaths = [
-      this.getVaultFilePath(),
-      ...this.getVaultCandidatePaths(),
-    ];
-
+    const candidatePaths = this.getVaultCandidatePaths();
     let saved = false;
+
     for (const vaultPath of candidatePaths) {
       if (!vaultPath) continue;
       try {
@@ -85,20 +164,22 @@ class AIProviderRouter {
         }
 
         if (apiKey) {
+          const entry = {};
           if (safeStorageModule && typeof safeStorageModule.isEncryptionAvailable === 'function' && safeStorageModule.isEncryptionAvailable()) {
-            vault[providerId] = { enc: safeStorageModule.encryptString(apiKey).toString('hex') };
-          } else {
-            vault[providerId] = { b64: Buffer.from(apiKey, 'utf8').toString('base64') };
+            try {
+              entry.enc = safeStorageModule.encryptString(apiKey).toString('hex');
+            } catch (e) {}
           }
+          entry.b64 = Buffer.from(apiKey, 'utf8').toString('base64');
+          vault[providerId] = entry;
         } else {
           delete vault[providerId];
         }
 
         fs.writeFileSync(vaultPath, JSON.stringify(vault, null, 2), 'utf8');
         saved = true;
-        break;
       } catch (e) {
-        // Try next candidate
+        // Continue saving to other candidate paths
       }
     }
     if (!saved) {
@@ -111,25 +192,26 @@ class AIProviderRouter {
   }
 
   loadKeysFromVault() {
-    const candidatePaths = [
-      this.getVaultFilePath(),
-      ...this.getVaultCandidatePaths(),
-    ];
+    const candidatePaths = this.getVaultCandidatePaths();
+    const loadedVault = {};
+    let loadedAny = false;
+
     for (const vaultPath of candidatePaths) {
       if (!vaultPath) continue;
       try {
         if (!fs.existsSync(vaultPath)) continue;
         const raw = fs.readFileSync(vaultPath, 'utf8');
         const vault = JSON.parse(raw) || {};
-        let loadedAny = false;
         for (const [pId, val] of Object.entries(vault)) {
           if (!val || typeof val !== 'object') continue;
+          if (this.apiKeys.has(pId) && this.apiKeys.get(pId)) continue;
           let decrypted = null;
           if (val.enc && safeStorageModule && typeof safeStorageModule.isEncryptionAvailable === 'function' && safeStorageModule.isEncryptionAvailable()) {
             try {
               decrypted = safeStorageModule.decryptString(Buffer.from(val.enc, 'hex'));
             } catch (e) {}
-          } else if (val.b64) {
+          }
+          if (!decrypted && val.b64) {
             try {
               decrypted = Buffer.from(val.b64, 'base64').toString('utf8');
             } catch (e) {}
@@ -137,28 +219,48 @@ class AIProviderRouter {
           if (decrypted && decrypted.trim()) {
             this.apiKeys.set(pId, decrypted.trim());
             this.keyValidationStatus.set(pId, PROVIDER_STATUS.CONNECTED);
+            loadedVault[pId] = decrypted.trim();
             loadedAny = true;
           }
-        }
-        if (loadedAny) {
-          break;
         }
       } catch (e) {
         // Try next candidate
       }
     }
+
+    if (loadedAny) {
+      for (const [pId, keyVal] of Object.entries(loadedVault)) {
+        this.saveKeyToVault(pId, keyVal);
+      }
+    }
   }
 
   registerProviders() {
+    // 1. Register Primary Six-Slot Gemini Backend (NEXUS 1 – NEXUS 6)
+    const nexus1 = new GeminiProvider(PROVIDER_IDS.NEXUS_1, 'NEXUS 1', undefined, 'gemini-2.5-flash', { slotIndex: 1, secondaryName: 'Gemini' });
+    const nexus2 = new GeminiProvider(PROVIDER_IDS.NEXUS_2, 'NEXUS 2', undefined, 'gemini-3.5-flash', { slotIndex: 2, secondaryName: 'Gemini' });
+    const nexus3 = new GeminiProvider(PROVIDER_IDS.NEXUS_3, 'NEXUS 3', undefined, 'gemini-3.5-flash', { slotIndex: 3, secondaryName: 'Gemini' });
+    const nexus4 = new GeminiProvider(PROVIDER_IDS.NEXUS_4, 'NEXUS 4', undefined, 'gemini-3.5-flash', { slotIndex: 4, secondaryName: 'Gemini' });
+    const nexus5 = new GeminiProvider(PROVIDER_IDS.NEXUS_5, 'NEXUS 5', undefined, 'gemini-3.5-flash', { slotIndex: 5, secondaryName: 'Gemini' });
+    const nexus6 = new GroqProvider(PROVIDER_IDS.NEXUS_6, 'NEXUS 6', undefined, 'openai/gpt-oss-120b', { slotIndex: 6, secondaryName: 'Groq' });
+
+    this.providers.set(nexus1.getId(), nexus1);
+    this.providers.set(nexus2.getId(), nexus2);
+    this.providers.set(nexus3.getId(), nexus3);
+    this.providers.set(nexus4.getId(), nexus4);
+    this.providers.set(nexus5.getId(), nexus5);
+    this.providers.set(nexus6.getId(), nexus6);
+
+    // 2. Register Existing Providers for Backward Compatibility
+    const gemini = new GeminiProvider(PROVIDER_IDS.GEMINI, 'Google Gemini', undefined, 'gemini-2.5-flash');
     const groq = new GroqProvider();
-    const gemini = new GeminiProvider();
     const openai = new OpenAIProvider();
     const claude = new ClaudeProvider();
     const deepseek = new DeepSeekProvider();
     const grok = new GrokProvider();
 
-    this.providers.set(groq.getId(), groq);
     this.providers.set(gemini.getId(), gemini);
+    this.providers.set(groq.getId(), groq);
     this.providers.set(openai.getId(), openai);
     this.providers.set(claude.getId(), claude);
     this.providers.set(deepseek.getId(), deepseek);
@@ -166,10 +268,16 @@ class AIProviderRouter {
   }
 
   initDefaultKeys() {
-    // 1. Check environment variables per provider
+    // 1. Check environment variables per provider/slot
     const envMappings = {
-      [PROVIDER_IDS.GROQ]: ['GROQ_API_KEY'],
+      [PROVIDER_IDS.NEXUS_1]: ['GEMINI_KEY_1', 'GEMINI_API_KEY_1', 'NEXUS_KEY_1'],
+      [PROVIDER_IDS.NEXUS_2]: ['GEMINI_KEY_2', 'GEMINI_API_KEY_2', 'NEXUS_KEY_2'],
+      [PROVIDER_IDS.NEXUS_3]: ['GEMINI_KEY_3', 'GEMINI_API_KEY_3', 'NEXUS_KEY_3'],
+      [PROVIDER_IDS.NEXUS_4]: ['GEMINI_KEY_4', 'GEMINI_API_KEY_4', 'NEXUS_KEY_4'],
+      [PROVIDER_IDS.NEXUS_5]: ['GEMINI_KEY_5', 'GEMINI_API_KEY_5', 'NEXUS_KEY_5'],
+      [PROVIDER_IDS.NEXUS_6]: ['GROQ_API_KEY', 'GEMINI_KEY_6', 'GEMINI_API_KEY_6', 'NEXUS_KEY_6'],
       [PROVIDER_IDS.GEMINI]: ['GEMINI_API_KEY'],
+      [PROVIDER_IDS.GROQ]: ['GROQ_API_KEY'],
       [PROVIDER_IDS.OPENAI]: ['OPENAI_API_KEY'],
       [PROVIDER_IDS.CLAUDE]: ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY'],
       [PROVIDER_IDS.DEEPSEEK]: ['DEEPSEEK_API_KEY'],
@@ -179,7 +287,7 @@ class AIProviderRouter {
     for (const [pId, envKeys] of Object.entries(envMappings)) {
       for (const envKey of envKeys) {
         const val = process.env[envKey];
-        if (val && val.trim()) {
+        if (val && val.trim() && val.trim() !== 'PASTE_KEY_HERE') {
           this.apiKeys.set(pId, val.trim());
           this.keyValidationStatus.set(pId, PROVIDER_STATUS.CONNECTED);
           break;
@@ -187,19 +295,24 @@ class AIProviderRouter {
       }
     }
 
+    // Fallback: if only GEMINI_API_KEY is provided and nexus1 is empty, assign it to nexus1
+    if (process.env.GEMINI_API_KEY && !this.apiKeys.has(PROVIDER_IDS.NEXUS_1) && process.env.GEMINI_API_KEY.trim() !== 'PASTE_KEY_HERE') {
+      this.apiKeys.set(PROVIDER_IDS.NEXUS_1, process.env.GEMINI_API_KEY.trim());
+      this.keyValidationStatus.set(PROVIDER_IDS.NEXUS_1, PROVIDER_STATUS.CONNECTED);
+    }
+
     // 2. Load keys from encrypted persistent vault
     this.loadKeysFromVault();
 
-    // 3. Align activeProviderId to configured provider if present
-    if (this.apiKeys.has(PROVIDER_IDS.GROQ)) {
-      this.activeProviderId = PROVIDER_IDS.GROQ;
-      this.activeModelId = DEFAULT_MODELS[PROVIDER_IDS.GROQ] || 'openai/gpt-oss-120b';
+    // 3. Set default active provider (prefer first connected nexus slot or nexus1)
+    const firstConnectedNexus = NEXUS_SLOT_IDS.find((slotId) => this.apiKeys.has(slotId));
+
+    if (firstConnectedNexus) {
+      this.activeProviderId = firstConnectedNexus;
+      this.activeModelId = this.getSelectedModelId(firstConnectedNexus);
     } else {
-      const firstConnected = Array.from(this.apiKeys.keys())[0];
-      if (firstConnected && this.providers.has(firstConnected)) {
-        this.activeProviderId = firstConnected;
-        this.activeModelId = this.providers.get(firstConnected).getDefaultModel();
-      }
+      this.activeProviderId = PROVIDER_IDS.NEXUS_1;
+      this.activeModelId = this.getSelectedModelId(PROVIDER_IDS.NEXUS_1);
     }
 
     // 4. Load persisted active provider and model selection if available
@@ -216,7 +329,15 @@ class AIProviderRouter {
       try {
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         const configPath = path.join(dir, 'nexus_ai_selection.json');
-        fs.writeFileSync(configPath, JSON.stringify({ activeProvider: providerId, activeModel: modelId }, null, 2), 'utf8');
+        const slotModels = Object.fromEntries(NEXUS_SLOT_IDS.map((slotId) => [
+          slotId,
+          this.getSelectedModelId(slotId),
+        ]));
+        fs.writeFileSync(configPath, JSON.stringify({
+          activeProvider: providerId,
+          activeModel: this.getValidModelId(providerId, modelId),
+          slotModels,
+        }, null, 2), 'utf8');
         break;
       } catch (e) {
         // Try next directory
@@ -235,14 +356,19 @@ class AIProviderRouter {
         if (fs.existsSync(configPath)) {
           const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
           if (data && data.activeProvider && this.providers.has(data.activeProvider)) {
-            this.activeProviderId = data.activeProvider;
-            const provider = this.providers.get(data.activeProvider);
-            if (data.activeModel) {
-              this.activeModelId = data.activeModel;
-            } else {
-              this.activeModelId = provider.getDefaultModel();
-              this.saveActiveSelection(this.activeProviderId, this.activeModelId);
+            const savedSlotModels = { ...(data.slotModels || {}) };
+            // Legacy files persisted only activeModel. Apply it to its original
+            // slot, then validate every NEXUS selection before any request.
+            if (data.activeModel && this.isNexusSlot(data.activeProvider) && !savedSlotModels[data.activeProvider]) {
+              savedSlotModels[data.activeProvider] = data.activeModel;
             }
+            this.initializeSlotModels(savedSlotModels);
+            this.activeProviderId = data.activeProvider;
+            this.activeModelId = this.isNexusSlot(data.activeProvider)
+              ? this.getSelectedModelId(data.activeProvider)
+              : this.getValidModelId(data.activeProvider, data.activeModel);
+            // Persist the correction and migrate legacy single-model files.
+            this.saveActiveSelection(this.activeProviderId, this.activeModelId);
             break;
           }
         }
@@ -281,33 +407,87 @@ class AIProviderRouter {
     return Boolean(key && typeof key === 'string' && key.trim().length > 0);
   }
 
-  getConfig() {
-    const providersList = Array.from(this.providers.values()).map((p) => {
-      const pId = p.getId();
-      const status = this.getProviderStatus(pId);
-      const meta = PROVIDER_METADATA[pId] || {};
-      const isConfigured = status === PROVIDER_STATUS.CONNECTED;
-      return {
-        id: pId,
-        providerId: pId,
-        name: p.getName(),
-        authenticated: isConfigured,
-        keyConfigured: this.apiKeys.has(pId),
-        models: p.getModels(),
-        defaultModel: p.getDefaultModel(),
-        selectedModelId: pId === this.activeProviderId ? this.activeModelId : p.getDefaultModel(),
-        status,
-        maskedKey: this.getMaskedKey(pId),
-        isConfigured,
-        keyPlaceholder: meta.keyPlaceholder || 'Enter API key...',
-        helpUrl: meta.helpUrl || '',
-        lastDiscoveryAt: p.lastDiscoveryAt || 0,
-      };
+  recordSlotRequest(slotId, status, modelId = '') {
+    const pId = slotId || this.activeProviderId || PROVIDER_IDS.NEXUS_1;
+    const provider = this.providers.get(pId);
+    const meta = PROVIDER_METADATA[pId] || {};
+    const existing = this.slotDiagnostics.get(pId) || {};
+    this.slotDiagnostics.set(pId, {
+      ...existing,
+      slotId: pId,
+      name: provider?.getName() || meta.name || pId,
+      secondaryName: meta.secondaryName || 'Gemini',
+      slotIndex: meta.slotIndex || null,
+      status: status || 'SUCCESS',
+      lastRequestAt: Date.now(),
+      lastModel: modelId || existing.lastModel || '',
     });
+  }
 
+  getConfig() {
+    const orderedIds = [
+      PROVIDER_IDS.NEXUS_1,
+      PROVIDER_IDS.NEXUS_2,
+      PROVIDER_IDS.NEXUS_3,
+      PROVIDER_IDS.NEXUS_4,
+      PROVIDER_IDS.NEXUS_5,
+      PROVIDER_IDS.NEXUS_6,
+      PROVIDER_IDS.GEMINI,
+      PROVIDER_IDS.GROQ,
+      PROVIDER_IDS.OPENAI,
+      PROVIDER_IDS.CLAUDE,
+      PROVIDER_IDS.DEEPSEEK,
+      PROVIDER_IDS.GROK,
+    ];
+
+    const providersList = orderedIds
+      .map((pId) => {
+        const p = this.providers.get(pId);
+        if (!p) return null;
+        const status = this.getProviderStatus(pId);
+        const meta = PROVIDER_METADATA[pId] || {};
+        const isConfigured = status === PROVIDER_STATUS.CONNECTED;
+        const diag = this.slotDiagnostics.get(pId) || {
+          slotId: pId,
+          name: p.getName(),
+          secondaryName: meta.secondaryName || 'Gemini',
+          slotIndex: meta.slotIndex || null,
+          status: isConfigured ? 'IDLE' : 'NOT_CONFIGURED',
+          lastRequestAt: null,
+          lastModel: '',
+        };
+
+        return {
+          id: pId,
+          providerId: pId,
+          name: p.getName(),
+          secondaryName: meta.secondaryName || 'Gemini',
+          slotIndex: meta.slotIndex || null,
+          authenticated: isConfigured,
+          keyConfigured: this.apiKeys.has(pId),
+          models: p.getModels(),
+          defaultModel: p.getDefaultModel(),
+          selectedModelId: this.getSelectedModelId(pId),
+          status,
+          maskedKey: this.getMaskedKey(pId),
+          isConfigured,
+          keyPlaceholder: meta.keyPlaceholder || 'Enter API key...',
+          helpUrl: meta.helpUrl || '',
+          lastDiscoveryAt: p.lastDiscoveryAt || 0,
+          diagnostics: {
+            ...diag,
+            isConfigured,
+          },
+        };
+      })
+      .filter(Boolean);
+
+    const activeMeta = PROVIDER_METADATA[this.activeProviderId] || {};
     return {
       activeProvider: this.activeProviderId,
       activeModel: this.activeModelId,
+      activeProviderName: this.providers.get(this.activeProviderId)?.getName() || 'NEXUS 1',
+      activeSecondaryName: activeMeta.secondaryName || 'Gemini',
       providers: providersList,
     };
   }
@@ -315,17 +495,8 @@ class AIProviderRouter {
   setConfig(providerId, modelId) {
     if (this.providers.has(providerId)) {
       this.activeProviderId = providerId;
-      const provider = this.providers.get(providerId);
-      const rawModels = (typeof provider.getModels === 'function' ? provider.getModels() : provider.models) || [];
-      const validModels = rawModels.map((m) => (typeof m === 'string' ? m : m?.id || ''));
-
-      if (modelId && (validModels.includes(modelId) || validModels.length === 0)) {
-        this.activeModelId = modelId;
-      } else if (typeof provider.getDefaultModel === 'function') {
-        this.activeModelId = provider.getDefaultModel();
-      } else {
-        this.activeModelId = modelId || validModels[0] || '';
-      }
+      this.activeModelId = this.synchronizeSlotModel(providerId, modelId);
+      if (!this.isNexusSlot(providerId)) this.activeModelId = this.getValidModelId(providerId, modelId);
       this.saveActiveSelection(this.activeProviderId, this.activeModelId);
       return { success: true, activeProvider: this.activeProviderId, activeModel: this.activeModelId };
     }
@@ -337,6 +508,7 @@ class AIProviderRouter {
       return { success: false, error: `Unsupported provider: ${providerId}` };
     }
 
+    const provider = this.providers.get(providerId);
     const trimmedKey = (apiKey || '').trim();
     if (!trimmedKey) {
       this.apiKeys.delete(providerId);
@@ -345,31 +517,30 @@ class AIProviderRouter {
       return { success: true, status: PROVIDER_STATUS.NOT_CONFIGURED, maskedKey: '', configured: false };
     }
 
-    const provider = this.providers.get(providerId);
-    const validation = await provider.validateKey(trimmedKey);
-
-    if (validation.valid) {
-      this.apiKeys.set(providerId, trimmedKey);
-      this.keyValidationStatus.set(providerId, PROVIDER_STATUS.CONNECTED);
-      this.saveKeyToVault(providerId, trimmedKey);
-      this.activeProviderId = providerId;
-      this.activeModelId = provider.getDefaultModel();
-      return {
-        success: true,
-        status: PROVIDER_STATUS.CONNECTED,
-        maskedKey: this.getMaskedKey(providerId),
-        configured: true,
-        models: provider.getModels(),
-      };
-    } else {
-      this.keyValidationStatus.set(providerId, PROVIDER_STATUS.INVALID_KEY);
+    if (trimmedKey.length < 8) {
       return {
         success: false,
         status: PROVIDER_STATUS.INVALID_KEY,
-        error: validation.error || `Invalid API key or ${provider.getName()} connection failed.`,
+        error: 'API key is too short. Please check your credential.',
         configured: false,
       };
     }
+
+    this.apiKeys.set(providerId, trimmedKey);
+    this.keyValidationStatus.set(providerId, PROVIDER_STATUS.CONNECTED);
+    this.saveKeyToVault(providerId, trimmedKey);
+    this.activeProviderId = providerId;
+    this.activeModelId = this.synchronizeSlotModel(providerId, this.getValidModelId(providerId));
+    if (!this.isNexusSlot(providerId)) this.activeModelId = this.getValidModelId(providerId);
+    this.saveActiveSelection(this.activeProviderId, this.activeModelId);
+
+    return {
+      success: true,
+      status: PROVIDER_STATUS.CONNECTED,
+      maskedKey: this.getMaskedKey(providerId),
+      configured: true,
+      models: provider.getModels(),
+    };
   }
 
   removeApiKey(providerId) {
@@ -387,7 +558,7 @@ class AIProviderRouter {
     return provider.validateKey(apiKey);
   }
 
-  async getProviderDiagnostics(providerId = 'groq') {
+  async getProviderDiagnostics(providerId = 'nexus1') {
     const provider = this.providers.get(providerId);
     if (!provider) {
       return {
@@ -395,34 +566,63 @@ class AIProviderRouter {
         reachable: false,
         error: `Unknown provider: ${providerId}`,
         models: [],
-        configuredModel: this.activeModelId,
+        configuredModel: this.getSelectedModelId(providerId),
         configuredModelAvailable: false,
       };
     }
 
     const apiKey = this.apiKeys.get(providerId);
+    const meta = PROVIDER_METADATA[providerId] || {};
+    const lastDiag = this.slotDiagnostics.get(providerId);
+
     if (!apiKey || !apiKey.trim()) {
       return {
+        providerId,
+        name: provider.getName(),
+        secondaryName: meta.secondaryName || 'Gemini',
+        slotIndex: meta.slotIndex || null,
         authenticated: false,
         reachable: false,
-        error: `No API key configured for ${provider.getName()}`,
-        models: [],
-        configuredModel: this.activeModelId,
+        error: 'API key is missing or not configured',
+        models: provider.getModels(),
+        configuredModel: this.getSelectedModelId(providerId),
         configuredModelAvailable: false,
+        lastRequestAt: lastDiag?.lastRequestAt || null,
+        lastStatus: lastDiag?.status || 'NOT_CONFIGURED',
       };
     }
 
     if (typeof provider.getAvailableModels === 'function') {
-      const diag = await provider.getAvailableModels(apiKey, this.activeModelId);
-      return diag;
+      const configuredModel = this.getSelectedModelId(providerId);
+      const diag = await provider.getAvailableModels(apiKey, configuredModel);
+      if (diag.authenticated && diag.reachable && this.isNexusSlot(providerId)) {
+        const correctedModel = this.synchronizeSlotModel(providerId, configuredModel, true);
+        diag.configuredModel = correctedModel;
+        diag.configuredModelAvailable = diag.models.some((model) => model.id === correctedModel);
+      }
+      return {
+        ...diag,
+        providerId,
+        name: provider.getName(),
+        secondaryName: meta.secondaryName || 'Gemini',
+        slotIndex: meta.slotIndex || null,
+        lastRequestAt: lastDiag?.lastRequestAt || null,
+        lastStatus: lastDiag?.status || (diag.authenticated ? 'CONNECTED' : 'ERROR'),
+      };
     }
 
     return {
       authenticated: true,
       reachable: true,
+      providerId,
+      name: provider.getName(),
+      secondaryName: meta.secondaryName || 'Gemini',
+      slotIndex: meta.slotIndex || null,
       models: provider.getModels(),
-      configuredModel: this.activeModelId,
+      configuredModel: this.getSelectedModelId(providerId),
       configuredModelAvailable: true,
+      lastRequestAt: lastDiag?.lastRequestAt || null,
+      lastStatus: lastDiag?.status || 'CONNECTED',
     };
   }
 
@@ -432,24 +632,22 @@ class AIProviderRouter {
    * If the target provider is not configured, returns null (delegates to offline deterministic engine).
    */
   resolveProviderAndModel(requestedProviderId, requestedModelId) {
-    const pId = requestedProviderId || this.activeProviderId || PROVIDER_IDS.GROQ;
-    const mId = requestedModelId || (pId === this.activeProviderId ? this.activeModelId : undefined);
+    const pId = requestedProviderId || this.activeProviderId || PROVIDER_IDS.NEXUS_1;
+    const mId = requestedModelId || this.getSelectedModelId(pId);
 
     let provider = this.providers.get(pId);
     let apiKey = provider ? this.apiKeys.get(pId) : null;
 
     if (provider && provider.isConfigured(apiKey)) {
-      const rawModels = (typeof provider.getModels === 'function' ? provider.getModels() : provider.models) || [];
-      const validModels = rawModels.map((m) => (typeof m === 'string' ? m : m?.id || ''));
-      const defaultMod = typeof provider.getDefaultModel === 'function' ? provider.getDefaultModel() : (validModels[0] || '');
-      const targetModel = mId && (validModels.includes(mId) || validModels.length === 0) ? mId : defaultMod;
+      const targetModel = this.getValidModelId(pId, mId);
+      this.synchronizeSlotModel(pId, targetModel, true);
       return {
         provider,
         apiKey,
         modelId: targetModel,
         isFallback: false,
         requestedProviderId: pId,
-        requestedModelId: mId,
+        requestedModelId: targetModel,
       };
     }
 
@@ -493,6 +691,7 @@ class AIProviderRouter {
     }
     return result;
   }
+
 }
 
 const aiProviderRouter = new AIProviderRouter();

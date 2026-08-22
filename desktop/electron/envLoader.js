@@ -58,26 +58,28 @@ function parseEnvContent(content) {
  * Loads the project-root .env file into process.env before any OAuth operations.
  */
 function loadEnvConfig({ projectRoot = getProjectRoot(), override = false } = {}) {
-  const envPath = path.resolve(projectRoot, '.env');
-  const found = fs.existsSync(envPath);
-  let loaded = false;
+  const candidateFiles = ['.env.local', '.env'];
+  let loadedAny = false;
+  let mainEnvPath = path.resolve(projectRoot, '.env');
 
-  if (found) {
-    try {
-      const content = fs.readFileSync(envPath, 'utf8');
-      const parsed = parseEnvContent(content);
-      for (const [k, v] of Object.entries(parsed)) {
-        if (override || !(k in process.env)) {
-          process.env[k] = v;
+  for (const file of candidateFiles) {
+    const envPath = path.resolve(projectRoot, file);
+    if (fs.existsSync(envPath)) {
+      mainEnvPath = envPath;
+      try {
+        const content = fs.readFileSync(envPath, 'utf8');
+        const parsed = parseEnvContent(content);
+        for (const [k, v] of Object.entries(parsed)) {
+          if (override || !(k in process.env)) {
+            process.env[k] = v;
+          }
         }
-      }
-      loaded = true;
-    } catch (e) {
-      loaded = false;
+        loadedAny = true;
+      } catch (e) {}
     }
   }
 
-  return { envPath, found, loaded };
+  return { envPath: mainEnvPath, found: loadedAny, loaded: loadedAny };
 }
 
 function isGitHubClientIdConfigured() {

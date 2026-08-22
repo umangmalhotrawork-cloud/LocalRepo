@@ -370,7 +370,7 @@ export default function EngineeringTimeline({
                   <div>
                     <span className="text-zinc-500 block text-[9.5px]">AI ROLE / MODEL</span>
                     <span className="text-cyan-300 font-medium">
-                      {selectedNode.roleId} ({selectedNode.providerId || "gemini"} / {selectedNode.modelId || "gemini-1.5-flash"})
+                      {selectedNode.roleId} ({selectedNode.providerId || "gemini"} / {selectedNode.modelId || "gemini-2.5-flash"})
                     </span>
                   </div>
                 )}

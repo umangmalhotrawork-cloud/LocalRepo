@@ -809,8 +809,8 @@ export default function IDEApp() {
   const [toolsDrawerTab, setToolsDrawerTab] = useState<ToolTab>("explorer");
 
   // Lazy API Key Prompt State
-  const [aiActiveProvider, setAiActiveProvider] = useState<string>("gemini");
-  const [aiActiveModel, setAiActiveModel] = useState<string>("gemini-1.5-flash");
+  const [aiActiveProvider, setAiActiveProvider] = useState<string>("nexus1");
+  const [aiActiveModel, setAiActiveModel] = useState<string>("gemini-2.5-flash");
   const [showApiKeyRequiredModal, setShowApiKeyRequiredModal] = useState<boolean>(false);
   const pendingAiActionRef = useRef<(() => void) | null>(null);
   const pendingAiTaskPromptRef = useRef<string | null>(null);
@@ -870,7 +870,7 @@ export default function IDEApp() {
     if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getConfig) {
       try {
         const config = await (window as any).electronAPI.ai.getConfig();
-        const activeProvider = targetProvider || aiActiveProvider || config?.activeProvider || "groq";
+        const activeProvider = targetProvider || aiActiveProvider || config?.activeProvider || "nexus1";
         setAiActiveProvider(activeProvider);
         if (config?.activeModel) setAiActiveModel(config.activeModel);
         const providerConfig = config?.providers?.find((p: any) => p.id === activeProvider);
@@ -1088,6 +1088,115 @@ export default function IDEApp() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [activeContinuumSnapshot, setActiveContinuumSnapshot] = useState<any>(null);
   const [newChatResetSignal, setNewChatResetSignal] = useState<number>(0);
+  const [sidebarThreads, setSidebarThreads] = useState<any[]>([]);
+
+  const fetchSidebarThreads = async () => {
+    if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.listThreads) {
+      try {
+        const list = await (window as any).electronAPI.harness.listThreads({ workspacePath: folderPath || "" });
+        if (Array.isArray(list)) {
+          setSidebarThreads(list);
+        }
+      } catch (e) {
+        console.error("[IDE] Failed to list threads:", e);
+      }
+    }
+  };
+
+  useEffect(() => {
+    fetchSidebarThreads();
+
+    let unsubscribeIpc: (() => void) | null = null;
+    if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.onThreadsChange) {
+      unsubscribeIpc = (window as any).electronAPI.harness.onThreadsChange(() => {
+        fetchSidebarThreads();
+      });
+    }
+
+    const handleDomThreadsChange = () => {
+      fetchSidebarThreads();
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("nexus:threads-changed", handleDomThreadsChange);
+    }
+
+    return () => {
+      if (typeof unsubscribeIpc === "function") unsubscribeIpc();
+      if (typeof window !== "undefined") {
+        window.removeEventListener("nexus:threads-changed", handleDomThreadsChange);
+      }
+    };
+  }, [folderPath]);
+
+  const handleNewTaskThread = () => {
+    setActiveSessionId(null);
+    setActiveTaskPrompt("");
+    setWorkspaceMode("home");
+    setMainView("editor");
+    setNewChatResetSignal((prev) => prev + 1);
+    fetchSidebarThreads();
+  };
+
+  const handleSelectThread = async (threadId: string, title?: string) => {
+    setActiveSessionId(threadId);
+    setActiveTaskPrompt(title || "AI Agent Task Session");
+    setWorkspaceMode("workbench");
+    setShowDockedAgentPanel(true);
+
+    if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.getThread) {
+      try {
+        const loaded = await (window as any).electronAPI.harness.getThread(threadId, folderPath || "");
+        if (loaded) {
+          if (loaded.metadata?.title) {
+            setActiveTaskPrompt(loaded.metadata.title);
+          }
+          if (loaded.metadata?.providerId && (window as any).electronAPI?.ai?.setConfig) {
+            (window as any).electronAPI.ai.setConfig(loaded.metadata.providerId, loaded.metadata.modelId);
+          }
+        }
+      } catch (e) {
+        console.error("[IDE] Error loading thread:", e);
+      }
+    }
+  };
+
+  const handlePinThread = async (threadId: string, pinned: boolean) => {
+    if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.pinThread) {
+      try {
+        await (window as any).electronAPI.harness.pinThread(threadId, pinned, folderPath || "");
+        fetchSidebarThreads();
+      } catch (e) {
+        console.error("[IDE] Pin thread failed:", e);
+      }
+    }
+  };
+
+  const handleRenameThread = async (threadId: string, newTitle: string) => {
+    if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.renameThread) {
+      try {
+        await (window as any).electronAPI.harness.renameThread(threadId, newTitle, folderPath || "");
+        fetchSidebarThreads();
+      } catch (e) {
+        console.error("[IDE] Rename thread failed:", e);
+      }
+    }
+  };
+
+  const handleDeleteThread = async (threadId: string) => {
+    if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.deleteThread) {
+      try {
+        await (window as any).electronAPI.harness.deleteThread(threadId, folderPath || "");
+        if (activeSessionId === threadId) {
+          setActiveSessionId(null);
+          setActiveTaskPrompt("");
+          setWorkspaceMode("home");
+        }
+        fetchSidebarThreads();
+      } catch (e) {
+        console.error("[IDE] Delete thread failed:", e);
+      }
+    }
+  };
 
   const handleResumeSession = async (sessionId: string) => {
     if (typeof window !== "undefined" && (window as any).electronAPI?.continuum?.resumeSession) {
@@ -6422,17 +6531,16 @@ return (
         {/* Persistent Codex Left Sidebar */}
         <CodexSidebar
           currentProjectName={folderPath ? folderPath.split("/").pop() || "NEXUS" : "NEXUS"}
+          workspacePath={folderPath || "demo-workspaces/ai_cart_project"}
+          activeThreadId={activeSessionId}
+          threads={sidebarThreads}
           recentSessions={snapshotHook.snapshots || []}
-          onNewTask={() => {
-            setWorkspaceMode("home");
-            setMainView("editor");
-            setActiveTaskPrompt("");
-            setNewChatResetSignal((prev) => prev + 1);
-          }}
-          onSelectSession={(sessId, userGoal) => {
-            handleResumeSession(sessId);
-            setWorkspaceMode("workbench");
-          }}
+          onNewTask={handleNewTaskThread}
+          onSelectThread={handleSelectThread}
+          onSelectSession={(sessId, userGoal) => handleSelectThread(sessId, userGoal)}
+          onPinThread={handlePinThread}
+          onRenameThread={handleRenameThread}
+          onDeleteThread={handleDeleteThread}
           onOpenFolder={handleOpenFolder}
           activeItem={activeActivityItem}
           onSelectItem={handleOpenActivityItem}
@@ -6441,6 +6549,7 @@ return (
         {workspaceMode === "home" ? (
           <TaskHome
             workspacePath={folderPath || "demo-workspaces/ai_cart_project"}
+            activeThreadId={activeSessionId}
             resetSignal={newChatResetSignal}
             onStartTask={(promptText, providerId, modelId) => {
               const targetProv = providerId || aiActiveProvider || "groq";
@@ -6645,13 +6754,16 @@ return (
                   ) : activeActivityItem === "sessions" ? (
                     <CodexSidebar
                       currentProjectName={folderPath ? folderPath.split("/").pop() || "NEXUS" : "NEXUS"}
+                      workspacePath={folderPath || "demo-workspaces/ai_cart_project"}
+                      activeThreadId={activeSessionId}
+                      threads={sidebarThreads}
                       recentSessions={snapshotHook.snapshots || []}
-                      onNewTask={() => {
-                        setWorkspaceMode("home");
-                      }}
-                      onSelectSession={(sessId, userGoal) => {
-                        handleResumeSession(sessId);
-                      }}
+                      onNewTask={handleNewTaskThread}
+                      onSelectThread={handleSelectThread}
+                      onSelectSession={(sessId, userGoal) => handleSelectThread(sessId, userGoal)}
+                      onPinThread={handlePinThread}
+                      onRenameThread={handleRenameThread}
+                      onDeleteThread={handleDeleteThread}
                       onOpenFolder={handleOpenFolder}
                       activeItem={activeActivityItem}
                       onSelectItem={handleOpenActivityItem}

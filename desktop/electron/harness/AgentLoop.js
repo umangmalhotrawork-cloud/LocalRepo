@@ -155,16 +155,25 @@ class AgentLoop {
 
     // 1. Start or retrieve active Turn
     let turn;
-    if (payload.turnId) {
-      turn = this.runtime.getTurn(payload.turnId);
+    const targetTurnId = payload.turnId || payload.retryTurnId;
+    if (targetTurnId) {
+      turn = this.runtime.getTurn(targetTurnId);
       if (!turn) {
-        throw new Error(`[HARNESS-AGENTLOOP] Turn "${payload.turnId}" not found`);
+        throw new Error(`[HARNESS-AGENTLOOP] Turn "${targetTurnId}" not found`);
       }
-      // If turn is paused or waiting for approval, resume it
-      if (turn.status === TURN_STATUS.PAUSED || turn.status === TURN_STATUS.WAITING_FOR_APPROVAL) {
+      // If turn is paused, failed (for retry), or waiting for approval, resume/reactivate it
+      if (turn.status === TURN_STATUS.FAILED) {
         try {
-          turn = this.runtime.turnManager.resumeTurn(turn.turnId);
-        } catch (e) {}
+          turn = this.runtime.turnManager.retryTurn(targetTurnId);
+        } catch (e) {
+          turn.status = TURN_STATUS.RUNNING;
+        }
+      } else if (turn.status === TURN_STATUS.PAUSED || turn.status === TURN_STATUS.WAITING_FOR_APPROVAL) {
+        try {
+          turn = this.runtime.turnManager.resumeTurn(targetTurnId);
+        } catch (e) {
+          turn.status = TURN_STATUS.RUNNING;
+        }
       }
     } else {
       turn = this.runtime.startTurn(threadId, userInput, {
@@ -778,6 +787,9 @@ class AgentLoop {
           success: true,
           status: TURN_STATUS.COMPLETED,
           turnId,
+          threadId,
+          providerId,
+          modelId,
           turn: completedTurn,
           finalResponse: finalAssistantResponse,
           iterations,
@@ -804,11 +816,21 @@ class AgentLoop {
       };
     } catch (err) {
       console.error('[HARNESS-AGENTLOOP] Turn execution error:', err);
-      const safeErrorMsg = secretFilter.sanitizeString(err.message || 'Agent loop encountered an error');
+      const actualProviderId = err.rateInfo?.providerId || err.providerId || providerId;
+      const actualModelId = err.rateInfo?.modelId || err.modelId || modelId;
+      const { parseRateLimitError } = require('../ai/types');
+      const rateInfo = err.rateInfo || parseRateLimitError(err, actualProviderId, actualModelId);
+      const finalProviderId = rateInfo?.providerId || actualProviderId || 'groq';
+      const finalModelId = rateInfo?.modelId || actualModelId || '';
+      const safeErrorMsg = secretFilter.sanitizeString(rateInfo ? rateInfo.message : (err.message || 'Agent loop encountered an error'));
 
       try {
         const errorItem = this.runtime.startItem(turnId, ITEM_TYPES.ERROR, {
           error: safeErrorMsg,
+          isRateLimit: Boolean(rateInfo),
+          rateInfo,
+          providerId: finalProviderId,
+          modelId: finalModelId,
         });
         this.runtime.completeItem(errorItem.itemId);
       } catch (e) {}
@@ -821,6 +843,11 @@ class AgentLoop {
         success: false,
         status: TURN_STATUS.FAILED,
         turnId,
+        threadId,
+        isRateLimit: Boolean(rateInfo),
+        rateInfo: rateInfo || undefined,
+        providerId: finalProviderId,
+        modelId: finalModelId,
         error: safeErrorMsg,
         iterations,
         totalToolCalls,

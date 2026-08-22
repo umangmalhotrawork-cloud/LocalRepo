@@ -57,7 +57,7 @@ class HarnessPersistenceAdapter {
         agentSummary: secretFilter.sanitizeString(summary),
         status,
         providerId: turn.metadata?.providerId || thread.metadata?.providerId || 'gemini',
-        modelId: turn.metadata?.modelId || thread.metadata?.modelId || 'gemini-1.5-flash',
+        modelId: turn.metadata?.modelId || thread.metadata?.modelId || 'gemini-2.5-flash',
       };
     });
 
@@ -329,6 +329,17 @@ class HarnessPersistenceAdapter {
   }
 
   /**
+   * Deletes a persisted Thread from Continuum storage.
+   * @param {string} threadId
+   * @param {string} [workspacePath]
+   * @returns {Object}
+   */
+  deleteThread(threadId, workspacePath = '') {
+    const activeWorkspace = workspacePath || process.cwd();
+    return this.continuumManager.deleteSnapshot(threadId, activeWorkspace);
+  }
+
+  /**
    * Lists persisted threads for a workspace from Continuum storage.
    * @param {string} [workspacePath]
    * @returns {Array<Object>}
@@ -341,8 +352,13 @@ class HarnessPersistenceAdapter {
       parentThreadId: s.parentSessionId || null,
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
-      title: s.userGoal || 'Persisted Session',
+      title: s.title || s.userGoal || 'Persisted Session',
       workspaceName: s.workspaceName,
+      workspacePath: s.workspacePath || activeWorkspace,
+      pinned: Boolean(s.pinned),
+      status: s.status || 'ACTIVE',
+      providerId: s.providerId || 'groq',
+      modelId: s.modelId || 'openai/gpt-oss-120b',
     }));
   }
 }

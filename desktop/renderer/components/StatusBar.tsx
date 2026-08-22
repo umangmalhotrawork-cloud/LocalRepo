@@ -155,12 +155,15 @@ export default function StatusBar({
     }
   };
 
-  const currentProviderId = activeProvider || aiConfig?.activeProvider || "groq";
-  const currentModelId = activeModel || aiConfig?.activeModel || "openai/gpt-oss-120b";
+  const currentProviderId = activeProvider || aiConfig?.activeProvider || "nexus1";
+  const currentModelId = activeModel || aiConfig?.activeModel || "gemini-2.5-flash";
   const activeProviderObj = aiConfig?.providers?.find((p: any) => p.id === currentProviderId);
+  const activeDiagnostics = activeProviderObj?.diagnostics;
+  const isConfigured = activeProviderObj?.isConfigured;
+
   const displayModelName = activeProviderObj 
-    ? `${activeProviderObj.name} (${currentModelId.split('/').pop()?.replace(/^models\//, '') || currentModelId})` 
-    : `Groq (${currentModelId.split('/').pop()?.replace(/^models\//, '') || currentModelId})`;
+    ? `${activeProviderObj.name} (${activeProviderObj.secondaryName || 'Gemini'})` 
+    : `NEXUS 1 (Gemini)`;
 
   const targetKeyProvider = aiConfig?.providers?.find((p: any) => p.id === selectedKeyProviderId) || {
     id: selectedKeyProviderId,
@@ -232,18 +235,26 @@ export default function StatusBar({
 
       {/* Right Items */}
       <div className="flex items-center gap-2.5">
-        {/* Active File Language */}
-        {activeLanguage && (
-          <div className="text-zinc-400 uppercase font-semibold text-[10px]">
-            {activeLanguage}
-          </div>
-        )}
-
-        <span className="text-[#1a1a24]">|</span>
-
-        {/* Encoding */}
-        <div className="text-zinc-500">
-          UTF-8
+        {/* Diagnostic Metadata Indicator */}
+        <div 
+          className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded bg-[#09090f] border border-[#1b1b26] text-[9.5px] text-zinc-400"
+          title={`Active Slot: ${activeProviderObj?.name || 'NEXUS 1'}\nProvider: ${activeProviderObj?.secondaryName || 'Gemini'}\nStatus: ${isConfigured ? 'Configured' : 'Not Configured'}\nLast Request: ${activeDiagnostics?.lastRequestAt ? new Date(activeDiagnostics.lastRequestAt).toLocaleTimeString() : 'Never'}\nLast Status: ${activeDiagnostics?.status || 'IDLE'}`}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full ${isConfigured ? "bg-emerald-400" : "bg-zinc-600"}`} />
+          <span className="font-bold text-zinc-200">{activeProviderObj?.name || "NEXUS 1"}</span>
+          <span className="text-zinc-500">({activeProviderObj?.secondaryName || "Gemini"})</span>
+          <span className="text-zinc-600">•</span>
+          <span className={isConfigured ? "text-emerald-400 font-semibold" : "text-zinc-500"}>
+            {isConfigured ? "Configured" : "No Key"}
+          </span>
+          {activeDiagnostics?.lastStatus && activeDiagnostics.lastStatus !== "IDLE" && (
+            <>
+              <span className="text-zinc-600">•</span>
+              <span className={activeDiagnostics.lastStatus === "SUCCESS" ? "text-emerald-400" : activeDiagnostics.lastStatus.includes("429") ? "text-amber-400" : "text-rose-400"}>
+                {activeDiagnostics.lastStatus}
+              </span>
+            </>
+          )}
         </div>
 
         <span className="text-[#1a1a24]">|</span>
@@ -265,10 +276,10 @@ export default function StatusBar({
           {showModelDropdown && (
             <div 
               ref={statusModelDropdownRef}
-              className="absolute right-0 bottom-7 w-80 bg-[#0c0c14] border border-[#262636] rounded-xl shadow-2xl z-50 p-2.5 space-y-2 text-xs font-mono text-zinc-200"
+              className="absolute right-0 bottom-7 w-84 bg-[#0c0c14] border border-[#262636] rounded-xl shadow-2xl z-50 p-2.5 space-y-2 text-xs font-mono text-zinc-200"
             >
               <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-1 border-b border-[#1c1c2a] pb-1.5 flex items-center justify-between">
-                <span>Select AI Provider & Model</span>
+                <span>Select AI Slot & Provider</span>
                 <button onClick={() => setShowModelDropdown(false)} className="text-zinc-500 hover:text-white">
                   <X className="w-3 h-3" />
                 </button>
@@ -276,15 +287,16 @@ export default function StatusBar({
 
               <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
                 {(aiConfig?.providers || [
-                  { id: "gemini", name: "Gemini", status: "CONNECTED", isConfigured: true },
-                  { id: "groq", name: "Groq", status: "NOT_CONFIGURED", isConfigured: false },
-                  { id: "openai", name: "OpenAI", status: "NOT_CONFIGURED", isConfigured: false },
-                  { id: "claude", name: "Claude", status: "NOT_CONFIGURED", isConfigured: false },
-                  { id: "deepseek", name: "DeepSeek", status: "NOT_CONFIGURED", isConfigured: false },
-                  { id: "grok", name: "Grok", status: "NOT_CONFIGURED", isConfigured: false },
+                  { id: "nexus1", name: "NEXUS 1", secondaryName: "Gemini", status: "CONNECTED", isConfigured: true },
+                  { id: "nexus2", name: "NEXUS 2", secondaryName: "Gemini", status: "NOT_CONFIGURED", isConfigured: false },
+                  { id: "nexus3", name: "NEXUS 3", secondaryName: "Gemini", status: "NOT_CONFIGURED", isConfigured: false },
+                  { id: "nexus4", name: "NEXUS 4", secondaryName: "Gemini", status: "NOT_CONFIGURED", isConfigured: false },
+                  { id: "nexus5", name: "NEXUS 5", secondaryName: "Gemini", status: "NOT_CONFIGURED", isConfigured: false },
+                  { id: "nexus6", name: "NEXUS 6", secondaryName: "Gemini", status: "NOT_CONFIGURED", isConfigured: false },
                 ]).map((provider: any) => {
-                  const isSelected = (aiConfig?.activeProvider || "gemini") === provider.id;
+                  const isSelected = (aiConfig?.activeProvider || "nexus1") === provider.id;
                   const isConnected = provider.isConfigured;
+                  const pDiag = provider.diagnostics;
 
                   return (
                     <div
@@ -297,11 +309,19 @@ export default function StatusBar({
                     >
                       <div className="flex items-center justify-between">
                         <button
-                          onClick={() => handleSelectModel(provider.id)}
+                          onClick={() => {
+                            handleSelectModel(provider.id);
+                            if (!isConnected) {
+                              handleOpenKeyModal(provider.id);
+                            }
+                          }}
                           className="flex items-center gap-1.5 font-bold text-[11px] hover:text-cyan-300 cursor-pointer flex-1 text-left"
                         >
                           <span className={isSelected ? "text-cyan-400 font-bold" : "text-zinc-300"}>
                             {isSelected ? "✓ " : "  "}{provider.name}
+                          </span>
+                          <span className="text-[9.5px] text-zinc-500 font-normal">
+                            ({provider.secondaryName || "Gemini"})
                           </span>
                         </button>
 
@@ -312,12 +332,37 @@ export default function StatusBar({
                           </span>
                           <button
                             onClick={() => handleOpenKeyModal(provider.id)}
-                            className="px-1.5 py-0.5 rounded bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/30 text-cyan-300 text-[9px] font-bold flex items-center gap-1 cursor-pointer"
+                            className={`px-2 py-0.5 rounded border text-[9px] font-bold flex items-center gap-1 cursor-pointer transition-colors ${
+                              isConnected
+                                ? "bg-zinc-900/80 hover:bg-zinc-800 border-zinc-700 text-zinc-300"
+                                : "bg-cyan-950/90 hover:bg-cyan-900 border-cyan-500/50 text-cyan-300"
+                            }`}
                           >
                             <Key className="w-2.5 h-2.5" />
-                            <span>Key</span>
+                            <span>{isConnected ? "Key" : "Configure Key"}</span>
                           </button>
                         </div>
+                      </div>
+
+                      {/* Unconfigured Slot Action Banner */}
+                      {!isConnected && isSelected && (
+                        <div className="mt-1.5 p-1.5 rounded bg-cyan-950/40 border border-cyan-500/30 flex items-center justify-between">
+                          <span className="text-[9.5px] text-cyan-300">Slot has no API key</span>
+                          <button
+                            onClick={() => handleOpenKeyModal(provider.id)}
+                            className="px-2 py-0.5 rounded bg-cyan-900 hover:bg-cyan-800 text-white text-[9.5px] font-bold cursor-pointer"
+                          >
+                            Configure API Key
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Diagnostic Status Row */}
+                      <div className="mt-1 pt-1 border-t border-[#141420] flex items-center justify-between text-[9px] text-zinc-500">
+                        <span>Last: {pDiag?.lastRequestAt ? new Date(pDiag.lastRequestAt).toLocaleTimeString() : "Never"}</span>
+                        <span className={pDiag?.status === "SUCCESS" ? "text-emerald-400" : pDiag?.status?.includes("429") ? "text-amber-400" : "text-zinc-500"}>
+                          Status: {pDiag?.status || (isConnected ? "IDLE" : "NOT_CONFIGURED")}
+                        </span>
                       </div>
 
                       {/* Provider Models */}
@@ -326,7 +371,7 @@ export default function StatusBar({
                           <div className="text-[9px] text-zinc-500 font-bold uppercase">Active Model:</div>
                           <div className="grid grid-cols-1 gap-1 max-h-40 overflow-y-auto pr-0.5">
                             {provider.models.map((m: any) => {
-                              const isMSelected = aiConfig?.activeModel === m.id;
+                              const isMSelected = (aiConfig?.activeModel || "gemini-2.5-flash") === m.id;
                               return (
                                 <button
                                   key={m.id}

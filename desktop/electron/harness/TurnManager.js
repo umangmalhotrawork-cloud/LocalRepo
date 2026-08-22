@@ -255,6 +255,36 @@ class TurnManager {
   }
 
   /**
+   * Reactivates or retries a failed, paused, or waiting Turn back to RUNNING.
+   * @param {string} turnId
+   * @param {Object} [metadataUpdates]
+   * @returns {Object} Updated Turn
+   */
+  retryTurn(turnId, metadataUpdates = {}) {
+    const turn = this.turns.get(turnId);
+    if (!turn) {
+      throw new Error(`[HARNESS-TURNMANAGER] Turn "${turnId}" not found`);
+    }
+
+    const sanitizedMetadataUpdates = secretFilter.sanitizeObject(metadataUpdates || {});
+    turn.status = TURN_STATUS.RUNNING;
+    turn.metadata = {
+      ...turn.metadata,
+      ...sanitizedMetadataUpdates,
+      isRetrying: true,
+    };
+    turn.updatedAt = Date.now();
+
+    this.eventBus.emit(EVENT_TYPES.TURN_UPDATED, {
+      threadId: turn.threadId,
+      turnId,
+      payload: { turn: { ...turn }, status: TURN_STATUS.RUNNING },
+    });
+
+    return this.getTurn(turnId);
+  }
+
+  /**
    * Resumes a paused or waiting Turn back to RUNNING.
    * @param {string} turnId
    * @param {Object} [metadataUpdates]
@@ -266,7 +296,7 @@ class TurnManager {
       throw new Error(`[HARNESS-TURNMANAGER] Turn "${turnId}" not found`);
     }
 
-    if ([TURN_STATUS.COMPLETED, TURN_STATUS.FAILED, TURN_STATUS.CANCELLED].includes(turn.status)) {
+    if ([TURN_STATUS.COMPLETED, TURN_STATUS.CANCELLED].includes(turn.status)) {
       throw new Error(`[HARNESS-TURNMANAGER] Cannot resume Turn "${turnId}" in terminal state "${turn.status}"`);
     }
 

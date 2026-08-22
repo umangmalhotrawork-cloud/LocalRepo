@@ -196,23 +196,25 @@ class ModelAdapter {
 
     const { provider, apiKey, modelId } = resolved;
 
-    // 3. Build system prompt with tools protocol
-    const toolsPrompt = this.formatToolsPrompt(tools);
+    // 3. Build system prompt & messages
     const systemMessage = messages.find((m) => m.role === 'system');
-    const existingSystemText = systemMessage ? systemMessage.content : 'You are NEXUS Autonomous AI Pair Programmer.';
-    const combinedSystemPrompt = toolsPrompt
-      ? `${existingSystemText}\n\n${toolsPrompt}`
-      : existingSystemText;
+    let existingSystemText = systemMessage ? systemMessage.content : 'You are NEXUS Autonomous AI Pair Programmer.';
+    
+    // Only include markdown tools prompt if native tools parameter is not supported/passed
+    if (tools && tools.length > 0) {
+      existingSystemText += '\n\n## RULES: When proposing or editing code, invoke apply_patch to create a ChangeSet.';
+    }
 
     // Filter out existing system message to avoid duplicates
     const conversationMessages = messages.filter((m) => m.role !== 'system');
 
-    // Convert tool results in conversation into formatted user/observation text
+    // Convert tool results in conversation into compact formatted user observation
     const formattedMessages = conversationMessages.map((m) => {
       if (m.role === 'tool') {
+        const compactJson = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
         return {
           role: 'user',
-          content: `[TOOL_RESULT for call "${m.tool_call_id}"]: \n\`\`\`json\n${typeof m.content === 'string' ? m.content : JSON.stringify(m.content, null, 2)}\n\`\`\``,
+          content: `[TOOL_RESULT for call "${m.tool_call_id}"]: ${compactJson}`,
         };
       }
       return {
@@ -222,7 +224,7 @@ class ModelAdapter {
     });
 
     const fullMessages = [
-      { role: 'system', content: combinedSystemPrompt },
+      { role: 'system', content: existingSystemText },
       ...formattedMessages,
     ];
 
@@ -333,19 +335,19 @@ class ModelAdapter {
     const { provider, apiKey, modelId } = resolved;
 
     // 3. Build system prompt & messages
-    const toolsPrompt = this.formatToolsPrompt(tools);
     const systemMessage = messages.find((m) => m.role === 'system');
-    const existingSystemText = systemMessage ? systemMessage.content : 'You are NEXUS Autonomous AI Pair Programmer.';
-    const combinedSystemPrompt = toolsPrompt
-      ? `${existingSystemText}\n\n${toolsPrompt}`
-      : existingSystemText;
+    let existingSystemText = systemMessage ? systemMessage.content : 'You are NEXUS Autonomous AI Pair Programmer.';
+    if (tools && tools.length > 0) {
+      existingSystemText += '\n\n## RULES: When proposing or editing code, invoke apply_patch to create a ChangeSet.';
+    }
 
     const conversationMessages = messages.filter((m) => m.role !== 'system');
     const formattedMessages = conversationMessages.map((m) => {
       if (m.role === 'tool') {
+        const compactJson = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
         return {
           role: 'user',
-          content: `[TOOL_RESULT for call "${m.tool_call_id}"]: \n\`\`\`json\n${typeof m.content === 'string' ? m.content : JSON.stringify(m.content, null, 2)}\n\`\`\``,
+          content: `[TOOL_RESULT for call "${m.tool_call_id}"]: ${compactJson}`,
         };
       }
       return {
@@ -355,7 +357,7 @@ class ModelAdapter {
     });
 
     const fullMessages = [
-      { role: 'system', content: combinedSystemPrompt },
+      { role: 'system', content: existingSystemText },
       ...formattedMessages,
     ];
 
@@ -364,7 +366,7 @@ class ModelAdapter {
       try {
         const stream = provider.streamChatCompletions(apiKey, modelId, fullMessages, {
           temperature: 0.1,
-          maxTokens: 3000,
+          maxTokens: options.maxTokens ?? 1500,
           tools,
           abortSignal: options.abortSignal,
         });
@@ -412,12 +414,29 @@ class ModelAdapter {
             sequence: sequence + 1,
           };
         }
+        if (this.router && typeof this.router.recordSlotRequest === 'function') {
+          this.router.recordSlotRequest(resolved.provider.getId(), 'SUCCESS', resolved.modelId);
+        }
         return;
       } catch (streamErr) {
         if (options.abortSignal?.aborted) {
           throw streamErr;
         }
-        // If streaming failed and wasn't aborted, fall back to non-streaming invoke below
+        const { parseRateLimitError } = require('../ai/types');
+        const rateInfo = parseRateLimitError(streamErr, options.providerId || resolved?.provider?.getId(), options.modelId || resolved?.modelId);
+        if (this.router && typeof this.router.recordSlotRequest === 'function') {
+          this.router.recordSlotRequest(
+            options.providerId || resolved?.provider?.getId(),
+            rateInfo ? '429_RATE_LIMIT' : 'ERROR',
+            options.modelId || resolved?.modelId
+          );
+        }
+        if (rateInfo) {
+          streamErr.isRateLimit = true;
+          streamErr.rateInfo = rateInfo;
+          throw streamErr;
+        }
+        // If streaming failed for other non-rate-limit reasons and wasn't aborted, fall back to non-streaming invoke below
       }
     }
 
