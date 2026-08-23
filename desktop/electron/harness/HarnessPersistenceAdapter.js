@@ -19,6 +19,136 @@ class HarnessPersistenceAdapter {
     this.workspaceIsolationManager = wsIsoMgr || workspaceIsolationManager;
   }
 
+  /**
+   * Extracts user-stated durable project facts, architecture rules, and engineering decisions.
+   */
+  extractDurableFactsAndDecisions(thread, turns = [], items = [], handoffStateJSON = null, options = {}) {
+    const decisions = [];
+    const seenStatements = new Set();
+
+    const addDecision = (decisionText, rationale = '', userApproved = true, timestamp = Date.now()) => {
+      if (!decisionText || typeof decisionText !== 'string') return;
+      const clean = decisionText.trim().replace(/^[-*•\d.]+\s*/, '');
+      if (!clean || clean.length < 5) return;
+      
+      // Parse inline rationale if present: "... (Rationale: ...)" or "... because ..."
+      let mainDecision = clean;
+      let extractedRationale = rationale;
+      const ratMatch = clean.match(/^(.+?)\s*\((?:rationale|reason):\s*([^)]+)\)$/i);
+      if (ratMatch) {
+        mainDecision = ratMatch[1].trim();
+        extractedRationale = ratMatch[2].trim();
+      }
+
+      const key = mainDecision.toLowerCase().replace(/\s+/g, ' ');
+      if (seenStatements.has(key)) return;
+      seenStatements.add(key);
+
+      decisions.push({
+        timestamp: typeof timestamp === 'number' ? timestamp : Date.now(),
+        decision: secretFilter.sanitizeString(mainDecision),
+        rationale: secretFilter.sanitizeString(extractedRationale || 'Explicit project architecture/workflow requirement'),
+        rejectedAlternatives: [],
+        userApproved: Boolean(userApproved),
+      });
+    };
+
+    // 1. Existing decisions from thread metadata, options, handoffState, parent snapshots, and workspace lineage
+    const rawExisting = [
+      ...(options.decisions || []),
+      ...(thread?.metadata?.decisions || []),
+      ...(thread?.decisions || []),
+      ...(handoffStateJSON?.importantDecisions || []),
+      ...(handoffStateJSON?.decisions || []),
+    ];
+
+    if (options.previousSnapshot?.decisions) {
+      rawExisting.push(...options.previousSnapshot.decisions);
+    }
+
+    const parentId = thread?.parentThreadId || thread?.metadata?.parentSessionId;
+    if (parentId && this.continuumManager) {
+      try {
+        const parentSnap = this.continuumManager.loadSnapshot(parentId, thread?.metadata?.workspacePath);
+        if (parentSnap && parentSnap.success && Array.isArray(parentSnap.snapshot?.decisions)) {
+          rawExisting.push(...parentSnap.snapshot.decisions);
+        }
+      } catch (e) {}
+    } else if (this.continuumManager && (thread?.metadata?.workspacePath || options.workspacePath)) {
+      try {
+        const wsPath = thread?.metadata?.workspacePath || options.workspacePath;
+        const summaries = this.continuumManager.listSnapshots(wsPath);
+        if (Array.isArray(summaries)) {
+          for (const s of summaries) {
+            const sId = s.snapshotId || s.sessionId;
+            if (sId !== thread?.threadId) {
+              const prev = this.continuumManager.loadSnapshot(sId, wsPath);
+              if (prev && prev.success && Array.isArray(prev.snapshot?.decisions)) {
+                rawExisting.push(...prev.snapshot.decisions);
+                break;
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    for (const d of rawExisting) {
+      if (typeof d === 'string') {
+        addDecision(d);
+      } else if (d && typeof d === 'object') {
+        addDecision(d.decision || d.statement || d.text, d.rationale, d.userApproved !== false, d.timestamp);
+      }
+    }
+
+    // 2. Extract decisions from approval items and applied change sets
+    for (const item of items) {
+      if (item.type === ITEM_TYPES.USER_APPROVAL && item.payload) {
+        addDecision(item.payload.decision || item.payload.statement || item.payload.summary || 'User approved operation', item.payload.rationale, true, item.createdAt);
+      } else if (item.type === ITEM_TYPES.POLICY_DECISION && item.payload) {
+        addDecision(item.payload.reason || item.payload.decision || 'Policy authorization verified', 'Policy Decision', true, item.createdAt);
+      } else if (item.type === ITEM_TYPES.CHANGE_SET && (item.payload?.status === 'APPLIED' || item.payload?.approved)) {
+        addDecision(item.payload.summary || item.payload.title || 'Applied surgical changeset', 'Verified and applied to codebase', true, item.createdAt);
+      }
+    }
+
+    // 3. Extract explicit facts and decisions from user directives and turn conversation
+    for (const turn of turns) {
+      const textsToScan = [turn.userInput];
+      const turnItems = items.filter((i) => i.turnId === turn.turnId);
+      for (const item of turnItems) {
+        if (item.type === ITEM_TYPES.AGENT_MESSAGE && item.payload?.text) {
+          textsToScan.push(item.payload.text);
+        }
+      }
+
+      for (const rawText of textsToScan) {
+        if (!rawText || typeof rawText !== 'string') continue;
+        
+        const lines = rawText.split(/\n+/);
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          // Match explicit prefixes: "Decision:", "Architecture:", "Fact:", "Rule:", "Note:", "Approved:"
+          const prefixMatch = trimmed.match(/^(?:[-*•\d.]+\s*)?(?:decision|architecture(?:\s+fact|\s+note)?|fact|rule|constraint|convention|note|approved|engineering\s+decision)\s*:\s*(.+)$/i);
+          if (prefixMatch && prefixMatch[1]) {
+            addDecision(prefixMatch[1].trim(), 'User/Assistant stated architectural fact or decision', true, turn.createdAt);
+            continue;
+          }
+
+          // Match explicit declarative statements
+          if (/NEXUS\s*1[–\-]5/i.test(trimmed) || /NEXUS\s*6/i.test(trimmed) || /ChangeSet\s+approval/i.test(trimmed)) {
+            addDecision(trimmed, 'NEXUS core architecture and workflow fact', true, turn.createdAt);
+          } else if (/(?:we\s+(?:have\s+)?(?:decided|agreed|chosen|opted|approved)\s+(?:to\s+|that\s+)?|architecture\s+(?:is|uses|requires))/i.test(trimmed)) {
+            addDecision(trimmed, 'Stated architectural decision', true, turn.createdAt);
+          }
+        }
+      }
+    }
+
+    return decisions;
+  }
 
   /**
    * Converts a Harness Thread (with its Turns & Items) into a valid ContinuumSnapshot.
@@ -82,6 +212,9 @@ class HarnessPersistenceAdapter {
     const changeSetItems = items.filter((i) => i.type === ITEM_TYPES.CHANGE_SET);
     const changeSetsData = changeSetItems.map((i) => i.payload?.changeSet || i.payload);
 
+    // Extract durable engineering decisions and user-stated project architecture facts
+    const decisions = this.extractDurableFactsAndDecisions(thread, turns, items, handoffStateJSON, options);
+
     // Create standard validated ContinuumSnapshot
     const snapshotInput = {
       sessionId: thread.threadId,
@@ -100,13 +233,13 @@ class HarnessPersistenceAdapter {
         completedSteps,
         pendingSteps,
       },
+      decisions,
       conversation: {
         lastUserDirective: lastTurn?.userInput || '',
         condensedSummary: `Harness Thread: ${thread.threadId} with ${turns.length} turns and ${items.length} items`,
         recentTurns,
       },
     };
-
 
     const snapshot = this.continuumEngine.createSnapshot(snapshotInput);
     if (continuumHandoff.immediateNextAction) {
@@ -289,7 +422,11 @@ class HarnessPersistenceAdapter {
   saveThread(thread, turns = [], items = [], workspacePath = '', options = {}) {
     const activeWorkspace = workspacePath || thread.metadata?.workspacePath || process.cwd();
     const snapshot = this.threadToContinuumSnapshot(thread, turns, items, activeWorkspace, options);
-    return this.continuumManager.saveSnapshot(snapshot, activeWorkspace);
+    const saveRes = this.continuumManager.saveSnapshot(snapshot, activeWorkspace);
+    return {
+      ...saveRes,
+      snapshot,
+    };
   }
 
   /**

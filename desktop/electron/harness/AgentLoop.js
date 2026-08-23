@@ -142,8 +142,24 @@ class AgentLoop {
       modelHandler,
       providerId,
       modelId,
-      continuumSnapshot,
+      continuumSnapshot: rawContinuumSnapshot,
+      continuumContextText: rawContinuumContextText,
+      continuumActive: rawContinuumActive,
     } = payload;
+
+    const continuumActive = payload.continuumActive === true;
+    let continuumSnapshot = null;
+    let continuumContextText = '';
+
+    if (continuumActive) {
+      continuumSnapshot = rawContinuumSnapshot || null;
+      continuumContextText = rawContinuumContextText || '';
+      if (!continuumSnapshot && !continuumContextText && this.runtime?.getLatestWorkspaceSnapshot) {
+        try {
+          continuumSnapshot = this.runtime.getLatestWorkspaceSnapshot(workspacePath, threadId);
+        } catch (e) {}
+      }
+    }
 
     if (!threadId || typeof threadId !== 'string') {
       throw new Error('[HARNESS-AGENTLOOP] Valid "threadId" is required to run turn');
@@ -320,6 +336,8 @@ class AgentLoop {
           turns: threadTurns,
           items: threadItems,
           continuumSnapshot,
+          continuumContextText,
+          continuumActive,
           handoffState: payload.handoffState || turn?.metadata?.handoffState || null,
           workspacePath,
           activeFilePath,

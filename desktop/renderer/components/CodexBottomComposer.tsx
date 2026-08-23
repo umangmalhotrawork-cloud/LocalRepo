@@ -12,6 +12,8 @@ interface CodexBottomComposerProps {
   gitBranch?: string;
   activeProvider?: string;
   activeModel?: string;
+  promptValue?: string;
+  onPromptChange?: (prompt: string) => void;
   onSelectModel: (providerId: string, modelId?: string) => void;
   onSubmitTask: (prompt: string, approvalMode: "auto" | "strict") => void;
   onOpenContinuum: () => void;
@@ -24,16 +26,24 @@ export default function CodexBottomComposer({
   gitBranch = "main",
   activeProvider = "gemini",
   activeModel = "gemini-2.5-flash",
+  promptValue,
+  onPromptChange,
   onSelectModel,
   onSubmitTask,
   onOpenContinuum,
   onOpenFolder,
   disabled = false,
 }: CodexBottomComposerProps) {
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(promptValue || "");
   const [approvalMode, setApprovalMode] = useState<"auto" | "strict">("auto");
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showApprovalDropdown, setShowApprovalDropdown] = useState(false);
+
+  React.useEffect(() => {
+    if (promptValue !== undefined && promptValue !== prompt) {
+      setPrompt(promptValue);
+    }
+  }, [promptValue]);
 
   const approvalTriggerRef = useRef<HTMLButtonElement | null>(null);
   const approvalDropdownRef = useOutsideClick<HTMLDivElement>({
@@ -51,9 +61,12 @@ export default function CodexBottomComposer({
 
   const handleSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!prompt.trim() || disabled) return;
-    onSubmitTask(prompt.trim(), approvalMode);
-    setPrompt("");
+    const currentPrompt = promptValue !== undefined ? promptValue : prompt;
+    if (!currentPrompt.trim() || disabled) return;
+    onSubmitTask(currentPrompt.trim(), approvalMode);
+    if (promptValue === undefined) {
+      setPrompt("");
+    }
   };
 
   return (
@@ -128,7 +141,11 @@ export default function CodexBottomComposer({
           {/* Prompt Textarea */}
           <textarea
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setPrompt(val);
+              onPromptChange?.(val);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();

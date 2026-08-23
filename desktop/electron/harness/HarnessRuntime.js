@@ -544,6 +544,27 @@ class HarnessRuntime {
       workspacePath: workspacePath || context.workspacePath,
     });
 
+    const continuumActive = payload.continuumActive === true;
+    const effectiveContinuumSnapshot = continuumActive
+      ? (continuumSnapshot || this.getLatestWorkspaceSnapshot(workspacePath, inputThreadId))
+      : null;
+
+    let continuumContextText = '';
+    if (continuumActive) {
+      continuumContextText = payload.continuumContextText || '';
+      if (!continuumContextText && effectiveContinuumSnapshot) {
+        try {
+          const { continuumContextBuilder } = require('../../engine/continuum_context_builder');
+          const built = continuumContextBuilder.buildSynthesizedHandoffPrompt
+            ? continuumContextBuilder.buildSynthesizedHandoffPrompt(effectiveContinuumSnapshot)
+            : continuumContextBuilder.buildContext(effectiveContinuumSnapshot);
+          if (built && built.success) {
+            continuumContextText = built.handoffText || built.contextText;
+          }
+        } catch (e) {}
+      }
+    }
+
     // 1. CONVERSATION PATH: Direct AI provider call
     if (classification.mode === ROUTER_MODES.CONVERSATION) {
       let assistantText = '';
@@ -581,17 +602,38 @@ class HarnessRuntime {
           isFallback: Boolean(resolved.isFallback),
         };
 
-        const providerRes = await aiProviderRouter.generateAgentPlan({
-          task: userInput,
-          workspacePath,
-          maxSteps: 1,
-          activeFilePath: null,
-          files: [],
-          targetFile: null,
-          intent: 'GENERAL_CHAT',
-          providerId: executionMeta.providerId,
-          modelId: executionMeta.modelId,
-        });
+        let providerRes = null;
+        if (typeof payload.modelHandler === 'function') {
+          const handlerOutput = await payload.modelHandler([
+            { role: 'system', content: continuumContextText },
+            { role: 'user', content: userInput },
+          ]);
+          providerRes = {
+            summary: typeof handlerOutput === 'string' ? handlerOutput : (handlerOutput.content || handlerOutput.summary || 'Handled by custom modelHandler'),
+          };
+        } else {
+          try {
+            providerRes = await aiProviderRouter.generateAgentPlan({
+              task: userInput,
+              workspacePath,
+              maxSteps: 1,
+              activeFilePath: null,
+              files: [],
+              targetFile: null,
+              intent: 'GENERAL_CHAT',
+              continuumContextText,
+              providerId: executionMeta.providerId,
+              modelId: executionMeta.modelId,
+            });
+          } catch (planErr) {
+            const { agentManager } = require('../agentManager');
+            if (agentManager && typeof agentManager.runDeterministicAgent === 'function') {
+              providerRes = await agentManager.runDeterministicAgent(userInput, workspacePath, 1, continuumContextText, null, null);
+            } else {
+              throw planErr;
+            }
+          }
+        }
 
         if (providerRes && providerRes.summary) {
           assistantText = providerRes.summary;
@@ -669,7 +711,9 @@ class HarnessRuntime {
       providerId,
       modelId,
       modelHandler: payload.modelHandler,
-      continuumSnapshot,
+      continuumSnapshot: effectiveContinuumSnapshot,
+      continuumContextText,
+      continuumActive,
       handoffState: payload.handoffState,
       diagnostic: payload.diagnostic,
       selectionText: payload.selectionText,
@@ -1343,6 +1387,32 @@ class HarnessRuntime {
    */
   listPersistedThreads(workspacePath = '') {
     return this.persistenceAdapter.listPersistedThreads(workspacePath);
+  }
+
+  /**
+   * Retrieves the latest active Continuum snapshot for a workspace from storage.
+   * @param {string} [workspacePath]
+   * @param {string} [excludeSessionId] - Optional session/thread ID to exclude to obtain previous session
+   * @returns {Object|null} Valid ContinuumSnapshot or null
+   */
+  getLatestWorkspaceSnapshot(workspacePath = '', excludeSessionId = null) {
+    const activeWorkspace = workspacePath || process.cwd();
+    try {
+      const summaries = this.persistenceAdapter?.continuumManager?.listSnapshots(activeWorkspace);
+      if (Array.isArray(summaries) && summaries.length > 0) {
+        for (const sum of summaries) {
+          const sId = sum.snapshotId || sum.sessionId;
+          if (excludeSessionId && sId === excludeSessionId) continue;
+          const loaded = this.persistenceAdapter?.continuumManager?.loadSnapshot(sId, activeWorkspace);
+          if (loaded && loaded.success && loaded.snapshot) {
+            return loaded.snapshot;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[HARNESS-RUNTIME] Failed to load latest workspace snapshot:', e.message);
+    }
+    return null;
   }
 
   // ==========================================

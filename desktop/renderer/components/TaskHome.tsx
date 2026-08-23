@@ -47,6 +47,10 @@ interface ChatMessage {
 interface TaskHomeProps {
   workspacePath: string;
   activeThreadId?: string | null;
+  promptValue?: string;
+  onPromptChange?: (prompt: string) => void;
+  isSplitOpen?: boolean;
+  isExecuting?: boolean;
   onStartTask: (prompt: string, providerId?: string, modelId?: string) => void;
   onContinueSession: (sessionId: string, userGoal?: string, providerId?: string) => void;
   onOpenFolder: () => void;
@@ -129,6 +133,10 @@ function isCodeTask(text: string): boolean {
 export default function TaskHome({
   workspacePath,
   activeThreadId,
+  promptValue,
+  onPromptChange,
+  isSplitOpen = false,
+  isExecuting = false,
   onStartTask,
   onContinueSession,
   onOpenFolder,
@@ -233,7 +241,10 @@ export default function TaskHome({
   }, [workspacePath]);
 
   const handlePresetClick = (presetPrompt: string) => {
-    handleComposerSubmit(presetPrompt);
+    if (onPromptChange) {
+      onPromptChange(presetPrompt);
+    }
+    onStartTask(presetPrompt, activeProvider, activeModel);
   };
 
   const handleSelectModel = (providerId: string, modelId?: string) => {
@@ -249,189 +260,7 @@ export default function TaskHome({
 
   const handleComposerSubmit = async (promptText: string) => {
     if (!promptText || !promptText.trim()) return;
-
-    // 1. Authoritative Request Classification via Codex Harness
-    let isCoding = isCodeTask(promptText);
-    if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.routeRequest) {
-      try {
-        const routeResult = await (window as any).electronAPI.harness.routeRequest({
-          userInput: promptText,
-          context: { workspacePath },
-        });
-        if (routeResult && routeResult.mode) {
-          isCoding = routeResult.mode === "CODING_TASK";
-        }
-      } catch (e) {}
-    }
-
-    if (isCoding) {
-      onStartTask(promptText, activeProvider, activeModel);
-      return;
-    }
-
-    // 2. Handle CONVERSATION in-place with progressive delta streaming
-    const now = Date.now();
-    const userMsg: ChatMessage = {
-      id: `user_${now}`,
-      role: "user",
-      content: promptText.trim(),
-      timestamp: now,
-    };
-
-    const agentMsgId = `agent_${now + 1}`;
-    setChatMessages((prev) => [...prev, userMsg]);
-    setChatLoading(true);
-
-    let unsubscribeHarness: (() => void) | null = null;
-
-    try {
-      if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.handleRequest) {
-        if ((window as any).electronAPI?.harness?.onEvent) {
-          unsubscribeHarness = (window as any).electronAPI.harness.onEvent((event: any) => {
-            if (!event) return;
-            const { type, payload } = event;
-            const item = payload?.item || {};
-
-            if (item.type === "AGENT_MESSAGE" || type.startsWith("ITEM_")) {
-              const textContent = item.payload?.text || payload?.text || item.payload?.summary || "";
-              if (type === "ITEM_STARTED" || type === "ITEM_UPDATED") {
-                setChatMessages((prev) => {
-                  const exists = prev.some((m) => m.id === agentMsgId);
-                  if (!exists) {
-                    return [
-                      ...prev,
-                      {
-                        id: agentMsgId,
-                        role: "agent",
-                        content: textContent,
-                        timestamp: Date.now(),
-                        isStreaming: true,
-                        execution: {
-                          providerId: activeProvider,
-                          modelId: activeModel,
-                        },
-                      },
-                    ];
-                  }
-                  return prev.map((m) =>
-                    m.id === agentMsgId
-                      ? { ...m, content: textContent || m.content, isStreaming: true }
-                      : m
-                  );
-                });
-              } else if (type === "ITEM_COMPLETED") {
-                setChatMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === agentMsgId
-                      ? { ...m, content: textContent || m.content, isStreaming: false }
-                      : m
-                  )
-                );
-              }
-            }
-          });
-        }
-
-        const res = await (window as any).electronAPI.harness.handleRequest({
-          threadId: activeThreadId || undefined,
-          userInput: promptText.trim(),
-          workspacePath,
-          activeFilePath: null,
-          providerId: activeProvider,
-          modelId: activeModel,
-        });
-
-        const is429 = Boolean(
-          res?.isRateLimit ||
-          res?.statusCode === 429 ||
-          /429|rate\s*limit/i.test(res?.error || "")
-        );
-        const actualProvider = res?.rateInfo?.providerId || res?.execution?.providerId || res?.providerId || activeProvider;
-        const actualModel = res?.rateInfo?.modelId || res?.execution?.modelId || res?.modelId || activeModel;
-        const rateInfo = res?.rateInfo ? {
-          ...res.rateInfo,
-          providerId: res.rateInfo.providerId || actualProvider,
-          modelId: res.rateInfo.modelId || actualModel,
-        } : (is429 ? {
-          providerId: actualProvider,
-          modelId: actualModel,
-          message: res?.error || `Rate limit reached on ${actualProvider}. Please wait before trying again.`,
-          retryAfter: res?.retryAfter || "5s",
-        } : undefined);
-
-        const finalContent = res?.response || res?.summary || (res?.error ? `Error: ${res.error}` : (res?.success === false ? "AI provider request failed." : "No response generated."));
-        setChatMessages((prev) => {
-          const exists = prev.some((m) => m.id === agentMsgId);
-          const msgPayload: ChatMessage = {
-            id: agentMsgId,
-            role: "agent",
-            content: finalContent,
-            timestamp: Date.now(),
-            isStreaming: false,
-            isRateLimit: is429,
-            rateInfo,
-            execution: {
-              providerId: actualProvider,
-              modelId: actualModel,
-            },
-          };
-          if (exists) {
-            return prev.map((m) =>
-              m.id === agentMsgId ? msgPayload : m
-            );
-          }
-          return [...prev, msgPayload];
-        });
-
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new CustomEvent("nexus:threads-changed", { detail: { threadId: res?.threadId } }));
-        }
-      } else if (typeof window !== "undefined" && (window as any).electronAPI?.agent?.run) {
-        const res = await (window as any).electronAPI.agent.run({
-          task: promptText.trim(),
-          workspacePath,
-          activeFilePath: null,
-          isExplicitEditorTarget: false,
-          providerId: activeProvider,
-          modelId: activeModel,
-        });
-
-        const agentMsg: ChatMessage = {
-          id: agentMsgId,
-          role: "agent",
-          content: res?.summary || res?.response || (res?.error ? `Error: ${res.error}` : "Task completed."),
-          timestamp: Date.now(),
-          isStreaming: false,
-          execution: res?.execution,
-        };
-        setChatMessages((prev) => [...prev, agentMsg]);
-      } else {
-        const agentMsg: ChatMessage = {
-          id: agentMsgId,
-          role: "agent",
-          content: "Hello! I am NEXUS AI Assistant. Ask me anything about this repository or describe a coding task to get started.",
-          timestamp: Date.now(),
-          isStreaming: false,
-        };
-        setChatMessages((prev) => [...prev, agentMsg]);
-      }
-    } catch (e: any) {
-      const errMsg: ChatMessage = {
-        id: `agent_${Date.now()}`,
-        role: "agent",
-        content: `Error: ${e.message || "Failed to process request"}`,
-        timestamp: Date.now(),
-        isStreaming: false,
-      };
-      setChatMessages((prev) => [...prev, errMsg]);
-    } finally {
-      if (unsubscribeHarness) {
-        try {
-          unsubscribeHarness();
-        } catch (e) {}
-      }
-      setChatLoading(false);
-    }
+    onStartTask(promptText.trim(), activeProvider, activeModel);
   };
 
   const workspaceName = workspacePath ? workspacePath.split("/").pop() || "NEXUS" : "NEXUS";
@@ -442,7 +271,7 @@ export default function TaskHome({
         backgroundColor: "var(--theme-background, #050505)",
         color: "var(--theme-text, #f4f4f5)",
       }}
-      className="flex-1 w-full h-full flex flex-col items-center justify-between p-6 overflow-y-auto font-sans select-none relative"
+      className={`flex-1 w-full h-full flex flex-col items-center justify-between ${isSplitOpen ? "p-4" : "p-6"} overflow-y-auto font-sans select-none relative`}
     >
       
       {/* Background Aura */}
@@ -451,182 +280,99 @@ export default function TaskHome({
         style={{ backgroundColor: "var(--theme-accent, #22d3ee)" }}
       />
 
-      {chatMessages.length === 0 ? (
-        /* Main Empty State Prompt Section */
-        <div className="w-full max-w-3xl my-auto flex flex-col items-center z-10 space-y-6 pt-6">
-          <div className="text-center space-y-3">
-            <div 
-              className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono border"
+      {/* Main Empty State Prompt Section (Always visible on Task Home) */}
+      <div className={`w-full ${isSplitOpen ? "max-w-lg" : "max-w-3xl"} my-auto flex flex-col items-center z-10 space-y-4 pt-4`}>
+        <div className="text-center space-y-2.5">
+          <div 
+            className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono border"
+            style={{
+              backgroundColor: "var(--theme-accent-dim, rgba(34,211,238,0.15))",
+              borderColor: "var(--theme-border-card, rgba(34,211,238,0.3))",
+              color: "var(--theme-accent, #22d3ee)",
+            }}
+          >
+            <Sparkles className="w-3.5 h-3.5" style={{ color: "var(--theme-accent, #22d3ee)" }} />
+            <span>NEXUS Coding Agent Engine</span>
+          </div>
+
+          <h1 className={`${isSplitOpen ? "text-2xl" : "text-4xl"} font-heading font-extrabold tracking-tight transition-all`} style={{ color: "var(--theme-text, #ffffff)" }}>
+            What should we build in NEXUS?
+          </h1>
+
+          <p className={`${isSplitOpen ? "text-xs max-w-sm" : "text-sm max-w-lg"} mx-auto font-mono text-[12px] transition-all`} style={{ color: "var(--theme-text-muted, #a1a1aa)" }}>
+            Describe a goal, bug, or refactoring. NEXUS will inspect dependencies, plan execution, and verify behavior safely.
+          </p>
+        </div>
+
+        {/* Quick Task Presets */}
+        <div className={`w-full ${isSplitOpen ? "max-w-lg" : "max-w-xl"} space-y-2`}>
+          <div className={`grid ${isSplitOpen ? "grid-cols-1 md:grid-cols-2" : "grid-cols-2"} gap-2 font-mono text-xs`}>
+            <button
+              onClick={() => handlePresetClick("Find redundant code in this project and safely remove it.")}
               style={{
-                backgroundColor: "var(--theme-accent-dim, rgba(34,211,238,0.15))",
-                borderColor: "var(--theme-border-card, rgba(34,211,238,0.3))",
-                color: "var(--theme-accent, #22d3ee)",
+                backgroundColor: "var(--theme-surface-panel, #0b0b12)",
+                borderColor: "var(--theme-border, #1e1e2a)",
+                color: "var(--theme-text, #f4f4f5)",
               }}
+              className="p-2.5 rounded-xl border hover:border-cyan-500/40 text-left transition-all flex items-center gap-2.5 group cursor-pointer hover:brightness-110"
             >
-              <Sparkles className="w-3.5 h-3.5" style={{ color: "var(--theme-accent, #22d3ee)" }} />
-              <span>NEXUS Coding Agent Engine</span>
-            </div>
-
-            <h1 className="text-4xl font-heading font-extrabold tracking-tight" style={{ color: "var(--theme-text, #ffffff)" }}>
-              What should we build in NEXUS?
-            </h1>
-
-            <p className="text-sm max-w-lg mx-auto font-mono text-[12.5px]" style={{ color: "var(--theme-text-muted, #a1a1aa)" }}>
-              Describe a goal, bug, or refactoring. NEXUS will inspect dependencies, plan execution, and verify behavior safely.
-            </p>
-          </div>
-
-          {/* Quick Task Presets */}
-          <div className="w-full max-w-xl space-y-2">
-            <div className="grid grid-cols-2 gap-2 font-mono text-xs">
-              <button
-                onClick={() => handlePresetClick("Find redundant code in this project and safely remove it.")}
-                style={{
-                  backgroundColor: "var(--theme-surface-panel, #0b0b12)",
-                  borderColor: "var(--theme-border, #1e1e2a)",
-                  color: "var(--theme-text, #f4f4f5)",
-                }}
-                className="p-2.5 rounded-xl border hover:border-cyan-500/40 text-left transition-all flex items-center gap-2.5 group cursor-pointer hover:brightness-110"
-              >
-                <Trash2 className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform shrink-0" />
-                <div className="min-w-0">
-                  <div className="font-bold text-[11px]">Find Redundant Code</div>
-                  <div className="text-[10px] text-zinc-500 truncate">Detect & remove unused code</div>
-                </div>
-              </button>
-
-              <button
-                onClick={() => handlePresetClick("Explain the workspace architecture and core dependency flow.")}
-                style={{
-                  backgroundColor: "var(--theme-surface-panel, #0b0b12)",
-                  borderColor: "var(--theme-border, #1e1e2a)",
-                  color: "var(--theme-text, #f4f4f5)",
-                }}
-                className="p-2.5 rounded-xl border hover:border-cyan-500/40 text-left transition-all flex items-center gap-2.5 group cursor-pointer hover:brightness-110"
-              >
-                <Sparkles className="w-4 h-4 text-purple-400 group-hover:scale-110 transition-transform shrink-0" />
-                <div className="min-w-0">
-                  <div className="font-bold text-[11px]">Analyze Architecture</div>
-                  <div className="text-[10px] text-zinc-500 truncate">Explain BDG graph & flow</div>
-                </div>
-              </button>
-
-              <button
-                onClick={() => handlePresetClick("Audit security vulnerabilities and hardcoded credentials.")}
-                style={{
-                  backgroundColor: "var(--theme-surface-panel, #0b0b12)",
-                  borderColor: "var(--theme-border, #1e1e2a)",
-                  color: "var(--theme-text, #f4f4f5)",
-                }}
-                className="p-2.5 rounded-xl border hover:border-cyan-500/40 text-left transition-all flex items-center gap-2.5 group cursor-pointer hover:brightness-110"
-              >
-                <ShieldAlert className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform shrink-0" />
-                <div className="min-w-0">
-                  <div className="font-bold text-[11px]">Security Audit</div>
-                  <div className="text-[10px] text-zinc-500 truncate">Scan credentials & risks</div>
-                </div>
-              </button>
-
-              <button
-                onClick={() => handlePresetClick("Fix all syntax, missing imports, and type errors.")}
-                style={{
-                  backgroundColor: "var(--theme-surface-panel, #0b0b12)",
-                  borderColor: "var(--theme-border, #1e1e2a)",
-                  color: "var(--theme-text, #f4f4f5)",
-                }}
-                className="p-2.5 rounded-xl border hover:border-cyan-500/40 text-left transition-all flex items-center gap-2.5 group cursor-pointer hover:brightness-110"
-              >
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform shrink-0" />
-                <div className="min-w-0">
-                  <div className="font-bold text-[11px]">Fix Type Errors</div>
-                  <div className="text-[10px] text-zinc-500 truncate">Check & resolve lints</div>
-                </div>
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : (
-        /* In-Place Conversational Stream */
-        <div className="w-full max-w-3xl flex-1 overflow-y-auto z-10 space-y-4 py-4 pr-1">
-          {chatMessages.map((msg) => (
-            <div key={msg.id} className="space-y-2">
-              {msg.role === "user" ? (
-                <div className="flex justify-end">
-                  <div className="max-w-[85%] p-3 rounded-2xl bg-[#121b2b] border border-cyan-500/30 text-cyan-100 font-sans text-[13px] shadow-sm leading-relaxed">
-                    {msg.content}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex justify-start">
-                  {msg.isRateLimit ? (
-                    <div className="max-w-[90%] p-4 rounded-2xl bg-amber-950/20 border border-amber-500/40 text-zinc-200 font-sans text-[13px] shadow-md space-y-3 leading-relaxed">
-                      <div className="flex items-center justify-between border-b border-amber-500/20 pb-2 text-[11px]">
-                        <div className="flex items-center gap-2 text-amber-400 font-bold">
-                          <AlertTriangle className="w-4 h-4 text-amber-400" />
-                          <span>Rate Limit Exceeded (HTTP 429)</span>
-                        </div>
-                        <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/30 text-[10px] font-mono">
-                          {msg.rateInfo?.providerId || msg.execution?.providerId || activeProvider} • {msg.rateInfo?.modelId || msg.execution?.modelId || activeModel}
-                        </span>
-                      </div>
-
-                      <p className="text-amber-200/90 text-xs">
-                        {msg.rateInfo?.message || msg.content}
-                      </p>
-
-                      <div className="flex items-center justify-between pt-1">
-                        <div className="text-[11px] font-mono text-zinc-400 flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 text-amber-400" />
-                          <span>Retry recommended after: <strong className="text-amber-300">{msg.rateInfo?.retryAfter || "5s"}</strong></span>
-                        </div>
-
-                        <button
-                          onClick={() => {
-                            const lastUserPrompt = chatMessages.slice().reverse().find((m) => m.role === "user")?.content;
-                            if (lastUserPrompt) handleComposerSubmit(lastUserPrompt);
-                          }}
-                          disabled={chatLoading}
-                          className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-mono text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          <span>Retry Task</span>
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                  <div className="max-w-[90%] p-4 rounded-2xl bg-[#0a0a12] border border-[#1e1e2e] text-zinc-200 font-sans text-[13px] shadow-md space-y-2 leading-relaxed">
-                    <div className="flex items-center justify-between border-b border-[#181826] pb-2 text-[11px]">
-                      <div className="flex items-center gap-2 text-cyan-400 font-bold">
-                        <Bot className="w-4 h-4 text-cyan-400" />
-                        <span>NEXUS Assistant</span>
-                      </div>
-                      {msg.execution && (
-                        <span className="px-2 py-0.5 rounded-full bg-[#121828] text-cyan-300 border border-cyan-500/30 text-[10px] font-mono">
-                          {msg.execution.providerId} ({msg.execution.modelId})
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-zinc-300 whitespace-pre-wrap">
-                      {msg.content}
-                    </div>
-                  </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-
-          {chatLoading && (
-            <div className="flex justify-start">
-              <div className="p-3.5 rounded-2xl bg-[#0a0a12] border border-[#1e1e2e] text-cyan-400 text-xs flex items-center gap-2.5">
-                <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
-                <span className="font-mono">NEXUS is thinking...</span>
+              <Trash2 className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform shrink-0" />
+              <div className="min-w-0">
+                <div className="font-bold text-[11px]">Find Redundant Code</div>
+                <div className="text-[10px] text-zinc-500 truncate">Detect & remove unused code</div>
               </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
+            </button>
+
+            <button
+              onClick={() => handlePresetClick("Explain the workspace architecture and core dependency flow.")}
+              style={{
+                backgroundColor: "var(--theme-surface-panel, #0b0b12)",
+                borderColor: "var(--theme-border, #1e1e2a)",
+                color: "var(--theme-text, #f4f4f5)",
+              }}
+              className="p-2.5 rounded-xl border hover:border-cyan-500/40 text-left transition-all flex items-center gap-2.5 group cursor-pointer hover:brightness-110"
+            >
+              <Sparkles className="w-4 h-4 text-purple-400 group-hover:scale-110 transition-transform shrink-0" />
+              <div className="min-w-0">
+                <div className="font-bold text-[11px]">Analyze Architecture</div>
+                <div className="text-[10px] text-zinc-500 truncate">Explain BDG graph & flow</div>
+              </div>
+            </button>
+
+            <button
+              onClick={() => handlePresetClick("Audit security vulnerabilities and hardcoded credentials.")}
+              style={{
+                backgroundColor: "var(--theme-surface-panel, #0b0b12)",
+                borderColor: "var(--theme-border, #1e1e2a)",
+                color: "var(--theme-text, #f4f4f5)",
+              }}
+              className="p-2.5 rounded-xl border hover:border-cyan-500/40 text-left transition-all flex items-center gap-2.5 group cursor-pointer hover:brightness-110"
+            >
+              <ShieldAlert className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform shrink-0" />
+              <div className="min-w-0">
+                <div className="font-bold text-[11px]">Security Audit</div>
+                <div className="text-[10px] text-zinc-500 truncate">Scan credentials & risks</div>
+              </div>
+            </button>
+
+            <button
+              onClick={() => handlePresetClick("Fix all syntax, missing imports, and type errors.")}
+              style={{
+                backgroundColor: "var(--theme-surface-panel, #0b0b12)",
+                borderColor: "var(--theme-border, #1e1e2a)",
+                color: "var(--theme-text, #f4f4f5)",
+              }}
+              className="p-2.5 rounded-xl border hover:border-cyan-500/40 text-left transition-all flex items-center gap-2.5 group cursor-pointer hover:brightness-110"
+            >
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform shrink-0" />
+              <div className="min-w-0">
+                <div className="font-bold text-[11px]">Fix Type Errors</div>
+                <div className="text-[10px] text-zinc-500 truncate">Check & resolve lints</div>
+              </div>
+            </button>
+          </div>
         </div>
-      )}
+      </div>
 
       {/* Bottom Floating Codex Agent Composer */}
       <div className="w-full z-20 pt-4">
@@ -635,6 +381,8 @@ export default function TaskHome({
           gitBranch={gitBranch}
           activeProvider={activeProvider}
           activeModel={activeModel}
+          promptValue={promptValue}
+          onPromptChange={onPromptChange}
           onSelectModel={handleSelectModel}
           onSubmitTask={handleComposerSubmit}
           onOpenContinuum={() => {
@@ -643,6 +391,7 @@ export default function TaskHome({
             }
           }}
           onOpenFolder={onOpenFolder}
+          disabled={isExecuting}
         />
       </div>
 

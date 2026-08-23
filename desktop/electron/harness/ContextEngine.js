@@ -30,13 +30,14 @@ const CODING_TASK_BUDGETS = Object.freeze({
   historyBudgetTokens: 500,       // ~2,000 chars history ceiling
   toolResultBudgetChars: 900,     // 900 chars max per tool result representation
   workspaceBudgetChars: 350,      // 350 chars max for workspace & file state
-  systemBudgetChars: 750,         // 750 chars max for system prompt & instructions
+  systemBudgetChars: 2500,        // 2500 chars max for system prompt & instructions (preserves Continuum & handoff)
   recentItemLimit: 5,             // Max 5 recent items retained before older compaction
 });
 
 class ContextEngine {
   constructor(options = {}) {
     this.eventBus = options.eventBus || null;
+    this.instanceCustomBudgets = options.budgets || {};
     this.budgets = {
       ...DEFAULT_BUDGETS,
       ...(options.budgets || {}),
@@ -131,7 +132,7 @@ class ContextEngine {
     if (toolName === 'search_workspace') {
       const matches = sanitized.matches || sanitized.result?.matches || [];
       const totalMatches = matches.length;
-      const topMatches = matches.slice(0, 4).map((m) => ({
+      const topMatches = matches.slice(0, 8).map((m) => ({
         file: m.file || m.path,
         line: m.line || m.lineNumber,
         snippet: typeof m.content === 'string' ? m.content.trim().slice(0, 80) : undefined,
@@ -141,6 +142,7 @@ class ContextEngine {
         ...metadata,
         totalMatches,
         matches: topMatches,
+        notice: `Showing top ${topMatches.length} of ${totalMatches} matches`,
       };
     }
 
@@ -462,6 +464,8 @@ class ContextEngine {
       turns = [],
       items = [],
       continuumSnapshot = null,
+      continuumContextText = null,
+      continuumActive = false,
       handoffState = null,
       workspacePath = process.cwd(),
       activeFilePath = null,
@@ -483,9 +487,10 @@ class ContextEngine {
     } = params;
 
     const isCodingTask = intent === 'MUTATION' || intent === 'READ_ONLY' || options.isCodingTask !== false;
-    const baseBudget = isCodingTask ? CODING_TASK_BUDGETS : this.budgets;
+    const baseBudget = isCodingTask ? CODING_TASK_BUDGETS : DEFAULT_BUDGETS;
     const budgets = {
       ...baseBudget,
+      ...(this.instanceCustomBudgets || {}),
       ...(options.budgets || {}),
     };
 
@@ -495,17 +500,26 @@ class ContextEngine {
     let compactionApplied = false;
     let compactedTurnsCount = 0;
 
-    // 1. Continuum Layer (Layered integration reusing continuum_context_builder)
+    // 1. Continuum Layer (Synthesized handoff from previous chat context)
     let continuumText = '';
-    if (continuumSnapshot) {
-      try {
-        const built = continuumContextBuilder.buildContext(continuumSnapshot);
-        if (built.success) {
-          continuumText = built.contextText;
-        }
-      } catch (e) {}
+    const isContinuumOn = continuumActive === true;
+
+    if (isContinuumOn) {
+      if (continuumContextText && typeof continuumContextText === 'string' && continuumContextText.trim()) {
+        continuumText = continuumContextText.trim();
+      } else if (continuumSnapshot) {
+        try {
+          const built = continuumContextBuilder.buildSynthesizedHandoffPrompt
+            ? continuumContextBuilder.buildSynthesizedHandoffPrompt(continuumSnapshot)
+            : continuumContextBuilder.buildContext(continuumSnapshot);
+          if (built && (built.handoffText || built.contextText)) {
+            continuumText = built.handoffText || built.contextText;
+          }
+        } catch (e) {}
+      }
     }
     sections.continuumTokens = this.estimateTokens(continuumText);
+    sections.continuumHandoffPresent = Boolean(continuumText);
 
     // 2. Active Handoff Context (Milestone 7 Durable Handoff)
     let handoffText = '';
@@ -729,14 +743,30 @@ class ContextEngine {
     }
     sections.workspaceTokens = this.estimateTokens(workspaceText);
 
-    // 4. Approved Engineering Decisions
+    // 4. Approved Engineering Decisions (Within current thread session; previous session decisions only enter when Continuum is ON)
     let decisionsText = '';
     const allDecisions = Array.isArray(decisions) ? [...decisions] : [];
-    if (continuumSnapshot?.decisions) {
-      allDecisions.push(...continuumSnapshot.decisions);
+    if (isContinuumOn) {
+      if (Array.isArray(continuumSnapshot?.decisions)) {
+        allDecisions.push(...continuumSnapshot.decisions);
+      }
+      if (Array.isArray(continuumSnapshot?.metadata?.harness?.handoffState?.importantDecisions)) {
+        allDecisions.push(...continuumSnapshot.metadata.harness.handoffState.importantDecisions);
+      }
+      if (Array.isArray(thread?.metadata?.handoffState?.importantDecisions)) {
+        allDecisions.push(...thread.metadata.handoffState.importantDecisions);
+      }
+    }
+    if (Array.isArray(thread?.metadata?.decisions)) {
+      allDecisions.push(...thread.metadata.decisions);
     }
     if (allDecisions.length > 0) {
-      const uniqueDecisions = Array.from(new Set(allDecisions.map((d) => typeof d === 'string' ? d : `[${d.userApproved ? 'APPROVED' : 'PENDING'}] ${d.decision || d.statement || ''}`)));
+      const uniqueDecisions = Array.from(new Set(allDecisions.map((d) => {
+        if (typeof d === 'string') return d;
+        const text = d.decision || d.statement || d.text || '';
+        const rationale = d.rationale ? ` (Rationale: ${d.rationale})` : '';
+        return `[${d.userApproved !== false ? 'APPROVED' : 'PENDING'}] ${text}${rationale}`;
+      }).filter(Boolean)));
       decisionsText = `## APPROVED ENGINEERING DECISIONS\n${uniqueDecisions.join('\n')}`;
     }
     sections.decisionsTokens = this.estimateTokens(decisionsText);
@@ -866,9 +896,7 @@ class ContextEngine {
     sections.projectCapabilitiesTokens = this.estimateTokens(projectCapabilitiesText);
 
     // 8. Build Base System Prompt (Concise & Focused)
-    const baseInstruction = isCodingTask
-      ? 'You are NEXUS, an autonomous software engineering assistant. Use tools iteratively to inspect code (read_file) and propose changesets (apply_patch). Keep explanations concise.'
-      : 'You are NEXUS, an autonomous software engineering pair programmer. Analyze directives and use tools iteratively to inspect files, search code, apply verified surgical patches, and run unit tests.';
+    const baseInstruction = 'You are NEXUS, an autonomous software engineering pair programmer. Analyze directives and use tools iteratively to inspect files, search code, apply verified surgical patches, and run unit tests.';
 
     const systemPromptComponents = [
       baseInstruction,

@@ -614,6 +614,7 @@ async function runContextTests() {
       threadId: longThread.threadId,
       userInput: 'Complete multi-step cart calculator refactoring',
       workspacePath: testWorkspaceDir,
+      approvalMode: 'auto',
       maxIterations: 8,
       modelHandler: async (messages, tools) => {
         modelInvocationCount++;

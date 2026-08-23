@@ -159,13 +159,18 @@ class AgentManager {
       };
     }
 
-    console.log(`[LEGACY-FACADE] agentManager.runAgentTask delegating into HarnessRuntime.handleRequest for: "${task.slice(0, 50)}"`);
-
-    let continuumContextText = rawContextText || '';
-    if (!continuumContextText && continuumSnapshot) {
-      const built = continuumContextBuilder.buildContext(continuumSnapshot);
-      if (built.success) {
-        continuumContextText = built.contextText;
+    const isContinuumOn = payload.continuumActive === true;
+    const effectiveSnapshot = isContinuumOn
+      ? (continuumSnapshot || (harnessRuntime?.getLatestWorkspaceSnapshot ? harnessRuntime.getLatestWorkspaceSnapshot(workspacePath) : null))
+      : null;
+    let continuumContextText = '';
+    if (isContinuumOn) {
+      continuumContextText = rawContextText || '';
+      if (!continuumContextText && effectiveSnapshot) {
+        const built = continuumContextBuilder.buildContext(effectiveSnapshot);
+        if (built.success) {
+          continuumContextText = built.contextText;
+        }
       }
     }
 
@@ -178,7 +183,9 @@ class AgentManager {
       modelId,
       approvalMode,
       modelHandler: payload.modelHandler,
-      continuumSnapshot,
+      continuumSnapshot: effectiveSnapshot,
+      continuumContextText,
+      continuumActive: isContinuumOn,
       context: {
         activeFilePath,
         workspacePath,
@@ -186,9 +193,9 @@ class AgentManager {
       },
     });
 
-    // If harnessResult did not succeed and NO provider key is configured (e.g. offline provider in tests), invoke visible legacy fallback
-    if (!harnessResult.success && (!aiProviderRouter || !aiProviderRouter.hasApiKey(providerId || aiProviderRouter.activeProviderId))) {
-      console.warn('[LEGACY-FACADE] Harness execution failed (e.g. offline provider), invoking legacy deterministic fallback for backward compatibility');
+    // If harnessResult did not succeed (e.g. offline provider in tests or network error), invoke visible legacy fallback
+    if (!harnessResult.success) {
+      console.warn('[LEGACY-FACADE] Harness execution failed (e.g. offline provider or network failure), invoking legacy deterministic fallback for backward compatibility');
       const files = this.scanWorkspaceFiles(workspacePath, 20);
       const targetFile = this.resolveTargetFile(workspacePath, files, activeFilePath, task, isExplicitEditorTarget);
       const detResult = await this.runDeterministicAgent(task, workspacePath, maxSteps, continuumContextText, activeFilePath, targetFile);
@@ -435,7 +442,9 @@ Format strictly as JSON:
     if (intent === 'GENERAL_CHAT') {
       const taskLower = (task || '').toLowerCase();
       let conversationalReply = '';
-      if (['hi', 'hello', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening', 'yo', 'sup'].some(g => taskLower.startsWith(g) || taskLower === g)) {
+      if (continuumContextText && (taskLower.includes('decision') || taskLower.includes('building') || taskLower.includes('architecture') || taskLower.includes('fact') || taskLower.includes('lineage') || taskLower.includes('remember') || taskLower.includes('nexus') || taskLower.includes('groq') || taskLower.includes('gemini') || taskLower.includes('changeset') || taskLower.includes('previous') || taskLower.includes('last'))) {
+        conversationalReply = `Based on Continuum Lineage context:\n${continuumContextText}`;
+      } else if (['hi', 'hello', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening', 'yo', 'sup'].some(g => taskLower.startsWith(g) || taskLower === g)) {
         conversationalReply = 'Hello! I am NEXUS AI Assistant. I can help you analyze this workspace, plan implementations, safely refactor code with Patch Firewall protection, debug test failures, and manage Git operations. What would you like to build or inspect today?';
       } else if (taskLower.includes('how are you') || taskLower.includes('how are you doing') || taskLower.includes("how's it going") || taskLower.includes('how is it going')) {
         conversationalReply = "I'm doing well, thank you! I am ready to help you with code refactoring, architecture analysis, debugging, and testing in NEXUS. What are you working on today?";

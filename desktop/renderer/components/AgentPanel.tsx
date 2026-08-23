@@ -27,6 +27,7 @@ import {
   Code2,
   FileText,
   Clock,
+  GitBranch,
 } from "lucide-react";
 import { useOutsideClick } from "../hooks/useOutsideClick";
 import SwarmActivityPanel from "./SwarmActivityPanel";
@@ -104,6 +105,8 @@ interface AgentPanelProps {
   activeSessionId?: string | null;
   activeSessionTitle?: string;
   activeContinuumSnapshot?: any;
+  activeProvider?: string;
+  activeModel?: string;
   selectionInfo?: {
     text: string;
     startLineNumber: number;
@@ -115,11 +118,16 @@ interface AgentPanelProps {
   gitBranch?: string;
   diagnostic?: TerminalDiagnostic | null;
   initialTask?: string;
+  externalTaskInput?: string;
+  taskToExecute?: { prompt: string; id: string | number; providerId?: string; modelId?: string } | null;
+  onTaskExecuted?: () => void;
+  onExecutingChange?: (isExecuting: boolean) => void;
   onPreviewDiff?: (edit: ProposedEdit) => void;
   onApplyStep?: (step: AgentStep) => Promise<boolean>;
   onApplyAllApproved?: (steps: AgentStep[], createCommit: boolean, verifyCmd: string) => Promise<void>;
   runningCommandOutput?: string;
   isDocked?: boolean;
+  className?: string;
   onSelectVerificationTab?: () => void;
   onRequireApiKey?: (pendingAction?: () => void) => void;
 }
@@ -139,20 +147,27 @@ export default function AgentPanel({
   activeSessionId,
   activeSessionTitle,
   activeContinuumSnapshot,
+  activeProvider,
+  activeModel,
   selectionInfo,
   cursorPos,
   gitBranch,
   diagnostic,
   initialTask,
+  externalTaskInput,
+  taskToExecute,
+  onTaskExecuted,
+  onExecutingChange,
   onPreviewDiff,
   onApplyStep,
   onApplyAllApproved,
   runningCommandOutput,
   isDocked = false,
+  className,
   onSelectVerificationTab,
   onRequireApiKey,
 }: AgentPanelProps) {
-  const [taskInput, setTaskInput] = useState("");
+  const [taskInput, setTaskInput] = useState(externalTaskInput || "");
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [result, setResult] = useState<AgentTaskResult | null>(null);
@@ -204,9 +219,26 @@ export default function AgentPanel({
     turnId?: string | null;
   } | null>(null);
 
+  const [continuumActive, setContinuumActive] = useState<boolean>(false);
+  const [isActivatingContinuum, setIsActivatingContinuum] = useState<boolean>(false);
+
   const swarmActivity = useSwarmActivity({
     threadId: harnessThreadId || activeSessionId || null,
   });
+
+  // Sync harnessThreadId with activeSessionId and clean up on new task / chat reset
+  useEffect(() => {
+    setHarnessThreadId(activeSessionId || null);
+    if (!activeSessionId) {
+      setMessages([]);
+      setResult(null);
+      setSteps([]);
+      setPendingApproval(null);
+      setLocalSnapshot(null);
+      setContinuumActive(false);
+      setActiveContinuumContextText("");
+    }
+  }, [activeSessionId]);
 
   // Subscribe to push events from the new Codex Harness Event Stream
   useEffect(() => {
@@ -367,77 +399,37 @@ export default function AgentPanel({
           } else if (item.type === "AGENT_MESSAGE") {
             const am = item.payload || {};
             const textContent = am.text || am.summary || payload?.text || "";
+            const currentTurnId = turnId || activeTurnId;
 
-            if (type === "ITEM_STARTED") {
-              setMessages((prev) => {
-                const exists = prev.find((m) => m.id === item.itemId);
-                if (exists) return prev;
-                return [
-                  ...prev,
-                  {
-                    id: item.itemId || `agent_${Date.now()}`,
-                    role: "agent",
-                    content: textContent,
-                    timestamp: Date.now(),
-                    status: "STREAMING",
-                    execution: {
-                      providerId: aiConfig?.activeProvider || "groq",
-                      modelId: aiConfig?.activeModel || "llama-3.3-70b-versatile",
-                    },
-                  },
-                ];
-              });
-            } else if (type === "ITEM_UPDATED") {
-              setMessages((prev) => {
-                const exists = prev.some((m) => m.id === item.itemId);
-                if (!exists) {
-                  return [
-                    ...prev,
-                    {
-                      id: item.itemId || `agent_${Date.now()}`,
-                      role: "agent",
-                      content: textContent,
-                      timestamp: Date.now(),
-                      status: "STREAMING",
-                      execution: {
-                        providerId: aiConfig?.activeProvider || "groq",
-                        modelId: aiConfig?.activeModel || "llama-3.3-70b-versatile",
-                      },
-                    },
-                  ];
-                }
-                return prev.map((m) =>
-                  m.id === item.itemId
-                    ? { ...m, content: textContent, status: "STREAMING" }
-                    : m
-                );
-              });
-            } else if (type === "ITEM_COMPLETED") {
-              const finalSummary = am.text || am.summary || "Task completed.";
-              setMessages((prev) => {
-                const exists = prev.some((m) => m.id === item.itemId);
-                if (exists) {
-                  return prev.map((m) =>
-                    m.id === item.itemId
-                      ? { ...m, content: finalSummary, status: "VERIFIED" }
-                      : m
-                  );
-                }
-                return [
-                  ...prev,
-                  {
-                    id: item.itemId || `agent_${Date.now()}`,
-                    role: "agent",
-                    content: finalSummary,
-                    timestamp: Date.now(),
-                    status: "VERIFIED",
-                    execution: {
-                      providerId: aiConfig?.activeProvider || "groq",
-                      modelId: aiConfig?.activeModel || "llama-3.3-70b-versatile",
-                    },
-                  },
-                ];
-              });
+            setMessages((prev) => {
+              const matchIdx = prev.findIndex(
+                (m) => m.id === item.itemId || (currentTurnId && m.turnId === currentTurnId && m.role === "agent")
+              );
+
+              const msgObj: AgentMessage = {
+                id: item.itemId || (currentTurnId ? `agent_${currentTurnId}` : `agent_${Date.now()}`),
+                role: "agent",
+                content: textContent,
+                timestamp: matchIdx >= 0 ? prev[matchIdx].timestamp : Date.now(),
+                turnId: currentTurnId || undefined,
+                status: type === "ITEM_COMPLETED" ? "VERIFIED" : "STREAMING",
+                execution: {
+                  providerId: aiConfig?.activeProvider || "groq",
+                  modelId: aiConfig?.activeModel || "llama-3.3-70b-versatile",
+                },
+                steps: matchIdx >= 0 ? prev[matchIdx].steps : undefined,
+              };
+
+              if (matchIdx >= 0) {
+                const updated = [...prev];
+                updated[matchIdx] = { ...updated[matchIdx], ...msgObj };
+                return updated;
+              }
+
+              return [...prev, msgObj];
+            });
+
+            if (type === "ITEM_COMPLETED") {
               setAutonomousState((prev) => ({ ...prev, stage: "VERIFICATION" }));
             }
           }
@@ -506,7 +498,7 @@ export default function AgentPanel({
       setAutonomousState((prev) => ({ ...prev, stage: "CANCELLED" }));
     }
   };
-  const executedTaskRef = useRef<string | null>(null);
+  const executedTaskRef = useRef<string | number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -628,9 +620,49 @@ export default function AgentPanel({
   const currentSnapshot = activeContinuumSnapshot || localSnapshot;
   const [activeContinuumContextText, setActiveContinuumContextText] = useState<string>("");
 
-  // Hydrate visible conversation from authoritative Continuum turns
+  const handleToggleContinuum = async () => {
+    if (continuumActive) {
+      setContinuumActive(false);
+      setActiveContinuumContextText("");
+      setLocalSnapshot(null);
+      return;
+    }
+
+    setIsActivatingContinuum(true);
+    try {
+      if (typeof window !== "undefined" && (window as any).electronAPI?.continuum?.generateHandoff) {
+        const res = await (window as any).electronAPI.continuum.generateHandoff({ workspacePath });
+        if (res && res.success) {
+          setContinuumActive(true);
+          setActiveContinuumContextText(res.handoffText || res.contextText || "");
+          if (res.snapshot) {
+            setLocalSnapshot(res.snapshot);
+          } else if ((window as any).electronAPI?.continuum?.getLatest) {
+            const latest = await (window as any).electronAPI.continuum.getLatest(workspacePath);
+            if (latest) setLocalSnapshot(latest);
+          }
+        } else if ((window as any).electronAPI?.continuum?.getLatest) {
+          const latest = await (window as any).electronAPI.continuum.getLatest(workspacePath);
+          if (latest) {
+            setLocalSnapshot(latest);
+            setContinuumActive(true);
+            if ((window as any).electronAPI?.continuum?.buildContext) {
+              const built = await (window as any).electronAPI.continuum.buildContext(latest);
+              if (built?.success) setActiveContinuumContextText(built.handoffText || built.contextText || "");
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[AGENT-PANEL] Failed to activate Continuum Lineage:", err);
+    } finally {
+      setIsActivatingContinuum(false);
+    }
+  };
+
+  // Hydrate visible conversation ONLY when explicitly resuming an existing session thread with activeSessionId
   useEffect(() => {
-    if (currentSnapshot?.conversation?.recentTurns) {
+    if (activeSessionId && currentSnapshot?.conversation?.recentTurns) {
       const turns = currentSnapshot.conversation.recentTurns;
       if (Array.isArray(turns) && turns.length > 0) {
         const hydratedMessages: AgentMessage[] = [];
@@ -668,7 +700,7 @@ export default function AgentPanel({
         setMessages(hydratedMessages);
       }
     }
-  }, [currentSnapshot]);
+  }, [currentSnapshot, activeSessionId]);
 
   const [capsuleExportResult, setCapsuleExportResult] = useState<{
     success: boolean;
@@ -731,11 +763,32 @@ export default function AgentPanel({
   };
 
   useEffect(() => {
-    if (initialTask && initialTask.trim() && executedTaskRef.current !== initialTask) {
-      executedTaskRef.current = initialTask;
-      handleRunAgent(initialTask);
+    if (externalTaskInput !== undefined && externalTaskInput !== taskInput) {
+      setTaskInput(externalTaskInput);
     }
-  }, [initialTask]);
+  }, [externalTaskInput]);
+
+  useEffect(() => {
+    if (taskToExecute && taskToExecute.prompt && taskToExecute.prompt.trim()) {
+      const taskKey = `${taskToExecute.id}_${taskToExecute.prompt.trim()}`;
+      if (executedTaskRef.current !== taskKey) {
+        executedTaskRef.current = taskKey;
+        handleRunAgent(taskToExecute.prompt.trim(), taskToExecute.providerId, taskToExecute.modelId);
+        if (onTaskExecuted) onTaskExecuted();
+      }
+    } else if (initialTask && initialTask.trim() && !taskToExecute) {
+      if (executedTaskRef.current !== initialTask) {
+        executedTaskRef.current = initialTask;
+        handleRunAgent(initialTask, activeProvider, activeModel);
+      }
+    }
+  }, [taskToExecute, initialTask]);
+
+  useEffect(() => {
+    if (onExecutingChange) {
+      onExecutingChange(loading);
+    }
+  }, [loading]);
 
   if (!isOpen) return null;
 
@@ -743,22 +796,25 @@ export default function AgentPanel({
     setExpandedSteps((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const handleRunAgent = async (taskToRun?: string) => {
+  const handleRunAgent = async (taskToRun?: string, providerIdOverride?: string, modelIdOverride?: string) => {
     if (loading) return; // Prevent concurrent duplicate task triggers
     const activeTask = taskToRun || taskInput;
     if (!activeTask || !activeTask.trim()) return;
+
+    const effectiveProvider = providerIdOverride || activeProvider || aiConfig?.activeProvider || "nexus1";
+    const effectiveModel = modelIdOverride || activeModel || aiConfig?.activeModel || "gemini-2.5-flash";
 
     // Check if active provider API key is configured
     if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.getConfig) {
       try {
         const config = await (window as any).electronAPI.ai.getConfig();
-        const activeProvider = config?.activeProvider || aiConfig?.activeProvider || "nexus1";
-        const providerConfig = config?.providers?.find((p: any) => p.id === activeProvider);
+        const activeProv = effectiveProvider || config?.activeProvider || "nexus1";
+        const providerConfig = config?.providers?.find((p: any) => p.id === activeProv);
         const isConfigured = Boolean(providerConfig?.isConfigured && providerConfig?.status === "CONNECTED");
 
         if (!isConfigured) {
           if (onRequireApiKey) {
-            onRequireApiKey(() => handleRunAgent(activeTask));
+            onRequireApiKey(() => handleRunAgent(activeTask, effectiveProvider, effectiveModel));
             return;
           }
         }
@@ -793,6 +849,7 @@ export default function AgentPanel({
 
     try {
       let res: AgentTaskResult;
+      let harnessRes: any = null;
       if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.runTurn) {
         let threadIdToUse = harnessThreadId || activeSessionId;
         if (!threadIdToUse && (window as any).electronAPI?.harness?.createThread) {
@@ -800,14 +857,14 @@ export default function AgentPanel({
             const newThread = await (window as any).electronAPI.harness.createThread({
               userInput: activeTask,
               workspacePath,
-              metadata: { workspacePath, activeFilePath, activeSessionId, providerId: aiConfig?.activeProvider, modelId: aiConfig?.activeModel },
+              metadata: { workspacePath, activeFilePath, activeSessionId, providerId: effectiveProvider, modelId: effectiveModel },
             });
             threadIdToUse = newThread?.threadId;
             setHarnessThreadId(threadIdToUse || null);
           } catch (e) {}
         }
 
-        const harnessRes = await (window as any).electronAPI.harness.runTurn({
+        harnessRes = await (window as any).electronAPI.harness.runTurn({
           threadId: threadIdToUse || `thread_${Date.now()}`,
           userInput: activeTask,
           workspacePath,
@@ -822,9 +879,11 @@ export default function AgentPanel({
           gitBranch: gitBranch,
           diagnostic: diagnostic || null,
           intent: "MUTATION",
-          providerId: aiConfig?.activeProvider,
-          modelId: aiConfig?.activeModel,
-          continuumSnapshot: currentSnapshot,
+          providerId: effectiveProvider,
+          modelId: effectiveModel,
+          continuumSnapshot: continuumActive ? currentSnapshot : null,
+          continuumContextText: continuumActive ? activeContinuumContextText : undefined,
+          continuumActive: continuumActive,
         });
 
         if (harnessRes && harnessRes.success) {
@@ -832,10 +891,10 @@ export default function AgentPanel({
             success: true,
             task: activeTask,
             summary: harnessRes.finalResponse || "Task completed successfully via Codex Harness.",
-            steps: steps,
+            steps: harnessRes.steps || [],
             execution: {
-              providerId: aiConfig?.activeProvider || "nexus1",
-              modelId: aiConfig?.activeModel || "gemini-2.5-flash",
+              providerId: harnessRes?.execution?.providerId || harnessRes?.providerId || effectiveProvider,
+              modelId: harnessRes?.execution?.modelId || harnessRes?.modelId || effectiveModel,
             },
           };
           setResult(res);
@@ -845,8 +904,8 @@ export default function AgentPanel({
             harnessRes?.statusCode === 429 ||
             /429|rate\s*limit/i.test(harnessRes?.error || '')
           );
-          const actualProvider = harnessRes?.rateInfo?.providerId || harnessRes?.providerId || harnessRes?.execution?.providerId || aiConfig?.activeProvider || "nexus1";
-          const actualModel = harnessRes?.rateInfo?.modelId || harnessRes?.modelId || harnessRes?.execution?.modelId || aiConfig?.activeModel || "";
+          const actualProvider = harnessRes?.rateInfo?.providerId || harnessRes?.providerId || harnessRes?.execution?.providerId || effectiveProvider;
+          const actualModel = harnessRes?.rateInfo?.modelId || harnessRes?.modelId || harnessRes?.execution?.modelId || effectiveModel;
           const rateInfo = harnessRes?.rateInfo ? {
             ...harnessRes.rateInfo,
             providerId: harnessRes.rateInfo.providerId || actualProvider,
@@ -887,10 +946,11 @@ export default function AgentPanel({
           activeFilePath,
           isExplicitEditorTarget: Boolean(selectionInfo?.text),
           maxSteps: 5,
-          continuumSnapshot: currentSnapshot,
-          continuumContextText: activeContinuumContextText,
-          providerId: aiConfig?.activeProvider,
-          modelId: aiConfig?.activeModel,
+          continuumSnapshot: continuumActive ? currentSnapshot : null,
+          continuumContextText: continuumActive ? activeContinuumContextText : undefined,
+          continuumActive: continuumActive,
+          providerId: effectiveProvider,
+          modelId: effectiveModel,
           selectionText: selectionInfo?.text,
           selectionLineRange: selectionInfo ? `${selectionInfo.startLineNumber}-${selectionInfo.endLineNumber}` : undefined,
         });
@@ -930,8 +990,8 @@ export default function AgentPanel({
             },
           ],
           execution: {
-            providerId: "gemini",
-            modelId: "gemini-2.5-flash",
+            providerId: effectiveProvider,
+            modelId: effectiveModel,
             isFallback: false,
           },
         };
@@ -944,27 +1004,60 @@ export default function AgentPanel({
       (res.steps || []).forEach((s) => (expMap[s.id] = true));
       setExpandedSteps(expMap);
 
-      const agentMsg: AgentMessage = {
-        id: agentMsgId,
-        role: "agent",
-        content: res.summary || `Constructed plan with ${res.steps?.length || 0} steps.`,
-        timestamp: Date.now(),
-        status: res.steps && res.steps.length > 0 ? "PLAN_READY" : "VERIFIED",
-        execution: res.execution,
-        steps: res.steps,
-      };
+      setMessages((prev) => {
+        const existingIdx = prev.findIndex((m) => {
+          if (m.role !== "agent") return false;
+          if (harnessRes?.turnId && m.turnId === harnessRes.turnId) return true;
+          if (m.id === agentMsgId) return true;
+          return false;
+        });
 
-      setMessages((prev) => [...prev, agentMsg]);
+        const targetId = existingIdx >= 0 ? prev[existingIdx].id : (harnessRes?.turnId ? `agent_${harnessRes.turnId}` : agentMsgId);
+
+        const agentMsg: AgentMessage = {
+          id: targetId,
+          role: "agent",
+          content: res.summary || `Constructed plan with ${res.steps?.length || 0} steps.`,
+          timestamp: existingIdx >= 0 ? prev[existingIdx].timestamp : Date.now(),
+          status: res.steps && res.steps.length > 0 ? "PLAN_READY" : "VERIFIED",
+          execution: res.execution,
+          steps: res.steps && res.steps.length > 0 ? res.steps : undefined,
+          turnId: harnessRes?.turnId || activeTurnId || undefined,
+        };
+
+        if (existingIdx >= 0) {
+          const updated = [...prev];
+          updated[existingIdx] = agentMsg;
+          return updated;
+        }
+
+        const lastIdx = prev.length - 1;
+        if (lastIdx >= 0 && prev[lastIdx].role === "agent" && (!prev[lastIdx].steps || prev[lastIdx].steps.length === 0)) {
+          const updated = [...prev];
+          updated[lastIdx] = { ...agentMsg, id: prev[lastIdx].id };
+          return updated;
+        }
+
+        return [...prev, agentMsg];
+      });
     } catch (err: any) {
       console.error("[AGENT-PANEL] Task execution failed:", err);
-      const errorMsg: AgentMessage = {
-        id: agentMsgId,
-        role: "agent",
-        content: `Error: ${err.message || "Failed to execute agent task"}`,
-        timestamp: Date.now(),
-        status: "ERROR",
-      };
-      setMessages((prev) => [...prev, errorMsg]);
+      setMessages((prev) => {
+        const lastAgentIdx = prev.map((m) => m.role).lastIndexOf("agent");
+        const errorMsg: AgentMessage = {
+          id: lastAgentIdx >= 0 ? prev[lastAgentIdx].id : agentMsgId,
+          role: "agent",
+          content: `Error: ${err.message || "Failed to execute agent task"}`,
+          timestamp: Date.now(),
+          status: "ERROR",
+        };
+        if (lastAgentIdx >= 0) {
+          const copy = [...prev];
+          copy[lastAgentIdx] = errorMsg;
+          return copy;
+        }
+        return [...prev, errorMsg];
+      });
     } finally {
       setLoading(false);
     }
@@ -1009,7 +1102,9 @@ export default function AgentPanel({
         color: "var(--theme-text, #f4f4f5)",
       }}
       className={
-        isDocked
+        className
+          ? className
+          : isDocked
           ? "w-[440px] max-w-full h-full border-l shadow-xl z-20 flex flex-col font-mono text-xs select-none shrink-0 overflow-hidden"
           : "fixed inset-y-0 right-0 w-[480px] max-w-full border-l shadow-2xl z-50 flex flex-col font-mono text-xs select-none"
       }
@@ -1029,6 +1124,30 @@ export default function AgentPanel({
           </div>
 
           <div className="flex items-center gap-1.5">
+            {/* Continuum Lineage Toggle Button */}
+            <button
+              onClick={handleToggleContinuum}
+              disabled={isActivatingContinuum}
+              className={`px-2 py-0.5 rounded-md border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-sm ${
+                continuumActive
+                  ? "bg-cyan-950/80 border-cyan-500/50 text-cyan-300 shadow-[0_0_8px_rgba(6,182,212,0.2)]"
+                  : "bg-[#12121a] border-[#222234] text-zinc-400 hover:text-zinc-200 hover:border-zinc-600"
+              }`}
+              title={continuumActive ? "Continuum Lineage Active: Inherited synthesized context from previous chat" : "Activate Continuum Lineage to synthesize and inject previous chat context"}
+            >
+              {isActivatingContinuum ? (
+                <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
+              ) : (
+                <GitBranch className={`w-3 h-3 ${continuumActive ? "text-cyan-400" : "text-zinc-500"}`} />
+              )}
+              <span>Continuum</span>
+              <span className={`text-[8.5px] px-1 py-0.1 rounded font-mono ${
+                continuumActive ? "bg-cyan-500/20 text-cyan-200" : "bg-zinc-800 text-zinc-500"
+              }`}>
+                {continuumActive ? "ON" : "OFF"}
+              </span>
+            </button>
+
             {/* Model Selector Dropdown Button */}
             <div className="relative">
               <button
@@ -1161,6 +1280,26 @@ export default function AgentPanel({
 
       {/* 3B. Conversation Stream Area */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-[#060609]">
+        {/* Continuum Lineage Active Banner */}
+        {continuumActive && (
+          <div className="p-2.5 rounded-xl bg-[#08121e] border border-cyan-500/40 text-cyan-200 text-[10.5px] space-y-1 shadow-sm">
+            <div className="flex items-center justify-between font-bold text-[10px] text-cyan-400">
+              <div className="flex items-center gap-1.5">
+                <GitBranch className="w-3.5 h-3.5 text-cyan-400" />
+                <span>CONTINUUM LINEAGE ACTIVE</span>
+              </div>
+              <button
+                onClick={() => { setContinuumActive(false); setActiveContinuumContextText(""); }}
+                className="text-zinc-500 hover:text-zinc-300 text-[9px] cursor-pointer"
+              >
+                Disable
+              </button>
+            </div>
+            <p className="text-zinc-300 text-[10px] leading-relaxed">
+              Synthesized handoff from previous chat injected into model context. Prompts will inherit project facts, architecture decisions, and current state.
+            </p>
+          </div>
+        )}
         {messages.length === 0 && (
           /* 3C & 11. Empty State & Shortcut Action Chips */
           <div className="py-6 space-y-4">
@@ -1272,7 +1411,7 @@ export default function AgentPanel({
                   <div className="flex items-center justify-between border-b border-[#141420] pb-1.5 text-[10px]">
                     <div className="flex items-center gap-1.5 text-cyan-400 font-bold">
                       <Bot className="w-3.5 h-3.5" />
-                      <span>Execution Plan</span>
+                      <span>{msg.steps && msg.steps.length > 0 ? "Execution Plan" : "NEXUS Assistant"}</span>
                     </div>
 
                     {msg.execution && (

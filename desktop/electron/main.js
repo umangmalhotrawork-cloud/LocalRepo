@@ -2644,6 +2644,31 @@ ipcMain.handle('continuum:build-context', async (_, snapshot) => {
   return continuumContextBuilder.buildContext(snapshot);
 });
 
+ipcMain.handle('continuum:get-latest', async (_, workspacePath) => {
+  const activeWorkspace = workspacePath || process.cwd();
+  return harnessRuntime.getLatestWorkspaceSnapshot(activeWorkspace);
+});
+
+ipcMain.handle('continuum:generate-handoff', async (_, { snapshot, snapshotId, workspacePath } = {}) => {
+  const activeWorkspace = workspacePath || process.cwd();
+  let targetSnapshot = snapshot;
+  if (!targetSnapshot && snapshotId) {
+    const loadRes = continuumManager.loadSnapshot(snapshotId, activeWorkspace);
+    targetSnapshot = loadRes.snapshot;
+  }
+  if (!targetSnapshot) {
+    targetSnapshot = harnessRuntime.getLatestWorkspaceSnapshot(activeWorkspace);
+  }
+  if (!targetSnapshot) {
+    return { success: false, error: 'No previous session snapshot found in workspace' };
+  }
+  const handoffRes = continuumContextBuilder.buildSynthesizedHandoffPrompt(targetSnapshot);
+  return {
+    ...handoffRes,
+    snapshot: handoffRes.snapshot || targetSnapshot,
+  };
+});
+
 ipcMain.handle('continuum:create-current', async (_, { payload = {}, workspacePath }) => {
   try {
     const activeWorkspace = workspacePath || payload.workspacePath || process.cwd();

@@ -216,6 +216,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     buildContext: (snapshot) => ipcRenderer.invoke('continuum:build-context', snapshot),
     createCurrent: (payload, workspacePath) => ipcRenderer.invoke('continuum:create-current', { payload, workspacePath }),
     resumeSession: (snapshotId, workspacePath) => ipcRenderer.invoke('continuum:resume-session', { snapshotId, workspacePath }),
+    getLatest: (workspacePath) => ipcRenderer.invoke('continuum:get-latest', workspacePath),
+    generateHandoff: (payload) => ipcRenderer.invoke('continuum:generate-handoff', payload),
     exportCapsule: (payload) => ipcRenderer.invoke('continuum:export-capsule', payload),
     importCapsule: (payload) => ipcRenderer.invoke('continuum:import-capsule', payload),
     openCapsuleDialog: () => ipcRenderer.invoke('dialog:open-capsule-file'),

@@ -804,6 +804,10 @@ export default function IDEApp() {
   // AI-Native Workspace & Contextual Tools State
   const [workspaceMode, setWorkspaceMode] = useState<"home" | "workbench" | "agent">("home");
   const [activeTaskPrompt, setActiveTaskPrompt] = useState<string>("");
+  const [homePrompt, setHomePrompt] = useState<string>("");
+  const [agentChatWidth, setAgentChatWidth] = useState<number>(520);
+  const [taskToExecute, setTaskToExecute] = useState<{ prompt: string; id: string | number; providerId?: string; modelId?: string } | null>(null);
+  const [isHomeAgentExecuting, setIsHomeAgentExecuting] = useState<boolean>(false);
   const [showCodexAiControl, setShowCodexAiControl] = useState<boolean>(false);
   const [toolsDrawerOpen, setToolsDrawerOpen] = useState<boolean>(false);
   const [toolsDrawerTab, setToolsDrawerTab] = useState<ToolTab>("explorer");
@@ -1131,17 +1135,44 @@ export default function IDEApp() {
   const handleNewTaskThread = () => {
     setActiveSessionId(null);
     setActiveTaskPrompt("");
+    setHomePrompt("");
+    setTaskToExecute(null);
+    setActiveContinuumSnapshot(null);
+    setIsHomeAgentExecuting(false);
     setWorkspaceMode("home");
     setMainView("editor");
     setNewChatResetSignal((prev) => prev + 1);
     fetchSidebarThreads();
   };
 
+  const handleHomePromptChange = (promptText: string) => {
+    setHomePrompt(promptText);
+    if (promptText.trim()) {
+      setActiveTaskPrompt(promptText);
+    }
+  };
+
+  const handleStartTaskFromHome = (promptText: string, providerId?: string, modelId?: string) => {
+    const targetProv = providerId || aiActiveProvider || "nexus1";
+    const targetModel = modelId || aiActiveModel || "gemini-2.5-flash";
+    if (providerId) setAiActiveProvider(providerId);
+    if (modelId) setAiActiveModel(modelId);
+    if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.setConfig) {
+      (window as any).electronAPI.ai.setConfig(targetProv, targetModel).catch(() => {});
+    }
+    ensureApiKeyConfigured(() => {
+      setHomePrompt("");
+      setActiveTaskPrompt(promptText);
+      setTaskToExecute({ prompt: promptText, id: Date.now(), providerId: targetProv, modelId: targetModel });
+      setWorkspaceMode("agent");
+      addLog(`[TASK] Started AI task: ${promptText}`);
+    }, promptText, targetProv);
+  };
+
   const handleSelectThread = async (threadId: string, title?: string) => {
     setActiveSessionId(threadId);
     setActiveTaskPrompt(title || "AI Agent Task Session");
-    setWorkspaceMode("workbench");
-    setShowDockedAgentPanel(true);
+    setWorkspaceMode("agent");
 
     if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.getThread) {
       try {
@@ -5611,6 +5642,25 @@ export default function IDEApp() {
     window.addEventListener("mouseup", onMouseUp);
   };
 
+  const startAgentChatResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = agentChatWidth;
+
+    const onMouseMove = (moveEvt: MouseEvent) => {
+      const newW = Math.max(340, Math.min(800, startW + (moveEvt.clientX - startX)));
+      setAgentChatWidth(newW);
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
   const startAnalysisResize = (e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
@@ -6550,26 +6600,19 @@ return (
           <TaskHome
             workspacePath={folderPath || "demo-workspaces/ai_cart_project"}
             activeThreadId={activeSessionId}
+            promptValue={homePrompt}
+            onPromptChange={handleHomePromptChange}
             resetSignal={newChatResetSignal}
-            onStartTask={(promptText, providerId, modelId) => {
-              const targetProv = providerId || aiActiveProvider || "groq";
-              if (providerId) setAiActiveProvider(providerId);
-              if (modelId) setAiActiveModel(modelId);
-              ensureApiKeyConfigured(() => {
-                setActiveTaskPrompt(promptText);
-                setWorkspaceMode("workbench");
-                setShowDockedAgentPanel(true);
-                addLog(`[TASK] Started AI task: ${promptText}`);
-              }, promptText, targetProv);
-            }}
+            onStartTask={handleStartTaskFromHome}
             onContinueSession={async (sessionId, userGoal, providerId) => {
               const restoredPrompt = userGoal || "Resumed Continuum Session Task";
-              const targetProv = providerId || aiActiveProvider || "groq";
+              const targetProv = providerId || aiActiveProvider || "nexus1";
               if (providerId) setAiActiveProvider(providerId);
               ensureApiKeyConfigured(async () => {
+                setHomePrompt("");
                 setActiveTaskPrompt(restoredPrompt);
-                setWorkspaceMode("workbench");
-                setShowDockedAgentPanel(true);
+                setTaskToExecute({ prompt: restoredPrompt, id: Date.now() });
+                setWorkspaceMode("agent");
                 if (typeof window !== "undefined" && (window as any).electronAPI?.continuum?.resumeSession) {
                   try {
                     await (window as any).electronAPI.continuum.resumeSession(sessionId, folderPath || "");
@@ -6584,6 +6627,51 @@ return (
             gitBranch={git.currentBranch || "main"}
             fileCount={openTabs.length}
           />
+        ) : workspaceMode === "agent" ? (
+          <div className="flex-1 flex min-w-0 min-h-0 overflow-hidden bg-[#050508]">
+            {/* Center: Full NEXUS Agent Chat */}
+            <div
+              style={{ width: `${agentChatWidth}px`, flexShrink: 0 }}
+              className="h-full border-r border-[#1a1a22] bg-[#08080c] flex flex-col relative z-10 overflow-hidden"
+            >
+              <AgentPanel
+                isOpen={true}
+                isDocked={true}
+                className="w-full h-full border-none shadow-none flex flex-col font-mono text-xs select-none min-w-0 overflow-hidden"
+                onClose={() => {}}
+                workspacePath={folderPath || "demo-workspaces/ai_cart_project"}
+                activeFilePath={activeTabPath}
+                activeSessionId={activeSessionId}
+                activeSessionTitle={activeTaskPrompt || "Agent Task Session"}
+                activeContinuumSnapshot={activeContinuumSnapshot}
+                activeProvider={aiActiveProvider}
+                activeModel={aiActiveModel}
+                selectionInfo={selectionInfo}
+                cursorPos={cursorPos}
+                gitBranch={git.currentBranch || "main"}
+                diagnostic={activeDiagnostic}
+                taskToExecute={taskToExecute}
+                onTaskExecuted={() => setTaskToExecute(null)}
+                onPreviewDiff={handleAgentPreviewDiff}
+                onApplyStep={handleApplyAgentStep}
+                onApplyAllApproved={handleApplyAllAgentApproved}
+                runningCommandOutput={agentRunningCommandOutput}
+                onSelectVerificationTab={() => {
+                  setWorkspaceMode("workbench");
+                  setActiveActivityItem("verification");
+                }}
+                onRequireApiKey={(pendingAction) => ensureApiKeyConfigured(pendingAction)}
+              />
+            </div>
+
+            {/* Resizer between Agent Chat and Code Editor */}
+            <div onMouseDown={startAgentChatResize} className="resizer-col" />
+
+            {/* Right: Code Editor Canvas */}
+            <div className="flex-1 h-full min-w-0 flex flex-col overflow-hidden bg-[#050505]">
+              {renderEditorGroupPane(editorGroups[0])}
+            </div>
+          </div>
         ) : (
           <>
 
