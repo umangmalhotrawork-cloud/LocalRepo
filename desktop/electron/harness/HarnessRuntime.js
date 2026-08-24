@@ -20,7 +20,7 @@ const { WorkspaceIsolationManager, workspaceIsolationManager } = require('./Work
 const { WorkerRuntime, workerRuntime } = require('./WorkerRuntime');
 const { SwarmOrchestrator, swarmOrchestrator } = require('./SwarmOrchestrator');
 const { registerCoreTools } = require('./tools');
-const { requestRouter, RequestRouter, ROUTER_MODES, CODING_INTENTS } = require('./RequestRouter');
+const { requestRouter, RequestRouter, ROUTER_MODES, CODING_INTENTS, isGreeting, getConversationalGreetingResponse } = require('./RequestRouter');
 const { aiProviderRouter } = require('../ai/AIProviderRouter');
 const { capabilityRegistry, CapabilityRegistry } = require('./CapabilityRegistry');
 const { mcpServerManager, MCPServerManager } = require('./mcp');
@@ -565,7 +565,7 @@ class HarnessRuntime {
       }
     }
 
-    // 1. CONVERSATION PATH: Direct AI provider call
+    // 1. CONVERSATION PATH: Zero workspace inspection or tool execution
     if (classification.mode === ROUTER_MODES.CONVERSATION) {
       let assistantText = '';
       let executionMeta = {
@@ -575,6 +575,20 @@ class HarnessRuntime {
         requestedModelId: modelId || 'gemini-2.5-flash',
         isFallback: false,
       };
+
+      // Direct Conversational Greeting Gate (0 AI quota, 0 workspace inspection)
+      if (isGreeting(userInput)) {
+        const greetingReply = getConversationalGreetingResponse(userInput);
+        return {
+          success: true,
+          mode: ROUTER_MODES.CONVERSATION,
+          codingIntent: null,
+          route: classification,
+          response: greetingReply,
+          summary: greetingReply,
+          execution: executionMeta,
+        };
+      }
 
       try {
         const resolved = aiProviderRouter.resolveProviderAndModel(providerId, modelId);

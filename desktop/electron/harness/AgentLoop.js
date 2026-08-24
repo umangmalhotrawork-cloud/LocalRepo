@@ -16,6 +16,7 @@ const { contextEngine: defaultContextEngine } = require('./ContextEngine');
 const { ChangeSet } = require('./ChangeSet');
 const { HandoffState } = require('./HandoffState');
 const { swarmOrchestrator: defaultSwarmOrchestrator } = require('./SwarmOrchestrator');
+const { isGreeting, getConversationalGreetingResponse, requestRouter, ROUTER_MODES } = require('./RequestRouter');
 const { continuumContextBuilder } = require('../../engine/continuum_context_builder');
 const secretFilter = require('../../security/secretFilter');
 
@@ -167,6 +168,60 @@ class AgentLoop {
 
     if (!this.runtime) {
       throw new Error('[HARNESS-AGENTLOOP] AgentLoop requires an attached HarnessRuntime');
+    }
+
+    // 0. Conversational Intent Gate: Simple greetings must not inspect workspace or call tools
+    if (userInput && typeof userInput === 'string' && isGreeting(userInput)) {
+      let turn;
+      const targetTurnId = payload.turnId || payload.retryTurnId;
+      if (targetTurnId) {
+        turn = this.runtime.getTurn(targetTurnId);
+      }
+      if (!turn) {
+        turn = this.runtime.startTurn(threadId, userInput, {
+          intent: 'GENERAL_CHAT',
+          activeFilePath: null,
+          workspacePath,
+          providerId,
+          modelId,
+        });
+      }
+
+      const turnId = turn.turnId;
+
+      // Add USER_MESSAGE Item
+      const existingItems = this.runtime.itemStore.getItemsByTurn(turnId);
+      const hasUserMsg = existingItems.some((i) => i.type === ITEM_TYPES.USER_MESSAGE);
+      if (!hasUserMsg) {
+        const userItem = this.runtime.startItem(turnId, ITEM_TYPES.USER_MESSAGE, {
+          text: userInput,
+        });
+        this.runtime.completeItem(userItem.itemId);
+      }
+
+      // Return deterministic greeting response without inspecting workspace or calling tools
+      const reply = getConversationalGreetingResponse(userInput);
+      const agentItem = this.runtime.startItem(turnId, ITEM_TYPES.AGENT_MESSAGE, {
+        text: reply,
+      });
+      this.runtime.completeItem(agentItem.itemId);
+
+      this.runtime.turnManager.completeTurn(turnId, { summary: reply });
+
+      return {
+        success: true,
+        status: TURN_STATUS.COMPLETED,
+        turnId,
+        iterations: 0,
+        finalResponse: reply,
+        summary: reply,
+        steps: [],
+        execution: {
+          providerId: providerId || 'nexus1',
+          modelId: modelId || 'gemini-2.5-flash',
+        },
+        isGreeting: true,
+      };
     }
 
     // 1. Start or retrieve active Turn

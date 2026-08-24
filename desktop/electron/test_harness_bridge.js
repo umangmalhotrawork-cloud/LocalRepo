@@ -233,6 +233,7 @@ async function runBridgeTests() {
       threadId: thread.threadId,
       userInput: 'Patch cart calculator',
       workspacePath: testWorkspaceDir,
+      approvalMode: 'auto',
       modelHandler: async () => {
         fcModelCalls++;
         if (fcModelCalls === 1) {

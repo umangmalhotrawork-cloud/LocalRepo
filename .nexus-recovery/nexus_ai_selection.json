@@ -1,6 +1,6 @@
 {
-  "activeProvider": "nexus1",
-  "activeModel": "gemini-2.5-flash",
+  "activeProvider": "groq",
+  "activeModel": "openai/gpt-oss-120b",
   "slotModels": {
     "nexus1": "gemini-2.5-flash",
     "nexus2": "gemini-3.5-flash",

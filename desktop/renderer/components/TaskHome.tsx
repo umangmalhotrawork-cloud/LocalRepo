@@ -64,17 +64,19 @@ function isCodeTask(text: string): boolean {
   const t = text.trim().toLowerCase();
 
   const casualPhrases = [
-    "hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening",
+    "hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening", "good night",
     "how are you", "how are you doing", "how's it going", "how is it going", "how do you do",
     "what is up", "what's up", "yo", "sup", "howdy", "test", "ping",
     "who are you", "what are you", "tell me about yourself", "what is your name",
-    "thank you", "thanks", "thank you so much", "cool", "nice", "awesome", "great",
+    "thank you", "thanks", "thank you so much", "thx", "ty",
+    "cool", "nice", "awesome", "great", "okay", "ok", "yes", "no", "yep", "nope",
     "what can you do", "what do you do", "how can you help", "how do you work",
     "tell me about nexus", "what is nexus"
   ];
 
+  const cleanT = t.replace(/^[^\w\s]+|[^\w\s]+$/g, "").trim();
   const isDirectCasual = casualPhrases.some((phrase) => {
-    return t === phrase || t.startsWith(phrase + " ") || t.startsWith(phrase + "?") || t.startsWith(phrase + "!") || t.startsWith(phrase + ",");
+    return t === phrase || cleanT === phrase || t.startsWith(phrase + " ") || t.startsWith(phrase + "?") || t.startsWith(phrase + "!") || t.startsWith(phrase + ",");
   });
 
   const fileExts = [".py", ".ts", ".tsx", ".js", ".jsx", ".json", ".html", ".css", ".yaml", ".yml", ".sql", ".go", ".rs", ".java", ".cpp", ".c", ".h", ".md"];

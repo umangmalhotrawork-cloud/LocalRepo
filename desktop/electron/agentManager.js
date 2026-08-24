@@ -21,7 +21,7 @@ const IGNORE_DIRS = new Set([
   '__pycache__',
 ]);
 
-const { requestRouter, ROUTER_MODES, CODING_INTENTS } = require('./harness/RequestRouter');
+const { requestRouter, ROUTER_MODES, CODING_INTENTS, isGreeting, getConversationalGreetingResponse } = require('./harness/RequestRouter');
 
 /**
  * Classifies task intent into GENERAL_CHAT vs READ_ONLY vs MUTATION.
@@ -442,12 +442,14 @@ Format strictly as JSON:
     if (intent === 'GENERAL_CHAT') {
       const taskLower = (task || '').toLowerCase();
       let conversationalReply = '';
-      if (continuumContextText && (taskLower.includes('decision') || taskLower.includes('building') || taskLower.includes('architecture') || taskLower.includes('fact') || taskLower.includes('lineage') || taskLower.includes('remember') || taskLower.includes('nexus') || taskLower.includes('groq') || taskLower.includes('gemini') || taskLower.includes('changeset') || taskLower.includes('previous') || taskLower.includes('last'))) {
+      if (isGreeting(task)) {
+        conversationalReply = getConversationalGreetingResponse(task);
+      } else if (continuumContextText && (taskLower.includes('decision') || taskLower.includes('building') || taskLower.includes('architecture') || taskLower.includes('fact') || taskLower.includes('lineage') || taskLower.includes('remember') || taskLower.includes('nexus') || taskLower.includes('groq') || taskLower.includes('gemini') || taskLower.includes('changeset') || taskLower.includes('previous') || taskLower.includes('last'))) {
         conversationalReply = `Based on Continuum Lineage context:\n${continuumContextText}`;
       } else if (['hi', 'hello', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening', 'yo', 'sup'].some(g => taskLower.startsWith(g) || taskLower === g)) {
-        conversationalReply = 'Hello! I am NEXUS AI Assistant. I can help you analyze this workspace, plan implementations, safely refactor code with Patch Firewall protection, debug test failures, and manage Git operations. What would you like to build or inspect today?';
+        conversationalReply = getConversationalGreetingResponse(task);
       } else if (taskLower.includes('how are you') || taskLower.includes('how are you doing') || taskLower.includes("how's it going") || taskLower.includes('how is it going')) {
-        conversationalReply = "I'm doing well, thank you! I am ready to help you with code refactoring, architecture analysis, debugging, and testing in NEXUS. What are you working on today?";
+        conversationalReply = "I'm doing well, thank you! How can I help you today?";
       } else if (taskLower.includes('what can you do') || taskLower.includes('who are you') || taskLower.includes('help') || taskLower.includes('tell me about nexus') || taskLower.includes('what is nexus')) {
         conversationalReply = 'I am NEXUS, an autonomous AI pair programmer. I provide workspace dependency analysis, multi-model AI routing (Groq, Gemini, OpenAI, Claude, DeepSeek, Grok), surgical code planning, Patch Firewall safety verification, automated testing, and Continuum session lineage.';
       } else if (taskLower.includes('explain what this project does') || taskLower.includes('what does this project do') || taskLower.includes('explain this project') || taskLower.includes('what is this project') || taskLower.includes('tell me about this project')) {

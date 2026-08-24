@@ -26,11 +26,12 @@ const FILE_EXTENSIONS = [
 ];
 
 const CASUAL_GREETINGS = [
-  'hi', 'hello', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening',
+  'hi', 'hello', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening', 'good night',
   'how are you', 'how are you doing', "how's it going", 'how is it going', 'how do you do',
   'what is up', "what's up", 'yo', 'sup', 'howdy', 'test', 'ping',
   'who are you', 'what are you', 'tell me about yourself', 'what is your name',
-  'thank you', 'thanks', 'thank you so much', 'cool', 'nice', 'awesome', 'great',
+  'thank you', 'thanks', 'thank you so much', 'thx', 'ty',
+  'cool', 'nice', 'awesome', 'great', 'okay', 'ok', 'yes', 'no', 'yep', 'nope',
   'what can you do', 'what do you do', 'how can you help', 'how do you work',
   'tell me about nexus', 'what is nexus'
 ];
@@ -288,6 +289,66 @@ class RequestRouter {
   }
 }
 
+const PURE_GREETINGS = new Set([
+  'hi', 'hello', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening', 'good night',
+  'how are you', 'how are you doing', "how's it going", 'how is it going', 'how do you do',
+  'what is up', "what's up", 'yo', 'sup', 'howdy',
+  'who are you', 'what are you', 'tell me about yourself', 'what is your name',
+  'thank you', 'thanks', 'thank you so much', 'thx', 'ty',
+  'cool', 'nice', 'awesome', 'great', 'okay', 'ok', 'yes', 'no', 'yep', 'nope',
+  'hi there', 'hello there', 'hey there',
+]);
+
+/**
+ * Fast deterministic check if input is a simple greeting / conversational message.
+ * @param {string} userInput
+ * @returns {boolean}
+ */
+function isGreeting(userInput = '') {
+  if (!userInput || typeof userInput !== 'string') return false;
+  const raw = userInput.trim();
+  const text = raw.toLowerCase().replace(/^[^\w\s]+|[^\w\s]+$/g, '').trim();
+  if (!text) return false;
+
+  return PURE_GREETINGS.has(text);
+}
+
+/**
+ * Returns a polished conversational response for greetings without workspace inspection or AI calls.
+ * @param {string} userInput
+ * @returns {string}
+ */
+function getConversationalGreetingResponse(userInput = '') {
+  const raw = (userInput || '').trim();
+  const text = raw.toLowerCase().replace(/^[^\w\s]+|[^\w\s]+$/g, '').trim();
+
+  if (['thanks', 'thank you', 'thank you so much', 'thx', 'ty'].includes(text) || text.startsWith('thanks') || text.startsWith('thank you')) {
+    return "You're welcome! Let me know if you need anything else.";
+  }
+  if (['good morning', 'morning'].includes(text) || text.startsWith('good morning')) {
+    return 'Good morning! How can I help with your project today?';
+  }
+  if (['good afternoon'].includes(text) || text.startsWith('good afternoon')) {
+    return 'Good afternoon! How can I help with your project today?';
+  }
+  if (['good evening', 'evening'].includes(text) || text.startsWith('good evening')) {
+    return 'Good evening! How can I help with your project today?';
+  }
+  if (['good night', 'night'].includes(text) || text.startsWith('good night')) {
+    return 'Good night! Have a great rest.';
+  }
+  if (['how are you', 'how are you doing', "how's it going", 'how is it going', 'what is up', "what's up", 'sup'].includes(text)) {
+    return "I'm doing well, thank you! How can I help you today?";
+  }
+  if (['okay', 'ok', 'cool', 'nice', 'awesome', 'great', 'sure', 'alright'].includes(text)) {
+    return "Sounds good! Let me know what you'd like to work on.";
+  }
+  if (['yes', 'no', 'yep', 'nope'].includes(text)) {
+    return 'Understood! How can I help you?';
+  }
+  return 'Hello! 👋 How can I help?';
+}
+
 const requestRouter = new RequestRouter();
 
 module.exports = {
@@ -295,4 +356,7 @@ module.exports = {
   requestRouter,
   ROUTER_MODES,
   CODING_INTENTS,
+  CASUAL_GREETINGS,
+  isGreeting,
+  getConversationalGreetingResponse,
 };
