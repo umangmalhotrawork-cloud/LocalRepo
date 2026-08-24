@@ -28,10 +28,16 @@ import {
   FileText,
   Clock,
   GitBranch,
+  Box,
+  Upload,
 } from "lucide-react";
 import { useOutsideClick } from "../hooks/useOutsideClick";
 import SwarmActivityPanel from "./SwarmActivityPanel";
 import ChangeConflictResolver, { ConflictItem } from "./ChangeConflictResolver";
+import CapsuleDropZone from "./CapsuleDropZone";
+import CapsuleImportBanner from "./CapsuleImportBanner";
+import CapsuleImportModal from "./CapsuleImportModal";
+import { generateContinuationPrompt } from "../utils/capsulePrompt";
 import { useSwarmActivity } from "../hooks/useSwarmActivity";
 import { TerminalDiagnostic } from "../utils/diagnosticParser";
 
@@ -118,6 +124,7 @@ interface AgentPanelProps {
   gitBranch?: string;
   diagnostic?: TerminalDiagnostic | null;
   initialTask?: string;
+  initialImportedCapsule?: any;
   externalTaskInput?: string;
   taskToExecute?: { prompt: string; id: string | number; providerId?: string; modelId?: string } | null;
   onTaskExecuted?: () => void;
@@ -154,6 +161,7 @@ export default function AgentPanel({
   gitBranch,
   diagnostic,
   initialTask,
+  initialImportedCapsule,
   externalTaskInput,
   taskToExecute,
   onTaskExecuted,
@@ -237,6 +245,10 @@ export default function AgentPanel({
       setLocalSnapshot(null);
       setContinuumActive(false);
       setActiveContinuumContextText("");
+      setImportedCapsule(null);
+      setCapsuleWarning(null);
+      setContextMetrics(null);
+      setSuppressedLevel(null);
     }
   }, [activeSessionId]);
 
@@ -660,6 +672,208 @@ export default function AgentPanel({
     }
   };
 
+  // Context Capsule State & Handler (Phase 3 - Strictly Independent)
+  type CapsuleCreationStatus = "IDLE" | "PROCESSING" | "SUCCESS" | "FAILED";
+  const [capsuleCreationStatus, setCapsuleCreationStatus] = useState<CapsuleCreationStatus>("IDLE");
+  const [isCreatingCapsule, setIsCreatingCapsule] = useState<boolean>(false);
+  const [capsuleFeedback, setCapsuleFeedback] = useState<{
+    type: "success" | "error";
+    title?: string;
+    capsuleId?: string;
+    capsuleRef?: string;
+    retainedExchangesCount?: number;
+    message?: string;
+    createdAt?: number;
+    capsule?: any;
+  } | null>(null);
+  const [showCapsuleDetail, setShowCapsuleDetail] = useState<boolean>(false);
+  const [isCopiedRef, setIsCopiedRef] = useState<boolean>(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
+  const capsuleFeedbackRef = useRef<HTMLDivElement>(null);
+
+  const handleCopyReference = (refText?: string) => {
+    if (!refText) return;
+    navigator.clipboard.writeText(refText);
+    setIsCopiedRef(true);
+    setTimeout(() => setIsCopiedRef(false), 2000);
+  };
+
+  // Authoritative active chat derivation: Enabled when active thread/session exists or conversation messages are visible
+  const hasActiveChat = Boolean(
+    harnessThreadId ||
+    activeSessionId ||
+    (messages && messages.length > 0) ||
+    result ||
+    (taskToExecute && taskToExecute.prompt)
+  );
+  const isCapsuleCreateDisabled = isCreatingCapsule || capsuleCreationStatus === "PROCESSING" || !hasActiveChat;
+
+  useEffect(() => {
+    if (capsuleFeedback && (capsuleCreationStatus === "SUCCESS" || capsuleCreationStatus === "FAILED")) {
+      capsuleFeedbackRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [capsuleFeedback, capsuleCreationStatus]);
+
+  const handleCreateCapsule = async () => {
+    if (isCreatingCapsule || capsuleCreationStatus === "PROCESSING") {
+      return;
+    }
+
+    setCapsuleCreationStatus("PROCESSING");
+    setIsCreatingCapsule(true);
+    setCapsuleFeedback(null);
+    setShowCapsuleDetail(false);
+    setIsCopiedRef(false);
+
+    let threadIdToUse = harnessThreadId || activeSessionId;
+
+    // Fallback: Check if messages contain a turnId to resolve active threadId if not yet in state
+    if (!threadIdToUse && typeof window !== "undefined") {
+      const msgWithTurn = messages.find((m) => m.turnId);
+      if (msgWithTurn?.turnId && (window as any).electronAPI?.harness?.getTurn) {
+        try {
+          const turnData = await (window as any).electronAPI.harness.getTurn(msgWithTurn.turnId);
+          if (turnData?.threadId) {
+            threadIdToUse = turnData.threadId;
+            setHarnessThreadId(turnData.threadId || null);
+          }
+        } catch (e) {}
+      }
+
+      // If still not resolved but visible conversation exists, create/sync thread in harness
+      if (!threadIdToUse && (window as any).electronAPI?.harness?.createThread && messages.length > 0) {
+        try {
+          const firstUserMsg = messages.find((m) => m.role === "user");
+          const promptText = firstUserMsg?.content || activeSessionTitle || initialTask || "Active Task Session";
+          const newThread = await (window as any).electronAPI.harness.createThread({
+            userInput: promptText,
+            workspacePath,
+            metadata: {
+              workspacePath,
+              activeFilePath,
+              title: promptText,
+              providerId: activeProvider || aiConfig?.activeProvider || "nexus1",
+              modelId: activeModel || aiConfig?.activeModel || "gemini-2.5-flash",
+            },
+          });
+          if (newThread?.threadId) {
+            threadIdToUse = newThread.threadId;
+            setHarnessThreadId(newThread.threadId || null);
+          }
+        } catch (e) {}
+      }
+    }
+
+    if (!threadIdToUse) {
+      setCapsuleCreationStatus("FAILED");
+      setCapsuleFeedback({
+        type: "error",
+        message: "A chat thread must exist first before creating a Context Capsule.",
+      });
+      setIsCreatingCapsule(false);
+      return;
+    }
+
+    try {
+      if (typeof window !== "undefined" && (window as any).electronAPI?.capsule?.createCapsule) {
+        const res = await (window as any).electronAPI.capsule.createCapsule(threadIdToUse, { workspacePath });
+        if (res && res.success === true && res.capsuleId) {
+          setSuppressedLevel(null);
+          setCapsuleCreationStatus("SUCCESS");
+          const refString = res.capsuleRef || res.capsule?.capsule_ref || `#CC${res.capsuleId?.slice(-6).toUpperCase()}` || "#CC7F3A2B";
+          setCapsuleFeedback({
+            type: "success",
+            title: res.title || "Context Capsule",
+            capsuleId: res.capsuleId,
+            capsuleRef: refString,
+            retainedExchangesCount: res.retainedExchangesCount ?? 0,
+            createdAt: res.createdAt,
+            capsule: res.capsule,
+          });
+        } else {
+          setCapsuleCreationStatus("FAILED");
+          setCapsuleFeedback({
+            type: "error",
+            message: res?.error || "Failed to create Context Capsule",
+          });
+        }
+      } else {
+        setCapsuleCreationStatus("FAILED");
+        setCapsuleFeedback({
+          type: "error",
+          message: "Capsule IPC bridge is unavailable in this environment.",
+        });
+      }
+    } catch (err: any) {
+      setCapsuleCreationStatus("FAILED");
+      setCapsuleFeedback({
+        type: "error",
+        message: err?.message || "Failed to create Context Capsule",
+      });
+    } finally {
+      setIsCreatingCapsule(false);
+    }
+  };
+
+  // Context Capsule Import State & Handlers (Phase 4 - Continuation Context)
+  const [importedCapsule, setImportedCapsule] = useState<any | null>(initialImportedCapsule || null);
+  const [capsuleWarning, setCapsuleWarning] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initialImportedCapsule) {
+      setImportedCapsule(initialImportedCapsule);
+      const prompt = generateContinuationPrompt(initialImportedCapsule);
+      if (prompt && !taskInput.trim()) {
+        setTaskInput(prompt);
+      }
+    }
+  }, [initialImportedCapsule]);
+
+  const handleCapsuleDropped = (capsule: any, fileName?: string) => {
+    if (messages.length > 0) {
+      setCapsuleWarning("Attaching Context Capsule to an ongoing conversation. The model will receive this capsule as continuation context alongside current chat history.");
+    } else {
+      setCapsuleWarning(null);
+    }
+    setImportedCapsule(capsule);
+    const prompt = generateContinuationPrompt(capsule);
+    if (prompt) {
+      setTaskInput(prompt);
+    }
+    setCapsuleFeedback({
+      type: "success",
+      title: capsule.source_chat?.title || fileName || "Imported Context Capsule",
+      capsuleId: capsule.capsule_id,
+      capsuleRef: capsule.capsule_ref || (capsule.capsule_id ? `#CC${capsule.capsule_id.slice(-6).toUpperCase()}` : "#CC"),
+      retainedExchangesCount: capsule.conversation_context?.last_exchanges?.length || 0,
+      capsule,
+    });
+  };
+
+  const handleOpenCapsuleDialog = () => {
+    setIsImportModalOpen(true);
+  };
+
+  // Context Budget Awareness State (Phase 5 - Independent Context Monitoring)
+  const [contextMetrics, setContextMetrics] = useState<{
+    totalEstimatedTokens: number;
+    budgetLimitTokens: number;
+    percentage: number;
+    level: "NORMAL" | "APPROACHING" | "CRITICAL";
+  } | null>(null);
+  const [suppressedLevel, setSuppressedLevel] = useState<"APPROACHING" | "CRITICAL" | null>(null);
+
+  // Compute effective display metrics
+  const estimatedTokenCount = contextMetrics?.totalEstimatedTokens ?? (
+    messages.reduce((acc, m) => acc + (m.content ? Math.ceil(m.content.length / 4) : 0), 0) +
+    (importedCapsule ? 400 : 0) + 600
+  );
+  const effectiveLimit = contextMetrics?.budgetLimitTokens || 6000;
+  const displayPercentage = contextMetrics?.percentage ?? Math.min(100, Math.round((estimatedTokenCount / effectiveLimit) * 100));
+  const displayLevel = contextMetrics?.level ?? (displayPercentage >= 90 ? "CRITICAL" : displayPercentage >= 75 ? "APPROACHING" : "NORMAL");
+
+
+
   // Hydrate visible conversation ONLY when explicitly resuming an existing session thread with activeSessionId
   useEffect(() => {
     if (activeSessionId && currentSnapshot?.conversation?.recentTurns) {
@@ -850,22 +1064,9 @@ export default function AgentPanel({
     try {
       let res: AgentTaskResult;
       let harnessRes: any = null;
-      if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.runTurn) {
+      if (typeof window !== "undefined" && (window as any).electronAPI?.harness?.handleRequest) {
         let threadIdToUse = harnessThreadId || activeSessionId;
-        if (!threadIdToUse && (window as any).electronAPI?.harness?.createThread) {
-          try {
-            const newThread = await (window as any).electronAPI.harness.createThread({
-              userInput: activeTask,
-              workspacePath,
-              metadata: { workspacePath, activeFilePath, activeSessionId, providerId: effectiveProvider, modelId: effectiveModel },
-            });
-            threadIdToUse = newThread?.threadId;
-            setHarnessThreadId(threadIdToUse || null);
-          } catch (e) {}
-        }
-
-        harnessRes = await (window as any).electronAPI.harness.runTurn({
-          threadId: threadIdToUse || `thread_${Date.now()}`,
+        harnessRes = await (window as any).electronAPI.harness.handleRequest({
           userInput: activeTask,
           workspacePath,
           activeFilePath,
@@ -878,19 +1079,34 @@ export default function AgentPanel({
           cursorColumn: cursorPos?.col,
           gitBranch: gitBranch,
           diagnostic: diagnostic || null,
-          intent: "MUTATION",
           providerId: effectiveProvider,
           modelId: effectiveModel,
+          threadId: threadIdToUse || undefined,
           continuumSnapshot: continuumActive ? currentSnapshot : null,
           continuumContextText: continuumActive ? activeContinuumContextText : undefined,
           continuumActive: continuumActive,
+          importedCapsule: importedCapsule || null,
         });
+
+        if (harnessRes?.threadId && !harnessThreadId) {
+          setHarnessThreadId(harnessRes.threadId);
+        }
+
+        if (harnessRes?.contextMetrics) {
+          const m = harnessRes.contextMetrics;
+          setContextMetrics({
+            totalEstimatedTokens: m.totalEstimatedTokens || 0,
+            budgetLimitTokens: m.budgetLimitTokens || 6000,
+            percentage: m.percentage ?? Math.round(((m.totalEstimatedTokens || 0) / (m.budgetLimitTokens || 6000)) * 100),
+            level: m.level || (m.percentage >= 90 ? "CRITICAL" : m.percentage >= 75 ? "APPROACHING" : "NORMAL"),
+          });
+        }
 
         if (harnessRes && harnessRes.success) {
           res = {
             success: true,
             task: activeTask,
-            summary: harnessRes.finalResponse || "Task completed successfully via Codex Harness.",
+            summary: harnessRes.finalResponse || harnessRes.response || harnessRes.summary || "Task completed successfully via Codex Harness.",
             steps: harnessRes.steps || [],
             execution: {
               providerId: harnessRes?.execution?.providerId || harnessRes?.providerId || effectiveProvider,
@@ -1148,6 +1364,41 @@ export default function AgentPanel({
               </span>
             </button>
 
+            {/* Create Context Capsule Button (Phase 3) */}
+            <button
+              onClick={handleCreateCapsule}
+              disabled={isCapsuleCreateDisabled}
+              className={`px-2 py-0.5 rounded-md border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-sm ${
+                isCapsuleCreateDisabled
+                  ? "bg-[#0d0d14] border-[#181824] text-zinc-600 cursor-not-allowed"
+                  : isCreatingCapsule
+                  ? "bg-cyan-950/60 border-cyan-500/40 text-cyan-300"
+                  : "bg-[#12121a] border-[#222234] text-zinc-300 hover:text-cyan-200 hover:border-cyan-500/40 hover:bg-[#161622]"
+              }`}
+              title={
+                !hasActiveChat
+                  ? "Create Context Capsule (Requires an active chat session)"
+                  : "Create Context Capsule: Package recent chat exchanges and task state"
+              }
+            >
+              {isCreatingCapsule ? (
+                <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
+              ) : (
+                <Box className="w-3 h-3 text-cyan-400" />
+              )}
+              <span>{isCreatingCapsule ? "Creating Capsule..." : "Create Context Capsule"}</span>
+            </button>
+
+            {/* Import Context Capsule Button (Phase 4) */}
+            <button
+              onClick={handleOpenCapsuleDialog}
+              className="px-2 py-0.5 rounded-md border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-sm bg-[#12121a] border-[#222234] text-zinc-300 hover:text-cyan-200 hover:border-cyan-500/40 hover:bg-[#161622]"
+              title="Import Context Capsule (.json file) to continue previous conversation context"
+            >
+              <Upload className="w-3 h-3 text-cyan-400" />
+              <span>Import Capsule</span>
+            </button>
+
             {/* Model Selector Dropdown Button */}
             <div className="relative">
               <button
@@ -1266,40 +1517,360 @@ export default function AgentPanel({
 
         {/* Active Session & Target Context Bar */}
         <div className="flex items-center justify-between text-[10px] text-zinc-400 pt-0.5 border-t border-[#14141e]">
-          <div className="flex items-center gap-1.5 truncate max-w-[240px]">
+          <div className="flex items-center gap-1.5 truncate max-w-[200px]">
             <span className="text-zinc-500 font-bold uppercase text-[9px]">Session:</span>
             <span className="text-zinc-200 font-bold truncate">{activeSessionTitle || "Default Workspace Session"}</span>
           </div>
 
-          <div className="flex items-center gap-1 text-cyan-400 font-mono text-[9.5px]">
-            <FileCode className="w-3 h-3" />
-            <span className="truncate max-w-[120px]">{activeFileName}</span>
+          <div className="flex items-center gap-2">
+            {/* Phase 5 Context Budget Indicator */}
+            <div
+              className={`flex items-center gap-1.5 font-mono text-[9px] px-1.5 py-0.5 rounded border transition-colors ${
+                displayLevel === "CRITICAL"
+                  ? "bg-rose-950/50 border-rose-500/50 text-rose-300"
+                  : displayLevel === "APPROACHING"
+                  ? "bg-amber-950/40 border-amber-500/40 text-amber-300"
+                  : "bg-[#101018] border-[#1e1e2c] text-zinc-400"
+              }`}
+              title={`Context Usage: ${displayPercentage}% of ${effectiveLimit} token budget limit`}
+            >
+              <span>Context {displayPercentage}%</span>
+              <div className="w-8 h-1 bg-[#1c1c28] rounded-full overflow-hidden">
+                <div
+                  className={`h-full transition-all duration-300 ${
+                    displayLevel === "CRITICAL"
+                      ? "bg-rose-500"
+                      : displayLevel === "APPROACHING"
+                      ? "bg-amber-500"
+                      : "bg-cyan-500"
+                  }`}
+                  style={{ width: `${Math.min(100, displayPercentage)}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1 text-cyan-400 font-mono text-[9.5px]">
+              <FileCode className="w-3 h-3" />
+              <span className="truncate max-w-[100px]">{activeFileName}</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* 3B. Conversation Stream Area */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-[#060609]">
-        {/* Continuum Lineage Active Banner */}
-        {continuumActive && (
-          <div className="p-2.5 rounded-xl bg-[#08121e] border border-cyan-500/40 text-cyan-200 text-[10.5px] space-y-1 shadow-sm">
-            <div className="flex items-center justify-between font-bold text-[10px] text-cyan-400">
-              <div className="flex items-center gap-1.5">
-                <GitBranch className="w-3.5 h-3.5 text-cyan-400" />
-                <span>CONTINUUM LINEAGE ACTIVE</span>
+      {/* 3B & 3C. Conversation Stream & Composer wrapped in CapsuleDropZone (Phase 4) */}
+      <CapsuleDropZone
+        onCapsuleDropped={handleCapsuleDropped}
+        onError={(errMsg) => setCapsuleFeedback({ type: "error", message: errMsg })}
+        className="flex-1 flex flex-col min-h-0 overflow-hidden"
+      >
+        {/* Conversation Stream Area */}
+        <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-[#060609]">
+          {/* Continuum Lineage Active Banner */}
+          {continuumActive && (
+            <div className="p-2.5 rounded-xl bg-[#08121e] border border-cyan-500/40 text-cyan-200 text-[10.5px] space-y-1 shadow-sm">
+              <div className="flex items-center justify-between font-bold text-[10px] text-cyan-400">
+                <div className="flex items-center gap-1.5">
+                  <GitBranch className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>CONTINUUM LINEAGE ACTIVE</span>
+                </div>
+                <button
+                  onClick={() => { setContinuumActive(false); setActiveContinuumContextText(""); }}
+                  className="text-zinc-500 hover:text-zinc-300 text-[9px] cursor-pointer"
+                >
+                  Disable
+                </button>
               </div>
-              <button
-                onClick={() => { setContinuumActive(false); setActiveContinuumContextText(""); }}
-                className="text-zinc-500 hover:text-zinc-300 text-[9px] cursor-pointer"
-              >
-                Disable
+              <p className="text-zinc-300 text-[10px] leading-relaxed">
+                Synthesized handoff from previous chat injected into model context. Prompts will inherit project facts, architecture decisions, and current state.
+              </p>
+            </div>
+          )}
+
+          {/* Attached Imported Context Capsule Banner (Phase 4) */}
+          {importedCapsule && (
+            <CapsuleImportBanner
+              capsule={importedCapsule}
+              onDetach={() => {
+                setImportedCapsule(null);
+                setCapsuleWarning(null);
+              }}
+            />
+          )}
+
+          {/* Context Capsule Warning for Ongoing Chat (Phase 4) */}
+          {capsuleWarning && (
+            <div className="p-2 rounded-lg bg-amber-950/40 border border-amber-500/40 text-amber-200 text-[10px] flex items-start gap-1.5 animate-fadeIn">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <span className="font-bold">Chat Continuation: </span>
+                <span>{capsuleWarning}</span>
+              </div>
+              <button onClick={() => setCapsuleWarning(null)} className="text-zinc-500 hover:text-zinc-300 p-0.5 cursor-pointer">
+                <X className="w-3 h-3" />
               </button>
             </div>
-            <p className="text-zinc-300 text-[10px] leading-relaxed">
-              Synthesized handoff from previous chat injected into model context. Prompts will inherit project facts, architecture decisions, and current state.
-            </p>
+          )}
+
+          {/* Phase 5: Approaching Threshold Recommendation (75% - 89%) */}
+          {displayLevel === "APPROACHING" && suppressedLevel !== "APPROACHING" && suppressedLevel !== "CRITICAL" && (
+            <div className="p-2.5 rounded-xl bg-[#1c140a] border border-amber-500/50 text-amber-200 text-[10px] space-y-1.5 shadow-sm animate-fadeIn">
+              <div className="flex items-center justify-between font-bold text-[10px] text-amber-300">
+                <div className="flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Context getting large ({displayPercentage}%)</span>
+                </div>
+                <button
+                  onClick={() => setSuppressedLevel("APPROACHING")}
+                  className="text-zinc-500 hover:text-zinc-300 p-0.5 cursor-pointer"
+                  title="Dismiss recommendation"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+              <p className="text-zinc-300 text-[9.5px] leading-relaxed">
+                Memory usage is approaching recommended limits. Create a Context Capsule to preserve active decisions, state, and recent exchanges for a fresh continuation session.
+              </p>
+              <div className="pt-0.5">
+                <button
+                  onClick={handleCreateCapsule}
+                  disabled={isCapsuleCreateDisabled}
+                  className="px-2 py-0.5 rounded bg-amber-950/80 hover:bg-amber-900 border border-amber-500/50 text-amber-200 font-bold text-[9.5px] flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  {isCreatingCapsule || capsuleCreationStatus === "PROCESSING" ? (
+                    <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                  ) : (
+                    <Box className="w-3 h-3 text-amber-400" />
+                  )}
+                  <span>{isCreatingCapsule || capsuleCreationStatus === "PROCESSING" ? "Creating Capsule..." : "Create Context Capsule"}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Phase 5: Critical Threshold Warning (>= 90%) */}
+          {displayLevel === "CRITICAL" && suppressedLevel !== "CRITICAL" && (
+            <div className="p-2.5 rounded-xl bg-[#20080c] border border-rose-500/60 text-rose-200 text-[10.5px] space-y-1.5 shadow-md animate-fadeIn">
+              <div className="flex items-center justify-between font-bold text-[10px] text-rose-300">
+                <div className="flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                  <span>This conversation is approaching its context limit ({displayPercentage}%).</span>
+                </div>
+              </div>
+              <p className="text-zinc-300 text-[9.5px] leading-relaxed">
+                Earlier messages and tool results may be summarized or compacted. You can package your current task state into an independent Context Capsule and continue in a new chat.
+              </p>
+              <div className="pt-1 flex items-center gap-2">
+                <button
+                  onClick={handleCreateCapsule}
+                  disabled={isCapsuleCreateDisabled}
+                  className="px-2.5 py-1 rounded-md bg-rose-950 hover:bg-rose-900 border border-rose-500/60 text-rose-200 font-bold text-[10px] flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+                >
+                  {isCreatingCapsule || capsuleCreationStatus === "PROCESSING" ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" />
+                  ) : (
+                    <Box className="w-3.5 h-3.5 text-rose-400" />
+                  )}
+                  <span>{isCreatingCapsule || capsuleCreationStatus === "PROCESSING" ? "Creating Capsule..." : "Create Context Capsule"}</span>
+                </button>
+                <button
+                  onClick={() => setSuppressedLevel("CRITICAL")}
+                  className="px-2.5 py-1 rounded-md bg-[#161622] hover:bg-[#202030] border border-[#2e2e42] text-zinc-300 text-[10px] cursor-pointer transition-colors"
+                >
+                  Continue Anyway
+                </button>
+              </div>
+            </div>
+          )}
+
+        {/* Context Capsule Confirmation Card (Phase 3) */}
+        {capsuleFeedback && capsuleFeedback.type === "success" && (
+          <div
+            ref={capsuleFeedbackRef}
+            className="p-3 rounded-xl bg-[#09131d] border border-cyan-500/50 text-cyan-200 text-[10.5px] space-y-2 shadow-lg animate-fadeIn sticky top-2 z-20 backdrop-blur-md"
+          >
+            <div className="flex items-center justify-between font-bold text-[11px] text-cyan-300">
+              <div className="flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="tracking-wide">✓ CONTEXT CAPSULE CREATED</span>
+              </div>
+              <button
+                onClick={() => {
+                  setCapsuleFeedback(null);
+                  setCapsuleCreationStatus("IDLE");
+                }}
+                className="text-zinc-500 hover:text-zinc-300 p-0.5 cursor-pointer rounded hover:bg-zinc-800/40"
+                title="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Prominent Reference & Copy Card */}
+            <div className="bg-[#03070e] p-2.5 rounded-lg border border-cyan-500/40 flex items-center justify-between">
+              <div className="space-y-0.5">
+                <div className="text-[9px] text-zinc-500 uppercase font-bold tracking-wider">Capsule Reference</div>
+                <div className="font-mono text-sm font-extrabold text-cyan-300 tracking-wider">
+                  {capsuleFeedback.capsuleRef || capsuleFeedback.capsule?.capsule_ref || `#CC${capsuleFeedback.capsuleId?.slice(-6).toUpperCase()}`}
+                </div>
+              </div>
+
+              <button
+                onClick={() => handleCopyReference(capsuleFeedback.capsuleRef || capsuleFeedback.capsule?.capsule_ref || `#CC${capsuleFeedback.capsuleId?.slice(-6).toUpperCase()}`)}
+                className="px-2.5 py-1 rounded bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-200 hover:text-white font-bold text-[10px] flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                title="Copy Capsule Reference to clipboard"
+              >
+                {isCopiedRef ? (
+                  <>
+                    <Check className="w-3 h-3 text-emerald-400" />
+                    <span className="text-emerald-400">Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3 h-3 text-cyan-400" />
+                    <span>Copy Reference</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="space-y-1.5 text-zinc-300 text-[10px] bg-[#050b12] p-2.5 rounded-lg border border-[#142336]">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400 font-medium">Title:</span>
+                <span className="font-semibold text-zinc-200 truncate max-w-[220px]">
+                  {capsuleFeedback.title || "Context Capsule"}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400 font-medium">Preserved exchanges:</span>
+                <span className="font-mono text-zinc-200 font-bold">
+                  {capsuleFeedback.retainedExchangesCount ?? 0}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between pt-1 border-t border-[#101b2a]">
+                <span className="text-emerald-400 font-bold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse" />
+                  Saved independently
+                </span>
+                {capsuleFeedback.createdAt && (
+                  <span className="text-zinc-500 text-[9px] font-mono">
+                    {new Date(capsuleFeedback.createdAt).toLocaleTimeString()}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Action Buttons: [ Copy Reference ] [ View Capsule ] [ Dismiss ] */}
+            <div className="flex items-center justify-between pt-1">
+              <button
+                onClick={() => setShowCapsuleDetail(!showCapsuleDetail)}
+                className="px-2.5 py-1 rounded bg-[#102030] hover:bg-[#162c44] border border-cyan-500/40 text-cyan-300 hover:text-cyan-100 font-semibold text-[10px] flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+              >
+                <ChevronRight className={`w-3 h-3 transition-transform ${showCapsuleDetail ? "rotate-90" : ""}`} />
+                <span>{showCapsuleDetail ? "Hide Capsule" : "View Capsule"}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setCapsuleFeedback(null);
+                  setCapsuleCreationStatus("IDLE");
+                }}
+                className="px-2.5 py-1 rounded bg-[#161622] hover:bg-[#202030] border border-[#2e2e42] text-zinc-300 hover:text-zinc-100 text-[10px] cursor-pointer transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+
+            {/* Toggled Capsule Summary Details */}
+            {showCapsuleDetail && capsuleFeedback.capsule && (
+              <div className="mt-2 p-2.5 rounded-lg bg-[#04080e] border border-[#142336] text-[9.5px] text-zinc-300 space-y-1.5 font-mono animate-fadeIn">
+                <div>
+                  <span className="text-zinc-500 font-bold">Goal: </span>
+                  <span className="text-zinc-200">{capsuleFeedback.capsule.task_state?.primary_goal || "None"}</span>
+                </div>
+                <div>
+                  <span className="text-zinc-500 font-bold">Status: </span>
+                  <span className="text-zinc-200">{capsuleFeedback.capsule.task_state?.current_status || "ACTIVE"}</span>
+                </div>
+                {Array.isArray(capsuleFeedback.capsule.task_state?.important_decisions) &&
+                  capsuleFeedback.capsule.task_state.important_decisions.length > 0 && (
+                    <div>
+                      <span className="text-zinc-500 font-bold">Decisions: </span>
+                      <span className="text-zinc-300">
+                        {capsuleFeedback.capsule.task_state.important_decisions.join(", ")}
+                      </span>
+                    </div>
+                  )}
+                {Array.isArray(capsuleFeedback.capsule.task_state?.relevant_files) &&
+                  capsuleFeedback.capsule.task_state.relevant_files.length > 0 && (
+                    <div>
+                      <span className="text-zinc-500 font-bold">Files: </span>
+                      <span className="text-cyan-400">
+                        {capsuleFeedback.capsule.task_state.relevant_files.join(", ")}
+                      </span>
+                    </div>
+                  )}
+                <div>
+                  <span className="text-zinc-500 font-bold">Preserved Exchanges: </span>
+                  <span className="text-zinc-300">
+                    {capsuleFeedback.capsule.conversation_context?.last_exchanges?.length || 0}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         )}
+
+        {capsuleFeedback && capsuleFeedback.type === "error" && (
+          <div
+            ref={capsuleFeedbackRef}
+            className="p-3 rounded-xl bg-[#200a0a] border border-rose-500/50 text-rose-200 text-[10.5px] space-y-2 shadow-lg animate-fadeIn sticky top-2 z-20 backdrop-blur-md"
+          >
+            <div className="flex items-center justify-between font-bold text-[11px] text-rose-300">
+              <div className="flex items-center gap-1.5">
+                <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span className="tracking-wide">✕ CONTEXT CAPSULE CREATION FAILED</span>
+              </div>
+              <button
+                onClick={() => {
+                  setCapsuleFeedback(null);
+                  setCapsuleCreationStatus("IDLE");
+                }}
+                className="text-zinc-500 hover:text-zinc-300 p-0.5 cursor-pointer rounded hover:bg-zinc-800/40"
+                title="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <p className="text-zinc-300 text-[10px] bg-[#120606] p-2 rounded border border-rose-900/40 leading-relaxed font-mono">
+              {capsuleFeedback.message || "Failed to create Context Capsule"}
+            </p>
+
+            <div className="flex items-center gap-2 pt-0.5">
+              <button
+                onClick={handleCreateCapsule}
+                disabled={isCapsuleCreateDisabled}
+                className="px-2.5 py-1 rounded bg-rose-950 hover:bg-rose-900 border border-rose-500/40 text-rose-200 font-bold text-[10px] flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+              >
+                <RotateCcw className="w-3 h-3 text-rose-400" />
+                <span>Try Again</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setCapsuleFeedback(null);
+                  setCapsuleCreationStatus("IDLE");
+                }}
+                className="px-2.5 py-1 rounded bg-[#161622] hover:bg-[#202030] border border-[#2e2e42] text-zinc-300 hover:text-zinc-100 text-[10px] cursor-pointer transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {messages.length === 0 && (
           /* 3C & 11. Empty State & Shortcut Action Chips */
           <div className="py-6 space-y-4">
@@ -1325,6 +1896,21 @@ export default function AgentPanel({
                 Suggested Actions
               </div>
               <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  onClick={handleOpenCapsuleDialog}
+                  className="p-2 rounded-lg bg-cyan-950/30 hover:bg-cyan-950/60 border border-cyan-500/40 text-left text-cyan-200 hover:text-cyan-100 transition-all cursor-pointer space-y-1 col-span-2 shadow-sm"
+                >
+                  <div className="font-bold text-[10.5px] flex items-center justify-between text-cyan-300">
+                    <div className="flex items-center gap-1.5">
+                      <Upload className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Import Context Capsule</span>
+                    </div>
+                    <ArrowRight className="w-3 h-3 text-cyan-400 opacity-60" />
+                  </div>
+                  <p className="text-[9.5px] text-zinc-400 font-mono">
+                    Load a saved conversation capsule (.json) to continue previous context
+                  </p>
+                </button>
                 {SHORTCUT_ACTIONS.map((action, idx) => (
                   <button
                     key={idx}
@@ -1726,19 +2312,41 @@ export default function AgentPanel({
           </div>
         </div>
 
+        {/* Subtle Capsule Attachment Badge */}
+        {importedCapsule && (
+          <div className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-[10px] text-cyan-300 font-mono animate-fadeIn">
+            <div className="flex items-center gap-2 min-w-0 truncate">
+              <Box className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span className="px-1.5 py-0.5 rounded bg-cyan-900/80 border border-cyan-400/40 text-cyan-200 font-bold tracking-wider shrink-0">
+                {`Context Capsule ${importedCapsule.capsule_ref || (importedCapsule.capsule_id ? `#CC${importedCapsule.capsule_id.slice(-6).toUpperCase()}` : "#CC")}`}
+              </span>
+              <span className="font-bold text-zinc-200 truncate">Continuation context prepared</span>
+            </div>
+            <span className="text-[9.5px] text-emerald-400 flex items-center gap-1 font-bold shrink-0 ml-1">
+              <Check className="w-3 h-3 text-emerald-400" />
+              Ready to continue
+            </span>
+          </div>
+        )}
+
         {/* Command Input Box */}
         <div className="relative flex items-end bg-[#12121a] border border-[#222232] focus-within:border-cyan-500/60 rounded-xl p-1.5 transition-all">
           <textarea
             value={taskInput}
             onChange={(e) => setTaskInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                handleRunAgent();
+              if (e.key === "Enter") {
+                if (e.metaKey || e.ctrlKey) {
+                  e.preventDefault();
+                  handleRunAgent();
+                } else if (!e.shiftKey && !importedCapsule && !taskInput.includes("\n")) {
+                  e.preventDefault();
+                  handleRunAgent();
+                }
               }
             }}
             placeholder="Ask NEXUS about this file... (Enter to send, Shift+Enter for newline)"
-            rows={2}
+            rows={importedCapsule || taskInput.includes("\n") ? 6 : 2}
             className="w-full bg-transparent resize-none outline-none text-zinc-100 placeholder:text-zinc-600 text-[11px] font-mono p-1 leading-relaxed"
           />
 
@@ -1752,6 +2360,7 @@ export default function AgentPanel({
           </button>
         </div>
       </div>
+      </CapsuleDropZone>
 
       {/* 3-Way ChangeSet Conflict Resolver (Milestone 16) */}
       <ChangeConflictResolver
@@ -1830,6 +2439,13 @@ export default function AgentPanel({
             harness.cancelConflictResolution({ threadId: activeSessionId });
           }
         }}
+      />
+
+      {/* NEXUS Context Capsule Reference Import Modal */}
+      <CapsuleImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onImportSuccess={(cap) => handleCapsuleDropped(cap, cap.source_chat?.title || "Imported Capsule")}
       />
     </div>
   );

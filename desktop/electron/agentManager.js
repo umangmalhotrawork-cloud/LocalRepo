@@ -21,7 +21,7 @@ const IGNORE_DIRS = new Set([
   '__pycache__',
 ]);
 
-const { requestRouter, ROUTER_MODES, CODING_INTENTS, isGreeting, getConversationalGreetingResponse } = require('./harness/RequestRouter');
+const { requestRouter, ROUTER_MODES, CODING_INTENTS, isGreeting, getConversationalGreetingResponse, getConversationalResponse } = require('./harness/RequestRouter');
 
 /**
  * Classifies task intent into GENERAL_CHAT vs READ_ONLY vs MUTATION.
@@ -286,9 +286,21 @@ class AgentManager {
   }
 
   async runGeminiAgent(apiKey, task, workspacePath, maxSteps, continuumContextText = '', activeFilePath) {
-    const files = this.scanWorkspaceFiles(workspacePath, 20);
     const intent = classifyTaskIntent(task);
-    const targetFile = intent === 'GENERAL_CHAT' ? null : this.resolveTargetFile(workspacePath, files, activeFilePath, task, Boolean(activeFilePath));
+    if (intent === 'GENERAL_CHAT') {
+      const conversationalReply = getConversationalResponse(task, continuumContextText);
+      return {
+        success: true,
+        task,
+        taskIntent: 'GENERAL_CHAT',
+        targetFile: null,
+        steps: [],
+        summary: conversationalReply,
+      };
+    }
+
+    const files = this.scanWorkspaceFiles(workspacePath, 20);
+    const targetFile = this.resolveTargetFile(workspacePath, files, activeFilePath, task, Boolean(activeFilePath));
     const effectiveTarget = targetFile || (files.length > 0 ? files[0] : path.join(workspacePath, 'main.py'));
     const relativeTarget = path.relative(workspacePath, effectiveTarget) || path.basename(effectiveTarget);
     const orderedFiles = targetFile ? [targetFile, ...files.filter((file) => path.resolve(file) !== path.resolve(targetFile))] : files;
@@ -307,24 +319,7 @@ class AgentManager {
       ? '\nCRITICAL DIRECTIVE: This is a READ_ONLY analysis task. DO NOT generate code modifications or surgical patches. Return empty proposedEdits: [] for all steps.'
       : '';
 
-    let systemPrompt;
-    if (intent === 'GENERAL_CHAT') {
-      systemPrompt = `${contextPrefix}You are NEXUS AI Assistant.
-Respond conversationally, helpfully, and concisely to the user's message.
-DO NOT generate any code modifications or surgical patches.
-User Message: "${task}"
-
-Workspace files context:
-${fileSummaries}
-
-Format strictly as JSON:
-{
-  "summary": "<Conversational and helpful response>",
-  "taskIntent": "GENERAL_CHAT",
-  "steps": []
-}`;
-    } else {
-      systemPrompt = `${contextPrefix}You are NEXUS Autonomous AI Agent.
+    const systemPrompt = `${contextPrefix}You are NEXUS Autonomous AI Agent.
 Analyze the workspace and task, then output a structured JSON plan with maximum ${maxSteps} steps.${readOnlyDirective}
 Task: "${task}"
 Active editor file: "${relativeTarget}". Treat it as the primary analysis target. All proposedEdits must target this file.
@@ -351,7 +346,6 @@ Format strictly as JSON:
     }
   ]
 }`;
-    }
 
     const requestBody = JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
@@ -440,23 +434,7 @@ Format strictly as JSON:
     const intent = classifyTaskIntent(task);
 
     if (intent === 'GENERAL_CHAT') {
-      const taskLower = (task || '').toLowerCase();
-      let conversationalReply = '';
-      if (isGreeting(task)) {
-        conversationalReply = getConversationalGreetingResponse(task);
-      } else if (continuumContextText && (taskLower.includes('decision') || taskLower.includes('building') || taskLower.includes('architecture') || taskLower.includes('fact') || taskLower.includes('lineage') || taskLower.includes('remember') || taskLower.includes('nexus') || taskLower.includes('groq') || taskLower.includes('gemini') || taskLower.includes('changeset') || taskLower.includes('previous') || taskLower.includes('last'))) {
-        conversationalReply = `Based on Continuum Lineage context:\n${continuumContextText}`;
-      } else if (['hi', 'hello', 'hey', 'greetings', 'good morning', 'good afternoon', 'good evening', 'yo', 'sup'].some(g => taskLower.startsWith(g) || taskLower === g)) {
-        conversationalReply = getConversationalGreetingResponse(task);
-      } else if (taskLower.includes('how are you') || taskLower.includes('how are you doing') || taskLower.includes("how's it going") || taskLower.includes('how is it going')) {
-        conversationalReply = "I'm doing well, thank you! How can I help you today?";
-      } else if (taskLower.includes('what can you do') || taskLower.includes('who are you') || taskLower.includes('help') || taskLower.includes('tell me about nexus') || taskLower.includes('what is nexus')) {
-        conversationalReply = 'I am NEXUS, an autonomous AI pair programmer. I provide workspace dependency analysis, multi-model AI routing (Groq, Gemini, OpenAI, Claude, DeepSeek, Grok), surgical code planning, Patch Firewall safety verification, automated testing, and Continuum session lineage.';
-      } else if (taskLower.includes('explain what this project does') || taskLower.includes('what does this project do') || taskLower.includes('explain this project') || taskLower.includes('what is this project') || taskLower.includes('tell me about this project')) {
-        conversationalReply = 'This workspace contains an e-commerce cart management system with modules for cart calculations, item cataloging, unit test validation, and checkout rules. You can ask me to inspect specific components, add features, refactor code, or run test suites.';
-      } else {
-        conversationalReply = 'I am ready to help with your workspace. Ask me any question about the architecture or describe a coding task to get started.';
-      }
+      const conversationalReply = getConversationalResponse(task, continuumContextText);
 
       return {
         success: true,

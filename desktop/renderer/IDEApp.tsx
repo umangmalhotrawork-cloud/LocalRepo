@@ -1134,12 +1134,15 @@ export default function IDEApp() {
     };
   }, [folderPath]);
 
+  const [initialImportedCapsule, setInitialImportedCapsule] = useState<any | null>(null);
+
   const handleNewTaskThread = () => {
     setActiveSessionId(null);
     setActiveTaskPrompt("");
     setHomePrompt("");
     setTaskToExecute(null);
     setActiveContinuumSnapshot(null);
+    setInitialImportedCapsule(null);
     setIsHomeAgentExecuting(false);
     setWorkspaceMode("home");
     setMainView("editor");
@@ -1154,11 +1157,12 @@ export default function IDEApp() {
     }
   };
 
-  const handleStartTaskFromHome = (promptText: string, providerId?: string, modelId?: string) => {
+  const handleStartTaskFromHome = (promptText: string, providerId?: string, modelId?: string, attachedCapsule?: any) => {
     const targetProv = providerId || aiActiveProvider || "nexus1";
     const targetModel = modelId || aiActiveModel || "gemini-2.5-flash";
     if (providerId) setAiActiveProvider(providerId);
     if (modelId) setAiActiveModel(modelId);
+    if (attachedCapsule) setInitialImportedCapsule(attachedCapsule);
     if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.setConfig) {
       (window as any).electronAPI.ai.setConfig(targetProv, targetModel).catch(() => {});
     }
@@ -6718,6 +6722,7 @@ return (
                 diagnostic={activeDiagnostic}
                 taskToExecute={taskToExecute}
                 onTaskExecuted={() => setTaskToExecute(null)}
+                initialImportedCapsule={initialImportedCapsule}
                 onPreviewDiff={handleAgentPreviewDiff}
                 onApplyStep={handleApplyAgentStep}
                 onApplyAllApproved={handleApplyAllAgentApproved}
@@ -8118,6 +8123,7 @@ return (
             gitBranch={git.currentBranch || "main"}
             diagnostic={activeDiagnostic}
             initialTask={activeTaskPrompt}
+            initialImportedCapsule={initialImportedCapsule}
             onPreviewDiff={handleAgentPreviewDiff}
             onApplyStep={handleApplyAgentStep}
             onApplyAllApproved={handleApplyAllAgentApproved}

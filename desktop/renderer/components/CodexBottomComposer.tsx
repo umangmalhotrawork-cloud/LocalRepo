@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { 
   FolderOpen, GitBranch, Layers, Plus, ShieldCheck, Cpu, 
-  Send, ArrowRight, Zap, ChevronDown, Check, Key
+  Send, ArrowRight, Zap, ChevronDown, Check, Key, Upload, Box
 } from "lucide-react";
 import { useOutsideClick } from "../hooks/useOutsideClick";
 
@@ -18,6 +18,8 @@ interface CodexBottomComposerProps {
   onSubmitTask: (prompt: string, approvalMode: "auto" | "strict") => void;
   onOpenContinuum: () => void;
   onOpenFolder: () => void;
+  onImportCapsule?: () => void;
+  attachedCapsule?: any;
   disabled?: boolean;
 }
 
@@ -32,18 +34,34 @@ export default function CodexBottomComposer({
   onSubmitTask,
   onOpenContinuum,
   onOpenFolder,
+  onImportCapsule,
+  attachedCapsule,
   disabled = false,
 }: CodexBottomComposerProps) {
   const [prompt, setPrompt] = useState(promptValue || "");
   const [approvalMode, setApprovalMode] = useState<"auto" | "strict">("auto");
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showApprovalDropdown, setShowApprovalDropdown] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   React.useEffect(() => {
     if (promptValue !== undefined && promptValue !== prompt) {
       setPrompt(promptValue);
+      if (promptValue && textareaRef.current) {
+        setTimeout(() => {
+          textareaRef.current?.focus();
+        }, 50);
+      }
     }
   }, [promptValue]);
+
+  useEffect(() => {
+    if (attachedCapsule && textareaRef.current) {
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 50);
+    }
+  }, [attachedCapsule]);
 
   const approvalTriggerRef = useRef<HTMLButtonElement | null>(null);
   const approvalDropdownRef = useOutsideClick<HTMLDivElement>({
@@ -71,7 +89,7 @@ export default function CodexBottomComposer({
 
   return (
     <div className="w-full max-w-3xl mx-auto flex flex-col items-center gap-2 select-none font-mono">
-      {/* 1. Context Row: Workspace -> Local -> Branch -> CONTINUUM (Immediately right of branch!) */}
+      {/* 1. Context Row: Workspace -> Local -> Branch -> CONTINUUM -> IMPORT CAPSULE */}
       <div className="flex items-center gap-2 text-xs font-mono" style={{ color: "var(--theme-text-muted, #a1a1aa)" }}>
         {/* Workspace Pill */}
         <button
@@ -127,6 +145,24 @@ export default function CodexBottomComposer({
           <Layers className="w-3.5 h-3.5 text-cyan-400 shrink-0 animate-pulse" />
           <span>Continuum</span>
         </button>
+
+        {/* Import Context Capsule Pill */}
+        {onImportCapsule && (
+          <button
+            type="button"
+            onClick={onImportCapsule}
+            style={{
+              backgroundColor: "var(--theme-surface-raised, #0e0e16)",
+              borderColor: "var(--theme-border, #1e1e2c)",
+              color: "var(--theme-accent, #22d3ee)",
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-bold transition-all cursor-pointer text-[11px] shadow-sm hover:border-cyan-500/40 hover:bg-cyan-950/40"
+            title="Import Context Capsule to continue previous conversation"
+          >
+            <Upload className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span>Import Capsule</span>
+          </button>
+        )}
       </div>
 
       {/* 2. Codex Agent Composer Container */}
@@ -138,8 +174,26 @@ export default function CodexBottomComposer({
           }}
           className="border focus-within:border-cyan-500/60 rounded-2xl p-3.5 shadow-2xl transition-all relative space-y-2"
         >
+          {/* Subtle Capsule Attachment Badge */}
+          {attachedCapsule && (
+            <div className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-[10px] text-cyan-300 font-mono animate-fadeIn">
+              <div className="flex items-center gap-2 min-w-0 truncate">
+                <Box className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span className="px-1.5 py-0.5 rounded bg-cyan-900/80 border border-cyan-400/40 text-cyan-200 font-bold tracking-wider shrink-0">
+                  {`Context Capsule ${attachedCapsule.capsule_ref || (attachedCapsule.capsule_id ? `#CC${attachedCapsule.capsule_id.slice(-6).toUpperCase()}` : "#CC")}`}
+                </span>
+                <span className="font-bold text-zinc-200 truncate">Continuation context prepared</span>
+              </div>
+              <span className="text-[9.5px] text-emerald-400 flex items-center gap-1 font-bold shrink-0 ml-2">
+                <Check className="w-3 h-3 text-emerald-400" />
+                Ready to continue
+              </span>
+            </div>
+          )}
+
           {/* Prompt Textarea */}
           <textarea
+            ref={textareaRef}
             value={prompt}
             onChange={(e) => {
               const val = e.target.value;
@@ -147,15 +201,22 @@ export default function CodexBottomComposer({
               onPromptChange?.(val);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                handleSubmit();
+              if (e.key === "Enter") {
+                if (e.metaKey || e.ctrlKey) {
+                  e.preventDefault();
+                  handleSubmit();
+                } else if (!e.shiftKey && !attachedCapsule && !prompt.includes("\n")) {
+                  e.preventDefault();
+                  handleSubmit();
+                }
               }
             }}
             placeholder="Ask NEXUS to investigate or change code... (⌘Enter to send)"
             disabled={disabled}
             style={{ color: "var(--theme-text, #f4f4f5)" }}
-            className="w-full h-20 bg-transparent text-xs placeholder-zinc-500 focus:outline-none resize-none font-mono"
+            className={`w-full bg-transparent text-xs placeholder-zinc-500 focus:outline-none resize-none font-mono transition-all ${
+              attachedCapsule || prompt.length > 200 || prompt.includes("\n") ? "h-48" : "h-20"
+            }`}
           />
 
           {/* Bottom Control Row */}

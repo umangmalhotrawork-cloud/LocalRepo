@@ -436,9 +436,158 @@ class ContextEngine {
   }
 
 
+  /**
+   * Formats an imported Context Capsule into a structured continuation context block.
+   * Carries Three Conversational Layers:
+   *   1. Base Chat (beginning topic/task)
+   *   2. Important / Repeated Context (constraints, decisions, requirements, recurring files)
+   *   3. Last 3 Complete Exchanges (chronological user/assistant turns)
+   * STRICTLY EXCLUDES fake user message insertion.
+   * BOUNDS content to respect character/token budgets.
+   * @param {Object} capsule - Validated Context Capsule
+   * @param {number} [maxChars=3000] - Max character budget for the capsule block
+   * @returns {string} Formatted context block
+   */
+  formatImportedCapsule(capsule, maxChars = 3000) {
+    if (!capsule || typeof capsule !== 'object') return '';
+
+    const safeCapsule = secretFilter.sanitizeObject(capsule);
+    const source = safeCapsule.source_chat || {};
+    const taskState = safeCapsule.task_state || {};
+    const convoContext = safeCapsule.conversation_context || {};
+    const baseChat = convoContext.base_chat || null;
+    const exchanges = Array.isArray(convoContext.last_exchanges) ? convoContext.last_exchanges.slice(-3) : [];
+
+    const lines = [
+      '--- IMPORTED CONTEXT CAPSULE (CONTINUATION CONTEXT) ---',
+      'This conversation continues from an earlier NEXUS conversation.',
+      `Source: ${source.title || 'Previous Session'}${source.thread_id ? ` (Thread: ${source.thread_id})` : ''}${source.workspace_name ? ` [Workspace: ${source.workspace_name}]` : ''}`,
+    ];
+
+    // Layer 1: Base Chat
+    if (baseChat && (baseChat.user || baseChat.assistant)) {
+      lines.push('\nBASE CHAT:');
+      if (baseChat.user) lines.push(`User: ${String(baseChat.user).trim()}`);
+      if (baseChat.assistant) lines.push(`Assistant: ${String(baseChat.assistant).trim()}`);
+    } else if (taskState.primary_goal) {
+      lines.push(`\nBASE CHAT:\nGoal: ${String(taskState.primary_goal).trim()}`);
+    }
+
+    // Layer 2: Important & Repeated Context, Decisions, State, Files, Constraints
+    const importantItems = [];
+    if (Array.isArray(taskState.important_context) && taskState.important_context.length > 0) {
+      for (const item of taskState.important_context) {
+        importantItems.push(String(item).trim());
+      }
+    }
+    if (importantItems.length > 0) {
+      lines.push('\nIMPORTANT / REPEATED CONTEXT:');
+      for (const item of importantItems.slice(0, 8)) {
+        lines.push(`- ${item.length > 200 ? item.slice(0, 197) + '...' : item}`);
+      }
+    }
+
+    if (Array.isArray(taskState.important_decisions) && taskState.important_decisions.length > 0) {
+      lines.push('\nIMPORTANT DECISIONS:');
+      for (const d of taskState.important_decisions.slice(0, 5)) {
+        lines.push(`- ${String(d).slice(0, 150)}`);
+      }
+    }
+
+    if (taskState.current_status) {
+      lines.push(`\nCURRENT STATE: ${taskState.current_status}`);
+    }
+
+    if (Array.isArray(taskState.constraints) && taskState.constraints.length > 0) {
+      lines.push('\nCONSTRAINTS:');
+      for (const c of taskState.constraints.slice(0, 5)) {
+        lines.push(`- ${String(c).slice(0, 150)}`);
+      }
+    }
+
+    if (Array.isArray(taskState.pending_work) && taskState.pending_work.length > 0) {
+      lines.push('\nPENDING WORK:');
+      for (const p of taskState.pending_work.slice(0, 5)) {
+        lines.push(`- ${String(p).slice(0, 150)}`);
+      }
+    }
+
+    if (Array.isArray(taskState.relevant_files) && taskState.relevant_files.length > 0) {
+      lines.push(`\nRELEVANT FILES:\n- ${taskState.relevant_files.slice(0, 8).join('\n- ')}`);
+    }
+
+    if (convoContext.summary && !baseChat) {
+      const summary = String(convoContext.summary).trim();
+      lines.push(`\nSUMMARY: ${summary.length > 300 ? summary.slice(0, 297) + '...' : summary}`);
+    }
+
+    // Layer 3: Last 3 complete exchanges
+    if (exchanges.length > 0) {
+      lines.push('\nLAST 3 EXCHANGES:');
+      exchanges.forEach((ex, idx) => {
+        const u = ex.user ? String(ex.user).trim() : '';
+        const a = ex.assistant ? String(ex.assistant).trim() : '';
+        const boundedU = u.length > 400 ? u.slice(0, 397) + '...' : u;
+        const boundedA = a.length > 500 ? a.slice(0, 497) + '...' : a;
+        lines.push(`[Exchange ${idx + 1}]\nUser: ${boundedU}\nAssistant: ${boundedA}`);
+      });
+    }
+
+    lines.push('\nUse this as inherited conversation context.');
+    lines.push('Continue naturally from this state.');
+    lines.push('--- END IMPORTED CONTEXT CAPSULE ---');
+
+    let result = lines.join('\n');
+    if (result.length > maxChars) {
+      const suffix = '\n... [Capsule Context Truncated]\nUse this as inherited conversation context.\n--- END IMPORTED CONTEXT CAPSULE ---';
+      const available = Math.max(0, maxChars - suffix.length);
+      result = result.slice(0, available) + suffix;
+    }
+
+    return secretFilter.sanitizeString(result);
+  }
+
+  /**
+   * Evaluates context budget metrics and recommendation level for a token count or ratio.
+   * Levels:
+   *   NORMAL: < 75%
+   *   APPROACHING: >= 75% and < 90%
+   *   CRITICAL: >= 90%
+   * @param {number} totalTokens - Estimated tokens
+   * @param {number} [budgetLimit] - Token budget limit (defaults to budgets.totalBudgetTokens)
+   * @returns {Object} { tokens, limit, ratio, percentage, level, isApproaching, isCritical }
+   */
+  evaluateContextBudget(totalTokens, budgetLimit = null) {
+    const limit = typeof budgetLimit === 'number' && budgetLimit > 0
+      ? budgetLimit
+      : (this.budgets?.totalBudgetTokens || DEFAULT_BUDGETS.totalBudgetTokens);
+    const tokens = typeof totalTokens === 'number' ? Math.max(0, totalTokens) : 0;
+    const ratio = limit > 0 ? tokens / limit : 0;
+    const percentage = Math.round(ratio * 100);
+
+    let level = 'NORMAL';
+    if (percentage >= 90) {
+      level = 'CRITICAL';
+    } else if (percentage >= 75) {
+      level = 'APPROACHING';
+    }
+
+    return {
+      tokens,
+      limit,
+      ratio,
+      percentage,
+      level,
+      isApproaching: level === 'APPROACHING',
+      isCritical: level === 'CRITICAL',
+    };
+  }
+
   compileContext(params = {}) {
     return this.buildContext(params);
   }
+
+
 
   /**
    * Compiles complete provider-neutral model context with budgeting & compaction.
@@ -520,6 +669,24 @@ class ContextEngine {
     }
     sections.continuumTokens = this.estimateTokens(continuumText);
     sections.continuumHandoffPresent = Boolean(continuumText);
+
+    // 1b. Imported Context Capsule Layer (Phase 4 - Independent Continuation Context)
+    let capsuleText = '';
+    const rawImportedCapsule = params.importedCapsule !== undefined
+      ? params.importedCapsule
+      : (turn?.metadata?.importedCapsule || thread?.metadata?.importedCapsule || options.importedCapsule || null);
+
+    // Avoid duplicate context if user input / messages already contain the generated continuation prompt
+    const userPromptHasContinuation = Boolean(
+      (typeof turn?.userInput === 'string' && (turn.userInput.includes('CONTINUE PREVIOUS NEXUS CONVERSATION') || turn.userInput.includes('BASE CONTEXT:'))) ||
+      (Array.isArray(params.messages) && params.messages.some((m) => m.role === 'user' && typeof m.content === 'string' && (m.content.includes('CONTINUE PREVIOUS NEXUS CONVERSATION') || m.content.includes('BASE CONTEXT:'))))
+    );
+
+    if (rawImportedCapsule && !userPromptHasContinuation) {
+      capsuleText = this.formatImportedCapsule(rawImportedCapsule, budgets.systemBudgetChars ? Math.floor(budgets.systemBudgetChars * 0.7) : 2500);
+    }
+    sections.importedCapsuleTokens = this.estimateTokens(capsuleText);
+    sections.importedCapsulePresent = Boolean(rawImportedCapsule);
 
     // 2. Active Handoff Context (Milestone 7 Durable Handoff)
     let handoffText = '';
@@ -900,6 +1067,7 @@ class ContextEngine {
 
     const systemPromptComponents = [
       baseInstruction,
+      capsuleText ? `\n${capsuleText}` : null,
       // Only include capabilities text if native tools schema is not being supplied
       (!capabilities || capabilities.length === 0) && capabilitiesText ? `\n--- PERMITTED CAPABILITIES ---\n${capabilitiesText}` : null,
       skillsText ? `\n--- ACTIVE SKILLS ---\n${skillsText}` : null,
@@ -1021,12 +1189,19 @@ class ContextEngine {
     }
 
     const totalEstimatedTokens = sections.systemPromptTokens + this.estimateTokens(finalMessages);
+    const budgetEval = this.evaluateContextBudget(totalEstimatedTokens, budgets.totalBudgetTokens);
 
     return {
       systemPrompt,
       messages: finalMessages,
       metadata: {
         totalEstimatedTokens,
+        budgetLimitTokens: budgetEval.limit,
+        budgetRatio: budgetEval.ratio,
+        percentage: budgetEval.percentage,
+        level: budgetEval.level,
+        isApproaching: budgetEval.isApproaching,
+        isCritical: budgetEval.isCritical,
         sections,
         truncatedSections,
         omittedItems,

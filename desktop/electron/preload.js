@@ -388,6 +388,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setTelemetry: (enabled) => ipcRenderer.invoke('telemetry:set', enabled),
     trackTelemetry: (eventName) => ipcRenderer.invoke('telemetry:track', eventName),
   },
+  capsule: {
+    createCapsule: (threadId, options) => ipcRenderer.invoke('capsule:create', { threadId, options }),
+    loadCapsule: (capsuleId) => ipcRenderer.invoke('capsule:load', capsuleId),
+    listCapsules: () => ipcRenderer.invoke('capsule:list'),
+    resolveReference: (ref) => ipcRenderer.invoke('capsule:resolve-reference', ref),
+    deleteCapsule: (capsuleId) => ipcRenderer.invoke('capsule:delete', capsuleId),
+    openCapsuleDialog: () => ipcRenderer.invoke('capsule:open-dialog'),
+    parseCapsule: (raw) => ipcRenderer.invoke('capsule:parse', raw),
+    validateCapsule: (capsule) => ipcRenderer.invoke('capsule:validate', capsule),
+    generateContinuationPrompt: (capsule) => ipcRenderer.invoke('capsule:generate-continuation-prompt', capsule),
+    importCapsuleFile: (filePath) => ipcRenderer.invoke('capsule:import-file', filePath),
+    evaluateBudget: (threadId) => ipcRenderer.invoke('capsule:evaluate-budget', threadId),
+  },
   runPythonFile: (filePath) => ipcRenderer.invoke('python:run-file', filePath),
   onPythonOutput: (callback) => {
     const listener = (_event, payload) => callback(payload);
@@ -395,3 +408,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('python:output', listener);
   },
 });
+

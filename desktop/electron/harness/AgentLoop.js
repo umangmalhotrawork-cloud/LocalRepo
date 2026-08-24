@@ -16,7 +16,7 @@ const { contextEngine: defaultContextEngine } = require('./ContextEngine');
 const { ChangeSet } = require('./ChangeSet');
 const { HandoffState } = require('./HandoffState');
 const { swarmOrchestrator: defaultSwarmOrchestrator } = require('./SwarmOrchestrator');
-const { isGreeting, getConversationalGreetingResponse, requestRouter, ROUTER_MODES } = require('./RequestRouter');
+const { isGreeting, getConversationalGreetingResponse, getConversationalResponse, requestRouter, ROUTER_MODES } = require('./RequestRouter');
 const { continuumContextBuilder } = require('../../engine/continuum_context_builder');
 const secretFilter = require('../../security/secretFilter');
 
@@ -170,11 +170,42 @@ class AgentLoop {
       throw new Error('[HARNESS-AGENTLOOP] AgentLoop requires an attached HarnessRuntime');
     }
 
-    // 0. Conversational Intent Gate: Simple greetings must not inspect workspace or call tools
-    if (userInput && typeof userInput === 'string' && isGreeting(userInput)) {
-      let turn;
-      const targetTurnId = payload.turnId || payload.retryTurnId;
-      if (targetTurnId) {
+    const targetTurnId = payload.turnId || payload.retryTurnId;
+    let initialTurn = null;
+    if (targetTurnId) {
+      initialTurn = this.runtime.getTurn(targetTurnId);
+      if (initialTurn && initialTurn.status === TURN_STATUS.CANCELLED) {
+        return {
+          success: false,
+          status: TURN_STATUS.CANCELLED,
+          turnId: initialTurn.turnId,
+          threadId: initialTurn.threadId || threadId,
+          iterations: 0,
+          totalToolCalls: 0,
+          finalResponse: 'Turn was cancelled',
+          summary: 'Turn was cancelled',
+          steps: [],
+        };
+      }
+    }
+
+    // 0. Conversational Intent Gate: Conversational messages must not inspect workspace or call tools
+    const routerClassification = this.runtime?.classifyRequest
+      ? this.runtime.classifyRequest(userInput, { activeFilePath, workspacePath })
+      : requestRouter.classify(userInput, { activeFilePath, workspacePath });
+
+    const isExplicitGeneralChat = payload.intent === 'GENERAL_CHAT';
+    const isPureGreeting = isGreeting(userInput);
+    const isClassifiedConversation = routerClassification.mode === ROUTER_MODES.CONVERSATION;
+
+    const isConversational = isPureGreeting ||
+      isExplicitGeneralChat ||
+      (typeof modelHandler !== 'function' && isClassifiedConversation) ||
+      (typeof modelHandler === 'function' && isExplicitGeneralChat);
+
+    if (isConversational) {
+      let turn = initialTurn;
+      if (!turn && targetTurnId) {
         turn = this.runtime.getTurn(targetTurnId);
       }
       if (!turn) {
@@ -192,27 +223,80 @@ class AgentLoop {
       // Add USER_MESSAGE Item
       const existingItems = this.runtime.itemStore.getItemsByTurn(turnId);
       const hasUserMsg = existingItems.some((i) => i.type === ITEM_TYPES.USER_MESSAGE);
-      if (!hasUserMsg) {
+      if (!hasUserMsg && userInput) {
         const userItem = this.runtime.startItem(turnId, ITEM_TYPES.USER_MESSAGE, {
           text: userInput,
         });
         this.runtime.completeItem(userItem.itemId);
       }
 
-      // Return deterministic greeting response without inspecting workspace or calling tools
-      const reply = getConversationalGreetingResponse(userInput);
+      // Return conversational response (pure greetings use zero-AI deterministic gate; non-greetings invoke modelHandler / conversational AI with tools: [] with smart deterministic fallback)
+      let reply = '';
+      if (isGreeting(userInput)) {
+        reply = getConversationalGreetingResponse(userInput);
+      } else if (typeof modelHandler === 'function') {
+        try {
+          const handlerOutput = await modelHandler(
+            [
+              { role: 'system', content: continuumContextText || '' },
+              { role: 'user', content: userInput },
+            ],
+            []
+          );
+          reply = typeof handlerOutput === 'string' ? handlerOutput : (handlerOutput?.content || handlerOutput?.summary || 'Handled by custom modelHandler');
+        } catch (e) {
+          reply = getConversationalResponse(userInput, continuumContextText);
+        }
+      } else {
+        let modelReplied = false;
+        try {
+          const convSystemPrompt = continuumContextText
+            ? `You are NEXUS, a helpful, natural, and concise AI pair programmer.\nContinuum Lineage Context:\n${continuumContextText}\n\nRespond conversationally, naturally, and concisely to the user. Do not perform code mutations or invent file paths unless asked.`
+            : `You are NEXUS, a helpful, natural, and concise AI pair programmer. Respond conversationally, naturally, and concisely to the user. Do not perform code mutations or invent file paths unless asked.`;
+
+          const convMessages = [
+            { role: 'system', content: convSystemPrompt },
+            { role: 'user', content: userInput },
+          ];
+
+          const modelRes = await this.modelAdapter.invoke(convMessages, [], {
+            threadId,
+            turnId,
+            workspacePath,
+            activeFilePath,
+            intent: 'GENERAL_CHAT',
+            providerId,
+            modelId,
+          });
+
+          if (modelRes && modelRes.content && modelRes.content.trim()) {
+            reply = modelRes.content.trim();
+            modelReplied = true;
+          }
+        } catch (err) {
+          // Provider unconfigured or offline — fallback cleanly
+        }
+
+        if (!modelReplied) {
+          reply = getConversationalResponse(userInput, continuumContextText);
+        }
+      }
+
       const agentItem = this.runtime.startItem(turnId, ITEM_TYPES.AGENT_MESSAGE, {
         text: reply,
+        summary: reply,
       });
       this.runtime.completeItem(agentItem.itemId);
 
-      this.runtime.turnManager.completeTurn(turnId, { summary: reply });
+      this.runtime.turnManager.completeTurn(turnId, { summary: reply, outcome: 'SUCCESS', iterations: 0, totalToolCalls: 0 });
 
       return {
         success: true,
         status: TURN_STATUS.COMPLETED,
         turnId,
+        threadId,
         iterations: 0,
+        totalToolCalls: 0,
         finalResponse: reply,
         summary: reply,
         steps: [],
@@ -220,15 +304,16 @@ class AgentLoop {
           providerId: providerId || 'nexus1',
           modelId: modelId || 'gemini-2.5-flash',
         },
-        isGreeting: true,
+        isConversational: true,
       };
     }
 
     // 1. Start or retrieve active Turn
-    let turn;
-    const targetTurnId = payload.turnId || payload.retryTurnId;
+    let turn = initialTurn;
     if (targetTurnId) {
-      turn = this.runtime.getTurn(targetTurnId);
+      if (!turn) {
+        turn = this.runtime.getTurn(targetTurnId);
+      }
       if (!turn) {
         throw new Error(`[HARNESS-AGENTLOOP] Turn "${targetTurnId}" not found`);
       }
@@ -351,6 +436,7 @@ class AgentLoop {
     let iterations = 0;
     let totalToolCalls = 0;
     let finalAssistantResponse = null;
+    let lastContextMetrics = null;
 
     try {
       while (iterations < maxIterations) {
@@ -393,6 +479,7 @@ class AgentLoop {
           continuumSnapshot,
           continuumContextText,
           continuumActive,
+          importedCapsule: payload.importedCapsule || turn?.metadata?.importedCapsule || null,
           handoffState: payload.handoffState || turn?.metadata?.handoffState || null,
           workspacePath,
           activeFilePath,
@@ -412,6 +499,8 @@ class AgentLoop {
           capabilities: tools,
           options: payload.contextOptions || {},
         });
+
+        lastContextMetrics = contextOutcome?.metadata || null;
 
         const messages = [
           { role: 'system', content: contextOutcome.systemPrompt },
@@ -867,6 +956,7 @@ class AgentLoop {
           finalResponse: finalAssistantResponse,
           iterations,
           totalToolCalls,
+          contextMetrics: lastContextMetrics,
         };
       }
 

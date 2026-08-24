@@ -58,6 +58,7 @@ const { autonomousRepairEngine } = require('./autonomousRepairEngine');
 const { diagnosticParser } = require('./debugging/DiagnosticParser');
 const debugManager = require('./debugManager');
 const { settingsManager } = require('./settingsManager');
+const { contextCapsuleManager } = require('./capsule/ContextCapsuleManager');
 const { evidenceGraph } = require('./evidence/EvidenceGraph');
 const behavioralDiffEngine = require('../engine/behavioral_diff_engine');
 const aiSystemReasoningEngine = require('../engine/ai_system_reasoning_engine');
@@ -3474,6 +3475,241 @@ ipcMain.handle('telemetry:track', async (_, eventName) => {
   }
   return telemetryState;
 });
+
+// Context Capsule IPC Handlers (Phase 3)
+ipcMain.handle('capsule:create', async (_, payload = {}) => {
+  const threadId = typeof payload === 'string' ? payload : payload?.threadId;
+  const options = (typeof payload === 'object' && payload?.options) ? payload.options : {};
+  if (!threadId) {
+    return {
+      success: false,
+      error: 'Active thread ID is required to create a Context Capsule',
+    };
+  }
+
+  try {
+    const capsule = contextCapsuleManager.createCapsule(threadId, options);
+    const saveResult = contextCapsuleManager.saveCapsule(capsule);
+
+    return {
+      success: true,
+      capsuleId: capsule.capsule_id,
+      capsuleRef: capsule.capsule_ref,
+      threadId: capsule.source_chat?.thread_id || threadId,
+      createdAt: capsule.created_at,
+      title: capsule.source_chat?.title || 'Context Capsule',
+      retainedExchangesCount: capsule.conversation_context?.last_exchanges?.length || 0,
+      filePath: saveResult.filePath,
+      capsule: {
+        nexus_capsule_version: capsule.nexus_capsule_version,
+        capsule_id: capsule.capsule_id,
+        capsule_ref: capsule.capsule_ref,
+        created_at: capsule.created_at,
+        source_chat: capsule.source_chat,
+        task_state: capsule.task_state,
+        conversation_context: {
+          summary: capsule.conversation_context?.summary,
+          base_chat: capsule.conversation_context?.base_chat,
+          last_exchanges: capsule.conversation_context?.last_exchanges,
+        },
+      },
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message || 'Failed to create Context Capsule',
+    };
+  }
+});
+
+ipcMain.handle('capsule:generate-continuation-prompt', async (_, capsule) => {
+  try {
+    const prompt = contextCapsuleManager.generateContinuationPrompt(capsule);
+    return {
+      success: true,
+      prompt,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message || 'Failed to generate continuation prompt',
+      prompt: '',
+    };
+  }
+});
+
+ipcMain.handle('capsule:resolve-reference', async (_, ref) => {
+  try {
+    const res = contextCapsuleManager.resolveCapsuleReference(ref);
+    return res;
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message || `Failed to resolve Context Capsule reference "${ref}"`,
+    };
+  }
+});
+
+ipcMain.handle('capsule:load', async (_, capsuleId) => {
+  try {
+    const capsule = contextCapsuleManager.loadCapsule(capsuleId);
+    return {
+      success: true,
+      capsule,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message || `Failed to load Context Capsule "${capsuleId}"`,
+    };
+  }
+});
+
+ipcMain.handle('capsule:list', async () => {
+  try {
+    const capsules = contextCapsuleManager.listCapsules();
+    return {
+      success: true,
+      capsules,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message || 'Failed to list Context Capsules',
+      capsules: [],
+    };
+  }
+});
+
+ipcMain.handle('capsule:delete', async (_, capsuleId) => {
+  try {
+    const deleted = contextCapsuleManager.deleteCapsule(capsuleId);
+    return {
+      success: true,
+      deleted,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message || `Failed to delete Context Capsule "${capsuleId}"`,
+    };
+  }
+});
+
+ipcMain.handle('capsule:open-dialog', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: 'Import Context Capsule',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Context Capsule JSON', extensions: ['json'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return { canceled: true };
+    }
+
+    const filePath = result.filePaths[0];
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const capsule = contextCapsuleManager.parseCapsule(raw);
+
+    return {
+      success: true,
+      canceled: false,
+      filePath,
+      capsule,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      canceled: false,
+      error: err.message || 'Failed to import Context Capsule file',
+    };
+  }
+});
+
+ipcMain.handle('capsule:import-file', async (_, filePath) => {
+  try {
+    if (!filePath || typeof filePath !== 'string') {
+      return { success: false, error: 'File path is required' };
+    }
+    if (!fs.existsSync(filePath)) {
+      return { success: false, error: `Capsule file not found at ${filePath}` };
+    }
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const capsule = contextCapsuleManager.parseCapsule(raw);
+
+    return {
+      success: true,
+      filePath,
+      capsule,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message || 'Failed to parse Context Capsule',
+    };
+  }
+});
+
+ipcMain.handle('capsule:parse', async (_, raw) => {
+  try {
+    const capsule = contextCapsuleManager.parseCapsule(raw);
+    return {
+      success: true,
+      capsule,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message || 'Failed to parse Context Capsule JSON',
+    };
+  }
+});
+
+ipcMain.handle('capsule:validate', async (_, capsule) => {
+  try {
+    const val = contextCapsuleManager.validateCapsule(capsule);
+    return val;
+  } catch (err) {
+    return {
+      valid: false,
+      errors: [err.message || 'Validation error'],
+    };
+  }
+});
+
+ipcMain.handle('capsule:evaluate-budget', async (_, threadId) => {
+  try {
+    if (!threadId) {
+      return { success: false, error: 'threadId is required' };
+    }
+    const turns = harnessRuntime.turnManager ? harnessRuntime.turnManager.listTurnsByThread(threadId) : [];
+    const items = harnessRuntime.itemStore ? turns.flatMap((t) => harnessRuntime.itemStore.getItemsByTurn(t.turnId)) : [];
+    const thread = harnessRuntime.getThread ? harnessRuntime.getThread(threadId) : null;
+
+    const compiled = harnessRuntime.contextEngine.buildContext({
+      thread,
+      turns,
+      items,
+      workspacePath: activeWorkspace || process.cwd(),
+    });
+
+    return {
+      success: true,
+      contextMetrics: compiled.metadata,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message || 'Failed to evaluate context budget',
+    };
+  }
+});
+
+
 
 app.on('will-quit', () => {
   logger.info('MAIN', 'Application shutting down cleanly');
