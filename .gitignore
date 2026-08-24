@@ -34,3 +34,5 @@ tsconfig.tsbuildinfo
 demo-workspaces/**/exports/
 .echo-nullity-*
 .nexus-recovery/
+
+.nexus-recovery/
