@@ -25,6 +25,7 @@ class GithubAuthManager {
       isConnected: false,
       user: null,
       token: null,
+      isAuthExpired: false,
     };
     this.workspaceAssociations = {};
     this.availableRepositories = new Map();
@@ -108,6 +109,7 @@ class GithubAuthManager {
             htmlUrl: vault.user.htmlUrl || `https://github.com/${vault.user.username}`,
           },
           token: token || null,
+          isAuthExpired: false,
         };
       }
 
@@ -163,13 +165,15 @@ class GithubAuthManager {
   }
 
   async getStatus() {
-    if (!this.authState.token) {
+    if (!this.authState.token && !this.authState.isAuthExpired) {
       this.loadVault();
     }
     return {
       isConnected: this.authState.isConnected,
       user: this.authState.user,
       config: this.getOAuthConfigStatus(),
+      isAuthExpired: !!this.authState.isAuthExpired,
+      authRequired: !this.authState.isConnected,
     };
   }
 
@@ -330,6 +334,7 @@ class GithubAuthManager {
             isConnected: true,
             user,
             token: accessToken,
+            isAuthExpired: false,
           };
           this.saveVault(user, accessToken);
 
@@ -344,7 +349,7 @@ class GithubAuthManager {
         } catch (err) {
           console.error('[GITHUB-AUTH] OAuth callback error:', err.message);
           res.writeHead(500, { 'Content-Type': 'text/html' });
-          res.end(this.renderHtmlResponse(false, `Authentication Error: ${err.message}`));
+          res.end(this.renderHtmlResponse(false, 'An unexpected error occurred during authentication.'));
           this.cleanupServer(server);
           if (!isResolved) {
             isResolved = true;
@@ -440,6 +445,7 @@ class GithubAuthManager {
       isConnected: false,
       user: null,
       token: null,
+      isAuthExpired: false,
     };
     this.workspaceAssociations = {};
     return {
@@ -450,64 +456,370 @@ class GithubAuthManager {
   }
 
   async listRepositories() {
-    if (!this.authState.isConnected) {
+    if (!this.authState.token && !this.authState.isAuthExpired) {
+      this.loadVault();
+    }
+
+    if (!this.authState.isConnected || !this.authState.token) {
       return {
         success: false,
-        error: 'Not authenticated with GitHub',
+        isConnected: false,
+        authRequired: true,
+        errorCode: this.authState.isAuthExpired ? 'GITHUB_AUTH_EXPIRED' : 'GITHUB_NOT_AUTHENTICATED',
+        error: this.authState.isAuthExpired
+          ? 'GitHub authentication expired or was revoked. Please reconnect GitHub.'
+          : 'Not authenticated with GitHub. Please connect your GitHub account.',
         repositories: [],
       };
     }
 
-    if (this.authState.token && typeof fetch !== 'undefined') {
-      try {
-        const res = await fetch('https://api.github.com/user/repos?sort=updated&per_page=100', {
-          headers: {
-            'Authorization': `Bearer ${this.authState.token}`,
-            'User-Agent': 'NEXUS-Workbench-App',
-            'Accept': 'application/vnd.github.v3+json',
-          },
-        });
-        if (res.ok) {
-          const repos = await res.json();
-          if (Array.isArray(repos)) {
-            const mapped = repos.map((r) => ({
-              id: String(r.id),
-              name: r.name,
-              owner: r.owner?.login || this.authState.user?.username || 'user',
-              fullName: r.full_name || `${r.owner?.login || 'user'}/${r.name}`,
-              private: !!r.private,
-              htmlUrl: r.html_url,
-              cloneUrl: r.clone_url || `${r.html_url}.git`,
-              defaultBranch: r.default_branch || 'main',
-            }));
-            this.availableRepositories = new Map(mapped.map((repo) => [repo.id, repo]));
-            return {
-              success: true,
-              repositories: mapped,
-            };
-          }
-        }
-      } catch (e) {
-        console.warn('[GITHUB-AUTH] Error fetching repositories from GitHub API:', e.message);
-      }
+    if (typeof fetch === 'undefined') {
+      return {
+        success: false,
+        error: 'Fetch API is unavailable in this runtime.',
+        repositories: [],
+      };
     }
 
-    return {
-      success: false,
-      error: 'Unable to load repositories from GitHub. Please reconnect and try again.',
-      repositories: [],
-    };
+    try {
+      const res = await fetch('https://api.github.com/user/repos?sort=updated&per_page=100', {
+        headers: {
+          'Authorization': `Bearer ${this.authState.token}`,
+          'User-Agent': 'NEXUS-Workbench-App',
+          'Accept': 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+      });
+
+      if (res.ok) {
+        const repos = await res.json();
+        if (Array.isArray(repos)) {
+          const mapped = repos.map((r) => ({
+            id: String(r.id),
+            name: r.name,
+            owner: r.owner?.login || this.authState.user?.username || 'user',
+            fullName: r.full_name || `${r.owner?.login || 'user'}/${r.name}`,
+            private: !!r.private,
+            htmlUrl: r.html_url,
+            cloneUrl: r.clone_url || `${r.html_url}.git`,
+            defaultBranch: r.default_branch || 'main',
+          }));
+          this.availableRepositories = new Map(mapped.map((repo) => [repo.id, repo]));
+          this.authState.isAuthExpired = false;
+          return {
+            success: true,
+            repositories: mapped,
+          };
+        }
+      }
+
+      // Handle non-2xx status codes with observable, sanitized errors
+      if (res.status === 401) {
+        this.authState.isConnected = false;
+        this.authState.token = null;
+        this.authState.isAuthExpired = true;
+        return {
+          success: false,
+          isConnected: false,
+          authRequired: true,
+          errorCode: 'GITHUB_AUTH_EXPIRED',
+          error: 'GitHub authentication expired or was revoked. Please reconnect GitHub.',
+          repositories: [],
+        };
+      }
+
+      if (res.status === 403) {
+        return {
+          success: false,
+          error: 'GitHub API access was rejected or rate-limited. Please try again later.',
+          repositories: [],
+        };
+      }
+
+      return {
+        success: false,
+        error: `GitHub repository request failed (HTTP ${res.status}).`,
+        repositories: [],
+      };
+    } catch (err) {
+      let errorMsg = err ? (err.message || String(err)) : 'Network error';
+      errorMsg = errorMsg.replace(/gh[opusr]_[a-zA-Z0-9_]{16,}/g, 'gho_***');
+      return {
+        success: false,
+        error: `Failed to connect to GitHub API: ${errorMsg}`,
+        repositories: [],
+      };
+    }
   }
 
   async getSelectedRepository(workspacePath) {
     if (!workspacePath || typeof workspacePath !== 'string') {
+      const values = Object.values(this.workspaceAssociations);
+      if (values.length > 0) {
+        const latest = values.sort((a, b) => (b.associatedAt || 0) - (a.associatedAt || 0))[0];
+        return {
+          success: true,
+          repo: latest.repo,
+          remoteName: latest.remoteName,
+        };
+      }
       return { success: false, repo: null };
     }
-    const record = this.workspaceAssociations[workspacePath];
+
+    let record = this.workspaceAssociations[workspacePath];
+    if (!record) {
+      const norm = path.resolve(workspacePath);
+      record = this.workspaceAssociations[norm];
+      if (!record) {
+        for (const [p, assoc] of Object.entries(this.workspaceAssociations)) {
+          if (path.resolve(p) === norm || path.basename(p).toLowerCase() === path.basename(workspacePath).toLowerCase()) {
+            record = assoc;
+            break;
+          }
+        }
+      }
+    }
+
     return {
       success: true,
       repo: record ? record.repo : null,
       remoteName: record ? record.remoteName : null,
+    };
+  }
+
+  getGit(workspacePath) {
+    const gitManager = require('./gitManager');
+    return gitManager.getGit(workspacePath);
+  }
+
+  async resolveLocalRepository(repo, currentWorkspacePath = '') {
+    if (!repo) {
+      return { exists: false, error: 'No repository provided' };
+    }
+
+    const targetName = (repo.name || '').toLowerCase();
+    const targetFullName = (repo.fullName || `${repo.owner}/${repo.name}`).toLowerCase();
+    const targetCloneUrl = (repo.cloneUrl || '').toLowerCase();
+    const targetHtmlUrl = (repo.htmlUrl || '').toLowerCase();
+
+    const checkDirMatches = async (dirPath) => {
+      try {
+        if (!dirPath || typeof dirPath !== 'string' || !fs.existsSync(dirPath)) return false;
+        const stat = fs.statSync(dirPath);
+        if (!stat.isDirectory()) return false;
+        const gitDir = path.join(dirPath, '.git');
+        if (!fs.existsSync(gitDir)) return false;
+
+        const git = this.getGit(dirPath);
+        const isRepo = await git.checkIsRepo().catch(() => false);
+        if (!isRepo) return false;
+
+        let remotes = [];
+        try {
+          remotes = await git.getRemotes(true);
+        } catch (e) {
+          remotes = [];
+        }
+
+        for (const r of remotes) {
+          const fetchUrl = (r.refs?.fetch || '').toLowerCase();
+          const pushUrl = (r.refs?.push || '').toLowerCase();
+          if (
+            (targetFullName && (fetchUrl.includes(targetFullName) || pushUrl.includes(targetFullName))) ||
+            (targetCloneUrl && (fetchUrl.includes(targetCloneUrl) || pushUrl.includes(targetCloneUrl))) ||
+            (targetHtmlUrl && (fetchUrl.includes(targetHtmlUrl) || pushUrl.includes(targetHtmlUrl))) ||
+            (targetName && (fetchUrl.includes(`/${targetName}.git`) || pushUrl.includes(`/${targetName}.git`)))
+          ) {
+            return true;
+          }
+        }
+
+        if (targetName && path.basename(dirPath).toLowerCase() === targetName) {
+          return true;
+        }
+
+        return false;
+      } catch (err) {
+        return false;
+      }
+    };
+
+    if (currentWorkspacePath && await checkDirMatches(currentWorkspacePath)) {
+      return {
+        exists: true,
+        localPath: path.resolve(currentWorkspacePath),
+        matchedBy: 'currentWorkspace',
+      };
+    }
+
+    for (const [assocPath, assoc] of Object.entries(this.workspaceAssociations)) {
+      if (
+        (assoc.repo?.fullName && assoc.repo.fullName.toLowerCase() === targetFullName) ||
+        (assoc.repo?.id && String(assoc.repo.id) === String(repo.id)) ||
+        (assoc.repo?.name && assoc.repo.name.toLowerCase() === targetName)
+      ) {
+        if (await checkDirMatches(assocPath)) {
+          return {
+            exists: true,
+            localPath: path.resolve(assocPath),
+            matchedBy: 'savedAssociation',
+          };
+        }
+      }
+    }
+
+    let homeDir = '';
+    let docDir = '';
+    try {
+      if (appModule && typeof appModule.getPath === 'function') {
+        homeDir = appModule.getPath('home') || '';
+        docDir = appModule.getPath('documents') || '';
+      }
+    } catch (e) {}
+    if (!homeDir) {
+      homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    }
+
+    const candidateFolders = [
+      path.join(process.cwd(), repo.name),
+      path.join(process.cwd(), '..', repo.name),
+    ];
+    if (docDir) candidateFolders.push(path.join(docDir, repo.name));
+    if (homeDir) {
+      candidateFolders.push(
+        path.join(homeDir, repo.name),
+        path.join(homeDir, 'Projects', repo.name),
+        path.join(homeDir, 'Documents', repo.name),
+        path.join(homeDir, 'Developer', repo.name),
+        path.join(homeDir, 'Desktop', repo.name)
+      );
+    }
+
+    for (const candidate of candidateFolders) {
+      if (await checkDirMatches(candidate)) {
+        return {
+          exists: true,
+          localPath: path.resolve(candidate),
+          matchedBy: 'filesystemDiscovery',
+        };
+      }
+    }
+
+    const suggestedClonePath = docDir
+      ? path.join(docDir, repo.name)
+      : path.join(homeDir || process.cwd(), repo.name);
+
+    return {
+      exists: false,
+      suggestedClonePath,
+    };
+  }
+
+  async cloneRepository(repo, destinationDir) {
+    if (!repo) {
+      return { success: false, error: 'No repository provided' };
+    }
+    if (!destinationDir || typeof destinationDir !== 'string') {
+      return { success: false, error: 'Invalid destination directory' };
+    }
+
+    const dest = path.resolve(destinationDir);
+
+    if (fs.existsSync(dest)) {
+      try {
+        const files = fs.readdirSync(dest);
+        if (files.length > 0) {
+          return {
+            success: false,
+            error: `Destination directory "${dest}" already exists and is not empty. Please choose an empty folder.`,
+          };
+        }
+      } catch (e) {
+        return { success: false, error: `Cannot inspect destination directory: ${e.message}` };
+      }
+    } else {
+      try {
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+      } catch (e) {
+        return { success: false, error: `Failed to create destination parent folder: ${e.message}` };
+      }
+    }
+
+    const cloneUrl = repo.cloneUrl || repo.htmlUrl;
+
+    // Create an isolated non-interactive environment for Git operations.
+    // Explicitly delete interactive editor, pager, and askpass environment variables
+    // so simple-git does not trigger security validation exceptions, and Git never prompts.
+    const isolatedEnv = { ...process.env };
+    delete isolatedEnv.EDITOR;
+    delete isolatedEnv.editor;
+    delete isolatedEnv.VISUAL;
+    delete isolatedEnv.visual;
+    delete isolatedEnv.GIT_EDITOR;
+    delete isolatedEnv.git_editor;
+    delete isolatedEnv.GIT_SEQUENCE_EDITOR;
+    delete isolatedEnv.git_sequence_editor;
+    delete isolatedEnv.PAGER;
+    delete isolatedEnv.pager;
+    delete isolatedEnv.GIT_PAGER;
+    delete isolatedEnv.git_pager;
+    delete isolatedEnv.GIT_ASKPASS;
+    delete isolatedEnv.git_askpass;
+    delete isolatedEnv.SSH_ASKPASS;
+    delete isolatedEnv.ssh_askpass;
+
+    isolatedEnv.GIT_TERMINAL_PROMPT = '0';
+    isolatedEnv.GIT_CONFIG_NOSYSTEM = '1';
+    isolatedEnv.GIT_CONFIG_GLOBAL = process.env.GIT_CONFIG_GLOBAL || '/dev/null';
+    isolatedEnv.GIT_CONFIG_SYSTEM = process.env.GIT_CONFIG_SYSTEM || '/dev/null';
+
+    const git = simpleGit({
+      maxConcurrentProcesses: 4,
+      unsafe: { allowUnsafeConfigPaths: true },
+    }).env(isolatedEnv);
+
+    let cloneSuccess = false;
+    let lastError = null;
+
+    if (this.authState.token) {
+      try {
+        const authHeader = `Authorization: Basic ${Buffer.from(`x-access-token:${this.authState.token}`).toString('base64')}`;
+        await git.clone(cloneUrl, dest, ['-c', `http.extraheader=${authHeader}`]);
+        cloneSuccess = true;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (!cloneSuccess) {
+      try {
+        await git.clone(cloneUrl, dest);
+        cloneSuccess = true;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (!cloneSuccess) {
+      let errorMsg = lastError ? (lastError.message || String(lastError)) : 'Clone failed';
+      errorMsg = errorMsg.replace(/gh[opusr]_[a-zA-Z0-9_]{16,}/g, 'gho_***');
+      return { success: false, error: `Failed to clone repository: ${errorMsg}` };
+    }
+
+    // Clean up any http.extraheader that git clone -c persisted into .git/config
+    // to ensure subsequent Git operations do not send duplicate authorization headers.
+    try {
+      const cleanGit = simpleGit({ baseDir: dest, maxConcurrentProcesses: 2 });
+      await cleanGit.raw(['config', '--unset-all', 'http.extraheader']).catch(() => {});
+    } catch (e) {}
+
+    this.availableRepositories.set(String(repo.id), repo);
+    await this.associateRepository(dest, repo);
+
+    return {
+      success: true,
+      localPath: dest,
+      repo,
     };
   }
 
@@ -531,7 +843,7 @@ class GithubAuthManager {
     let remoteStatus = 'Associated repository with workspace';
 
     try {
-      const git = simpleGit({ baseDir: workspacePath, maxConcurrentProcesses: 4 });
+      const git = this.getGit(workspacePath);
       const isRepo = await git.checkIsRepo().catch(() => false);
       if (!isRepo) {
         await git.init().catch((e) => console.warn('[GITHUB-AUTH] Git init notice:', e.message));

@@ -2360,8 +2360,20 @@ ipcMain.handle('git:discard', async (_, { workspacePath, file }) => {
   return gitManager.discard(workspacePath, file);
 });
 
+ipcMain.handle('git:fetch', async (_, { workspacePath, remote }) => {
+  return gitManager.fetch(workspacePath, remote);
+});
+
+ipcMain.handle('git:pull', async (_, { workspacePath, remote, branch }) => {
+  return gitManager.pull(workspacePath, remote, branch);
+});
+
 ipcMain.handle('git:push', async (_, { workspacePath, remote, branch }) => {
   return gitManager.push(workspacePath, remote, branch);
+});
+
+ipcMain.handle('git:sync', async (_, { workspacePath, remote, branch }) => {
+  return gitManager.sync(workspacePath, remote, branch);
 });
 
 ipcMain.handle('git:commitAndPush', async (_, { workspacePath, message }) => {
@@ -2425,6 +2437,32 @@ ipcMain.handle('github:associateRepo', async (_, { workspacePath, repo }) => {
 
 ipcMain.handle('github:getSelectedRepo', async (_, workspacePath) => {
   return githubAuthManager.getSelectedRepository(workspacePath);
+});
+
+ipcMain.handle('github:resolveLocalPath', async (_, { repo, currentWorkspacePath }) => {
+  return githubAuthManager.resolveLocalRepository(repo, currentWorkspacePath);
+});
+
+ipcMain.handle('github:selectCloneDestination', async (_, defaultName) => {
+  if (!mainWindow) return null;
+  const homeDir = (app && typeof app.getPath === 'function')
+    ? (app.getPath('documents') || app.getPath('home') || process.cwd())
+    : process.cwd();
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Destination Folder to Clone Repository',
+    defaultPath: homeDir,
+    properties: ['openDirectory', 'createDirectory'],
+    buttonLabel: 'Select Folder',
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  const selectedDir = result.filePaths[0];
+  return defaultName ? path.join(selectedDir, defaultName) : selectedDir;
+});
+
+ipcMain.handle('github:cloneRepo', async (_, { repo, destinationDir }) => {
+  return githubAuthManager.cloneRepository(repo, destinationDir);
 });
 
 // Workspace Search & Replace IPC Handlers

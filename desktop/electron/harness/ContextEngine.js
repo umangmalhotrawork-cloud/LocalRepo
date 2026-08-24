@@ -905,6 +905,7 @@ class ContextEngine {
       skillsText ? `\n--- ACTIVE SKILLS ---\n${skillsText}` : null,
       handoffText ? `\n--- ACTIVE TASK HANDOFF ---\n${handoffText}` : null,
       editorContextText ? `\n--- ACTIVE EDITOR CONTEXT ---\n${editorContextText}` : null,
+      gitHunkText ? `\n--- ACTIVE GIT HUNK ---\n${gitHunkText}` : null,
       gitContextText ? `\n--- CURRENT GIT CONTEXT ---\n${gitContextText}` : null,
       debuggingContextText ? `\n--- CURRENT DEBUGGING CONTEXT ---\n${debuggingContextText}` : null,
       problemsText ? `\n--- ACTIVE PROBLEMS ---\n${problemsText}` : null,

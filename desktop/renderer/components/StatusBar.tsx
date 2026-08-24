@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { GitBranch, ShieldCheck, ChevronDown, Bot, Key, X, Loader2, Layers, Cpu, Check } from "lucide-react";
+import { GitBranch, ShieldCheck, ChevronDown, Bot, Key, X, Loader2, Layers, Cpu, Check, Github } from "lucide-react";
 import { useOutsideClick } from "../hooks/useOutsideClick";
 
 interface StatusBarProps {
@@ -19,6 +19,7 @@ interface StatusBarProps {
   activeProvider?: string;
   activeModel?: string;
   onSelectModel?: (providerId: string, modelId?: string) => void;
+  onOpenGithub?: () => void;
 }
 
 export default function StatusBar({
@@ -36,6 +37,7 @@ export default function StatusBar({
   activeProvider,
   activeModel,
   onSelectModel,
+  onOpenGithub,
 }: StatusBarProps) {
   const [aiConfig, setAiConfig] = useState<any>(null);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
@@ -400,10 +402,15 @@ export default function StatusBar({
 
         <span className="text-[#1a1a24]">|</span>
 
-        {/* Local-First Indicator */}
-        <div className="text-[10px] text-zinc-500 font-semibold">
-          local-first
-        </div>
+        {/* GitHub Status Button */}
+        <button
+          onClick={onOpenGithub}
+          className="flex items-center gap-1.5 text-[10.5px] text-zinc-400 hover:text-cyan-300 transition-colors cursor-pointer py-0.5 px-1.5 rounded hover:bg-white/5"
+          title="GitHub Account Connection & Repository Association"
+        >
+          <Github className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+          <span className="font-mono">GitHub</span>
+        </button>
       </div>
 
       {/* API Key Modal */}

@@ -20,5 +20,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listRepos: () => ipcRenderer.invoke('github:listRepos'),
     associateRepo: (payload: { workspacePath: string; repo: any }) => ipcRenderer.invoke('github:associateRepo', payload),
     getSelectedRepo: (workspacePath: string) => ipcRenderer.invoke('github:getSelectedRepo', workspacePath),
+    resolveLocalPath: (payload: { repo: any; currentWorkspacePath?: string }) => ipcRenderer.invoke('github:resolveLocalPath', payload),
+    selectCloneDestination: (defaultName?: string) => ipcRenderer.invoke('github:selectCloneDestination', defaultName),
+    cloneRepo: (payload: { repo: any; destinationDir: string }) => ipcRenderer.invoke('github:cloneRepo', payload),
   },
 });

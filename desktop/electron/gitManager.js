@@ -7,12 +7,36 @@ class GitManager {
     if (!workspacePath || typeof workspacePath !== 'string') {
       throw new Error('Invalid workspace path');
     }
-    const env = {
-      ...process.env,
-      GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL || '/dev/null',
-      GIT_CONFIG_SYSTEM: process.env.GIT_CONFIG_SYSTEM || '/dev/null',
-      GIT_CONFIG_NOSYSTEM: '1',
-    };
+    const env = { ...process.env };
+    
+    // 1. Remove interactive editor variables
+    delete env.EDITOR;
+    delete env.editor;
+    delete env.VISUAL;
+    delete env.visual;
+    delete env.GIT_EDITOR;
+    delete env.git_editor;
+    delete env.GIT_SEQUENCE_EDITOR;
+    delete env.git_sequence_editor;
+
+    // 2. Remove pager variables
+    delete env.PAGER;
+    delete env.pager;
+    delete env.GIT_PAGER;
+    delete env.git_pager;
+
+    // 3. Remove interactive authentication prompt variables
+    delete env.GIT_ASKPASS;
+    delete env.git_askpass;
+    delete env.SSH_ASKPASS;
+    delete env.ssh_askpass;
+
+    // 4. Explicitly set non-interactive and isolated flags
+    env.GIT_TERMINAL_PROMPT = '0';
+    env.GIT_CONFIG_NOSYSTEM = '1';
+    env.GIT_CONFIG_GLOBAL = process.env.GIT_CONFIG_GLOBAL || '/dev/null';
+    env.GIT_CONFIG_SYSTEM = process.env.GIT_CONFIG_SYSTEM || '/dev/null';
+
     return simpleGit({
       baseDir: workspacePath,
       maxConcurrentProcesses: 4,
@@ -256,7 +280,11 @@ class GitManager {
     const git = this.getGit(workspacePath);
     try {
       await git.reset(['HEAD']);
-    } catch (e) {}
+    } catch (e) {
+      try {
+        await git.raw(['rm', '-r', '--cached', '.']);
+      } catch (e2) {}
+    }
     return this.getStatus(workspacePath);
   }
 
@@ -642,6 +670,9 @@ class GitManager {
     if (!rawErr) return 'Push failed.';
     const lower = String(rawErr).toLowerCase();
 
+    if (lower.includes('duplicate header')) {
+      return 'Push failed: remote received duplicate Authorization header.';
+    }
     if (
       lower.includes('401') ||
       lower.includes('invalid credentials') ||
@@ -676,7 +707,144 @@ class GitManager {
       return 'No remote repository configured.';
     }
 
-    return String(rawErr).replace(/ghp_[a-zA-Z0-9]{36,40}|gho_[a-zA-Z0-9]{36,40}/g, 'gho_***');
+    return String(rawErr)
+      .replace(/gh[opusr]_[a-zA-Z0-9_]{16,}/g, 'gho_***')
+      .replace(/Basic\s+[a-zA-Z0-9+/=]{16,}/g, 'Basic [REDACTED]');
+  }
+
+  async fetch(workspacePath, remote = 'origin') {
+    try {
+      const git = this.getGit(workspacePath);
+      const { githubAuthManager } = require('./githubAuthManager');
+      const associatedRes = await githubAuthManager.getSelectedRepository(workspacePath).catch(() => ({ repo: null }));
+      const associatedRepo = associatedRes?.repo || null;
+      const token = githubAuthManager.authState?.token || null;
+
+      let remotes = await git.getRemotes(true).catch(() => []);
+      if (associatedRepo && remotes.length === 0) {
+        try {
+          await git.addRemote('origin', associatedRepo.cloneUrl || associatedRepo.htmlUrl);
+          remotes = await git.getRemotes(true);
+        } catch (e) {}
+      }
+
+      if (!remotes || remotes.length === 0) {
+        return {
+          success: false,
+          noRemote: true,
+          message: 'No remote repository configured',
+          status: await this.getStatus(workspacePath),
+        };
+      }
+
+      let targetRemote = remote;
+      if (!remotes.some((r) => r.name === targetRemote)) {
+        targetRemote = remotes[0].name;
+      }
+
+      let fetchResult;
+      if (token) {
+        // Unset any static http.extraheader from local repo config to ensure exactly one auth header is sent via -c
+        await git.raw(['config', '--unset-all', 'http.extraheader']).catch(() => {});
+        const basicAuth = Buffer.from(`x-access-token:${token}`).toString('base64');
+        const authConfig = `http.extraheader=Authorization: Basic ${basicAuth}`;
+        fetchResult = await git.raw(['-c', authConfig, 'fetch', targetRemote]);
+      } else {
+        fetchResult = await git.fetch(targetRemote);
+      }
+
+      const status = await this.getStatus(workspacePath);
+      return {
+        success: true,
+        result: fetchResult,
+        message: `Fetched from ${targetRemote}`,
+        status,
+      };
+    } catch (err) {
+      console.error('[GIT-MANAGER] fetch error:', err);
+      const formatted = this.formatPushError(err.message || String(err));
+      return {
+        success: false,
+        error: formatted,
+        message: `Fetch failed: ${formatted}`,
+        status: await this.getStatus(workspacePath),
+      };
+    }
+  }
+
+  async pull(workspacePath, remote = 'origin', branch) {
+    try {
+      const git = this.getGit(workspacePath);
+      const { githubAuthManager } = require('./githubAuthManager');
+      const associatedRes = await githubAuthManager.getSelectedRepository(workspacePath).catch(() => ({ repo: null }));
+      const associatedRepo = associatedRes?.repo || null;
+      const token = githubAuthManager.authState?.token || null;
+
+      let remotes = await git.getRemotes(true).catch(() => []);
+      if (associatedRepo && remotes.length === 0) {
+        try {
+          await git.addRemote('origin', associatedRepo.cloneUrl || associatedRepo.htmlUrl);
+          remotes = await git.getRemotes(true);
+        } catch (e) {}
+      }
+
+      if (!remotes || remotes.length === 0) {
+        return {
+          success: false,
+          noRemote: true,
+          message: 'No remote repository configured',
+          status: await this.getStatus(workspacePath),
+        };
+      }
+
+      let targetRemote = remote;
+      if (!remotes.some((r) => r.name === targetRemote)) {
+        targetRemote = remotes[0].name;
+      }
+
+      let targetBranch = branch;
+      if (!targetBranch) {
+        const st = await git.status();
+        targetBranch = st.current || 'main';
+      }
+
+      let pullResult;
+      if (token) {
+        // Unset any static http.extraheader from local repo config to ensure exactly one auth header is sent via -c
+        await git.raw(['config', '--unset-all', 'http.extraheader']).catch(() => {});
+        const basicAuth = Buffer.from(`x-access-token:${token}`).toString('base64');
+        const authConfig = `http.extraheader=Authorization: Basic ${basicAuth}`;
+        try {
+          pullResult = await git.raw(['-c', authConfig, 'pull', targetRemote, targetBranch]);
+        } catch (pullErr) {
+          // If pull with branch spec failed, try default pull
+          pullResult = await git.raw(['-c', authConfig, 'pull']);
+        }
+      } else {
+        try {
+          pullResult = await git.pull(targetRemote, targetBranch);
+        } catch (pullErr) {
+          pullResult = await git.pull();
+        }
+      }
+
+      const status = await this.getStatus(workspacePath);
+      return {
+        success: true,
+        result: pullResult,
+        message: `Pulled from ${targetRemote}/${targetBranch}`,
+        status,
+      };
+    } catch (err) {
+      console.error('[GIT-MANAGER] pull error:', err);
+      const formatted = this.formatPushError(err.message || String(err));
+      return {
+        success: false,
+        error: formatted,
+        message: `Pull failed: ${formatted}`,
+        status: await this.getStatus(workspacePath),
+      };
+    }
   }
 
   async push(workspacePath, remote = 'origin', branch) {
@@ -704,6 +872,11 @@ class GitManager {
         };
       }
 
+      let targetRemote = remote;
+      if (!remotes.some((r) => r.name === targetRemote)) {
+        targetRemote = remotes[0].name;
+      }
+
       let targetBranch = branch;
       if (!targetBranch) {
         const st = await git.status();
@@ -712,18 +885,20 @@ class GitManager {
 
       let pushResult;
       if (token) {
+        // Unset any static http.extraheader from local repo config to ensure exactly one auth header is sent via -c
+        await git.raw(['config', '--unset-all', 'http.extraheader']).catch(() => {});
         const basicAuth = Buffer.from(`x-access-token:${token}`).toString('base64');
         const authConfig = `http.extraheader=Authorization: Basic ${basicAuth}`;
         try {
-          pushResult = await git.raw(['-c', authConfig, 'push', '--set-upstream', remote, targetBranch]);
+          pushResult = await git.raw(['-c', authConfig, 'push', '--set-upstream', targetRemote, targetBranch]);
         } catch (upstreamErr) {
-          pushResult = await git.raw(['-c', authConfig, 'push', remote, targetBranch]);
+          pushResult = await git.raw(['-c', authConfig, 'push', targetRemote, targetBranch]);
         }
       } else {
         try {
-          pushResult = await git.push(remote, targetBranch, ['--set-upstream']);
+          pushResult = await git.push(targetRemote, targetBranch, ['--set-upstream']);
         } catch (upstreamErr) {
-          pushResult = await git.push(remote, targetBranch);
+          pushResult = await git.push(targetRemote, targetBranch);
         }
       }
 
@@ -731,7 +906,7 @@ class GitManager {
       return {
         success: true,
         result: pushResult,
-        message: `Pushed to ${remote}/${targetBranch}`,
+        message: `Pushed to ${targetRemote}/${targetBranch}`,
         status,
       };
     } catch (err) {
@@ -741,6 +916,48 @@ class GitManager {
         success: false,
         error: formatted,
         message: `Push failed: ${formatted}`,
+        status: await this.getStatus(workspacePath),
+      };
+    }
+  }
+
+  async sync(workspacePath, remote = 'origin', branch) {
+    try {
+      // 1. Fetch & Pull changes first
+      const pullRes = await this.pull(workspacePath, remote, branch);
+      if (!pullRes.success && !pullRes.noRemote) {
+        return {
+          success: false,
+          error: pullRes.error || pullRes.message,
+          message: `Sync failed during pull: ${pullRes.error || pullRes.message}`,
+          status: pullRes.status,
+        };
+      }
+
+      // 2. Push local commits to remote
+      const pushRes = await this.push(workspacePath, remote, branch);
+      if (!pushRes.success && !pushRes.noRemote) {
+        return {
+          success: false,
+          error: pushRes.error || pushRes.message,
+          message: `Sync failed during push: ${pushRes.error || pushRes.message}`,
+          status: pushRes.status,
+        };
+      }
+
+      const status = await this.getStatus(workspacePath);
+      return {
+        success: true,
+        message: 'Synchronized with remote repository successfully.',
+        status,
+      };
+    } catch (err) {
+      console.error('[GIT-MANAGER] sync error:', err);
+      const formatted = this.formatPushError(err.message || String(err));
+      return {
+        success: false,
+        error: formatted,
+        message: `Sync failed: ${formatted}`,
         status: await this.getStatus(workspacePath),
       };
     }
@@ -869,6 +1086,8 @@ class GitManager {
 
       if (!remoteMismatch) {
         if (token) {
+          // Unset any static http.extraheader from local repo config to ensure exactly one auth header is sent via -c
+          await git.raw(['config', '--unset-all', 'http.extraheader']).catch(() => {});
           const basicAuth = Buffer.from(`x-access-token:${token}`).toString('base64');
           const authConfig = `http.extraheader=Authorization: Basic ${basicAuth}`;
           try {
@@ -952,45 +1171,7 @@ class GitManager {
         };
       }
 
-      // Try AI-powered suggestion if available
-      try {
-        let aiRouter = null;
-        try {
-          const routerMod = require('./ai/AIProviderRouter');
-          aiRouter = routerMod.aiRouter;
-        } catch (e) {}
-
-        if (aiRouter && aiRouter.getActiveProvider && aiRouter.getActiveProvider().isConfigured) {
-          const fileSummaryText = files.slice(0, 10).map((f) => `- [${f.status}] ${f.path}`).join('\n');
-          let diffSnippet = '';
-          try {
-            const git = this.getGit(workspacePath);
-            diffSnippet = (await git.diff(['--stat'])).slice(0, 500);
-          } catch (dErr) {}
-
-          const prompt = `Generate a single concise, conventional git commit message (under 60 chars) summarizing these changes. Do NOT include markdown blocks or extra explanation. Just the message, e.g. "feat(cart): update tax calculation" or "fix(auth): resolve token expiration".\nFiles:\n${fileSummaryText}\n${diffSnippet ? `Diff stat:\n${diffSnippet}` : ''}`;
-          const aiRes = await aiRouter.execute({
-            task: prompt,
-            model: 'fast',
-            systemPrompt: 'You are an expert software engineer generating conventional commit messages.',
-          });
-
-          if (aiRes && aiRes.response) {
-            let cleanMsg = aiRes.response.trim().replace(/^["'`]|["'`]$/g, '').split('\n')[0].trim();
-            if (cleanMsg.length > 5 && cleanMsg.length < 90) {
-              return {
-                success: true,
-                suggestedMessage: cleanMsg,
-                source: 'ai',
-              };
-            }
-          }
-        }
-      } catch (aiErr) {
-        console.warn('[GIT-MANAGER] AI commit suggestion fallback to heuristic:', aiErr.message);
-      }
-
-      // High-precision heuristic generator
+      // High-precision heuristic generator (deterministic, no AI calls)
       const paths = files.map((f) => f.path);
       const isAllTests = paths.every((p) => p.includes('test') || p.includes('spec') || p.startsWith('tests/'));
       const isAllDocs = paths.every((p) => p.endsWith('.md') || p.includes('docs/') || p.endsWith('.txt'));
@@ -1730,4 +1911,6 @@ class GitManager {
 }
 
 const gitManager = new GitManager();
+gitManager.GitManager = GitManager;
+gitManager.gitManager = gitManager;
 module.exports = gitManager;

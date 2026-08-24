@@ -33,10 +33,20 @@ import {
   Layers,
   Split,
   FolderGit2,
+  Download,
 } from "lucide-react";
 import { GitFileItem, LastCommitInfo, GitBranchInfo, GitStashItem, GitHistoryGraph, GitCommitItem } from "../hooks/useGit";
 
-interface SourceControlPanelProps {
+export type GitOperationType = "commit" | "push" | "pull" | "fetch" | "sync";
+export type GitOperationState = "idle" | "processing" | "success" | "failed";
+
+export interface GitOperationProgress {
+  type: GitOperationType;
+  state: GitOperationState;
+  errorMessage?: string | null;
+}
+
+export interface SourceControlPanelProps {
   isRepo: boolean;
   currentBranch: string;
   isDetached?: boolean;
@@ -55,6 +65,8 @@ interface SourceControlPanelProps {
   loading: boolean;
   statusMessage: string | null;
   errorMessage: string | null;
+  workspacePath?: string;
+  repositoryName?: string;
   onRefresh: () => void;
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
@@ -62,7 +74,10 @@ interface SourceControlPanelProps {
   onUnstageAll: () => void;
   onCommit: (message: string) => Promise<boolean>;
   onCommitAndPush?: (message: string) => Promise<boolean>;
+  onFetch?: (remote?: string) => Promise<boolean>;
+  onPull?: (remote?: string, branch?: string) => Promise<boolean>;
   onPush?: (remote?: string, branch?: string) => Promise<boolean>;
+  onSync?: (remote?: string, branch?: string) => Promise<boolean>;
   onSuggestMessage?: () => Promise<string | null>;
   onCheckoutBranch: (branch: string, force?: boolean) => Promise<boolean> | void;
   onCreateBranch: (branch: string, checkout?: boolean) => Promise<boolean> | void;
@@ -89,6 +104,9 @@ interface SourceControlPanelProps {
   // Conflict Resolver Integration (Milestone 30)
   onOpenConflictResolver?: () => void;
   conflictsCount?: number;
+  // Popover mode support
+  isPopover?: boolean;
+  onClosePopover?: () => void;
 }
 
 export default function SourceControlPanel({
@@ -110,6 +128,8 @@ export default function SourceControlPanel({
   loading,
   statusMessage,
   errorMessage,
+  workspacePath,
+  repositoryName,
   onRefresh,
   onStageFile,
   onUnstageFile,
@@ -117,7 +137,10 @@ export default function SourceControlPanel({
   onUnstageAll,
   onCommit,
   onCommitAndPush,
+  onFetch,
+  onPull,
   onPush,
+  onSync,
   onSuggestMessage,
   onCheckoutBranch,
   onCreateBranch,
@@ -142,6 +165,8 @@ export default function SourceControlPanel({
   onSelectCommit,
   onOpenConflictResolver,
   conflictsCount = 0,
+  isPopover = false,
+  onClosePopover,
 }: SourceControlPanelProps) {
   const [commitMessage, setCommitMessage] = useState("");
   const [isStagedOpen, setIsStagedOpen] = useState(true);
@@ -160,9 +185,124 @@ export default function SourceControlPanel({
   const [stashToDrop, setStashToDrop] = useState<GitStashItem | null>(null);
   const [showStashSaveModal, setShowStashSaveModal] = useState(false);
   const [customStashMessage, setCustomStashMessage] = useState("");
-  const [isGeneratingSuggestion, setIsGeneratingSuggestion] = useState(false);
+  const [isFetching, setIsFetching] = useState(false);
+  const [isPulling, setIsPulling] = useState(false);
+  const [isPushing, setIsPushing] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [associatedRepo, setAssociatedRepo] = useState<{ fullName: string; owner: string; name: string } | null>(null);
+
+  // Operation Progress State & Dismiss Timer
+  const [operationProgress, setOperationProgress] = useState<GitOperationProgress>({
+    type: "commit",
+    state: "idle",
+    errorMessage: null,
+  });
+  const dismissTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (dismissTimerRef.current) {
+        clearTimeout(dismissTimerRef.current);
+      }
+    };
+  }, []);
+
+  const getOperationLabel = (type: GitOperationType, state: GitOperationState): string => {
+    if (state === "processing") {
+      switch (type) {
+        case "commit":
+          return "Committing...";
+        case "push":
+          return "Pushing...";
+        case "pull":
+          return "Pulling...";
+        case "fetch":
+          return "Fetching...";
+        case "sync":
+          return "Syncing...";
+      }
+    }
+    if (state === "success") {
+      switch (type) {
+        case "commit":
+          return "Commit completed";
+        case "push":
+          return "Push completed";
+        case "pull":
+          return "Pull completed";
+        case "fetch":
+          return "Fetch completed";
+        case "sync":
+          return "Sync completed";
+      }
+    }
+    if (state === "failed") {
+      switch (type) {
+        case "commit":
+          return "Commit failed";
+        case "push":
+          return "Push failed";
+        case "pull":
+          return "Pull failed";
+        case "fetch":
+          return "Fetch failed";
+        case "sync":
+          return "Sync failed";
+      }
+    }
+    return "";
+  };
+
+  const runWithProgress = async (
+    type: GitOperationType,
+    fn: () => Promise<boolean | void>
+  ): Promise<boolean> => {
+    if (dismissTimerRef.current) {
+      clearTimeout(dismissTimerRef.current);
+      dismissTimerRef.current = null;
+    }
+    setOperationProgress({ type, state: "processing", errorMessage: null });
+
+    try {
+      const result = await fn();
+      const isSuccess = result !== false;
+      if (isSuccess) {
+        setOperationProgress({ type, state: "success", errorMessage: null });
+      } else {
+        setOperationProgress({
+          type,
+          state: "failed",
+          errorMessage: errorMessage || null,
+        });
+      }
+
+      dismissTimerRef.current = setTimeout(() => {
+        setOperationProgress((prev) => (prev.type === type ? { type, state: "idle", errorMessage: null } : prev));
+        dismissTimerRef.current = null;
+      }, isSuccess ? 3000 : 4500);
+
+      return isSuccess;
+    } catch (err: any) {
+      const rawMsg = err?.message || String(err);
+      const sanitizedMsg = rawMsg
+        .replace(/gh[opusr]_[a-zA-Z0-9_]{16,}/g, "gho_***")
+        .replace(/Basic\s+[a-zA-Z0-9+/=]{16,}/g, "Basic [REDACTED]");
+
+      setOperationProgress({
+        type,
+        state: "failed",
+        errorMessage: sanitizedMsg,
+      });
+
+      dismissTimerRef.current = setTimeout(() => {
+        setOperationProgress((prev) => (prev.type === type ? { type, state: "idle", errorMessage: null } : prev));
+        dismissTimerRef.current = null;
+      }, 4500);
+
+      return false;
+    }
+  };
 
   // Milestone 28: Visual History & Inspection State
   const [activeSection, setActiveSection] = useState<"changes" | "history" | "stashes">("changes");
@@ -225,7 +365,7 @@ export default function SourceControlPanel({
   useEffect(() => {
     let isMounted = true;
     if (typeof window !== "undefined" && (window as any).electronAPI?.github?.getSelectedRepo) {
-      (window as any).electronAPI.github.getSelectedRepo("").then((res: any) => {
+      (window as any).electronAPI.github.getSelectedRepo(workspacePath || "").then((res: any) => {
         if (isMounted && res && res.repo) {
           setAssociatedRepo(res.repo);
         }
@@ -234,7 +374,7 @@ export default function SourceControlPanel({
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [workspacePath]);
 
   useEffect(() => {
     if (activeSection === "history" && !historyGraph && onFetchHistory) {
@@ -243,7 +383,6 @@ export default function SourceControlPanel({
   }, [activeSection, historyGraph, onFetchHistory]);
 
   const totalChanges = staged.length + unstaged.length + untracked.length;
-  const lastChangesCountRef = useRef(0);
 
   const validateBranchInput = (name: string): string | null => {
     if (!name || !name.trim()) return "Branch name cannot be empty.";
@@ -299,79 +438,100 @@ export default function SourceControlPanel({
     b.toLowerCase().includes(branchSearch.toLowerCase().trim())
   );
 
-  // Automatic suggestion when meaningful file changes are detected
-  const handleAutoSuggest = useCallback(async (force = false) => {
-    if (!onSuggestMessage) return;
-    if (!force && commitMessage.trim()) return;
-    if (totalChanges === 0) return;
-
-    setIsGeneratingSuggestion(true);
-    try {
-      const suggested = await onSuggestMessage();
-      if (suggested) {
-        setCommitMessage(suggested);
-      }
-    } catch (e) {
-      console.warn("[SOURCE-CONTROL] Suggest message error:", e);
-    } finally {
-      setIsGeneratingSuggestion(false);
-    }
-  }, [onSuggestMessage, commitMessage, totalChanges]);
-
-  // Trigger initial auto-suggest when changes appear if message is blank
-  useEffect(() => {
-    if (totalChanges > 0 && lastChangesCountRef.current === 0 && !commitMessage.trim()) {
-      handleAutoSuggest(false);
-    }
-    lastChangesCountRef.current = totalChanges;
-  }, [totalChanges, handleAutoSuggest, commitMessage]);
-
   const handleCommitSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!commitMessage.trim() || staged.length === 0 || isSubmitting) return;
+    if (!commitMessage.trim() || staged.length === 0 || isSubmitting || operationProgress.state === "processing") return;
     setIsSubmitting(true);
-    try {
+    await runWithProgress("commit", async () => {
       const success = await onCommit(commitMessage);
       if (success) {
         setCommitMessage("");
       }
-    } finally {
-      setIsSubmitting(false);
-    }
+      return success;
+    });
+    setIsSubmitting(false);
+  };
+
+  const handleStageAllAndCommit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!commitMessage.trim() || totalChanges === 0 || isSubmitting || operationProgress.state === "processing") return;
+    setIsSubmitting(true);
+    await runWithProgress("commit", async () => {
+      await onStageAll();
+      const success = await onCommit(commitMessage);
+      if (success) {
+        setCommitMessage("");
+      }
+      return success;
+    });
+    setIsSubmitting(false);
   };
 
   const handleCommitAndPushSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!commitMessage.trim() || totalChanges === 0 || isSubmitting) return;
+    if (!commitMessage.trim() || totalChanges === 0 || isSubmitting || operationProgress.state === "processing") return;
     setIsSubmitting(true);
-    try {
+    await runWithProgress("commit", async () => {
       if (onCommitAndPush) {
         const success = await onCommitAndPush(commitMessage);
         if (success) {
           setCommitMessage("");
         }
+        return success;
       } else {
         // Fallback: stage all, commit
         await onStageAll();
         const success = await onCommit(commitMessage);
         if (success) {
           setCommitMessage("");
-          if (onPush) await onPush();
+          if (onPush) return await onPush();
         }
+        return success;
       }
-    } finally {
-      setIsSubmitting(false);
-    }
+    });
+    setIsSubmitting(false);
+  };
+
+  const handleFetchOnly = async () => {
+    if (!onFetch || isFetching || loading || operationProgress.state === "processing") return;
+    setIsFetching(true);
+    await runWithProgress("fetch", async () => {
+      return await onFetch();
+    });
+    setIsFetching(false);
+  };
+
+  const handlePullOnly = async () => {
+    if (!onPull || isPulling || loading || operationProgress.state === "processing") return;
+    setIsPulling(true);
+    await runWithProgress("pull", async () => {
+      return await onPull();
+    });
+    setIsPulling(false);
   };
 
   const handlePushOnly = async () => {
-    if (!onPush || isSubmitting) return;
-    setIsSubmitting(true);
-    try {
-      await onPush();
-    } finally {
-      setIsSubmitting(false);
-    }
+    if (!onPush || isPushing || loading || isSubmitting || operationProgress.state === "processing") return;
+    setIsPushing(true);
+    await runWithProgress("push", async () => {
+      return await onPush();
+    });
+    setIsPushing(false);
+  };
+
+  const handleSyncOnly = async () => {
+    if ((!onSync && (!onPull || !onPush)) || isSyncing || loading || isSubmitting || operationProgress.state === "processing") return;
+    setIsSyncing(true);
+    await runWithProgress("sync", async () => {
+      if (onSync) {
+        return await onSync();
+      } else {
+        if (onPull) await onPull();
+        if (onPush) return await onPush();
+        return true;
+      }
+    });
+    setIsSyncing(false);
   };
 
   const renderBadge = (status: string) => {
@@ -406,57 +566,50 @@ export default function SourceControlPanel({
   return (
     <div
       style={{
-        backgroundColor: "var(--theme-surface-panel, #050507)",
-        borderColor: "var(--theme-border, #1f1f1f)",
+        backgroundColor: isPopover ? "transparent" : "var(--theme-surface-panel, #050507)",
+        borderColor: isPopover ? "transparent" : "var(--theme-border, #1f1f1f)",
         color: "var(--theme-text, #f4f4f5)",
       }}
-      className="h-full flex flex-col border-r font-mono text-xs select-none overflow-hidden"
+      className={`flex flex-col font-mono text-xs select-none ${isPopover ? "h-auto max-h-[500px] overflow-hidden" : "h-full border-r overflow-hidden"}`}
     >
       {/* Top Header */}
       <div
         style={{
-          backgroundColor: "var(--theme-surface, #0a0a0d)",
-          borderColor: "var(--theme-border, #1f1f1f)",
+          backgroundColor: isPopover ? "rgba(10, 12, 22, 0.95)" : "var(--theme-surface, #0a0a0d)",
+          borderColor: isPopover ? "rgba(31, 31, 46, 0.8)" : "var(--theme-border, #1f1f1f)",
         }}
-        className="h-10 border-b px-3 flex items-center justify-between shrink-0"
+        className={`px-2.5 flex items-center justify-between shrink-0 border-b ${isPopover ? "h-8.5" : "h-10"}`}
       >
         <div className="flex items-center gap-2">
-          <GitBranch className="w-4 h-4 text-cyan-400" />
-          <span className="font-bold text-zinc-100 uppercase tracking-wide text-[11px]">
+          <GitBranch className="w-3.5 h-3.5 text-cyan-400" />
+          <span className="font-bold text-zinc-100 uppercase tracking-wide text-[10.5px]">
             Source Control
           </span>
           {totalChanges > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full bg-cyan-950 text-cyan-300 text-[10px] font-bold border border-cyan-500/30">
+            <span className="px-1.5 py-0.2 rounded-full bg-cyan-950 text-cyan-300 text-[9.5px] font-bold border border-cyan-500/30">
               {totalChanges}
             </span>
           )}
         </div>
 
         <div className="flex items-center gap-1.5">
-          {onSuggestMessage && totalChanges > 0 && (
-            <button
-              onClick={() => handleAutoSuggest(true)}
-              disabled={isGeneratingSuggestion || loading}
-              className="px-2 py-0.5 rounded bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/30 text-cyan-300 hover:text-white text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-sm"
-              title="AI suggest concise commit message"
-            >
-              {isGeneratingSuggestion ? (
-                <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
-              ) : (
-                <Sparkles className="w-3 h-3 text-cyan-400" />
-              )}
-              <span>Suggest</span>
-            </button>
-          )}
-
           <button
             onClick={onRefresh}
-            disabled={loading}
+            disabled={loading || isFetching || isPulling || isPushing}
             className="p-1 rounded bg-[#141414] hover:bg-[#202020] text-zinc-400 hover:text-white transition-all cursor-pointer disabled:opacity-40"
             title="Refresh Git Status"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-cyan-400" : ""}`} />
           </button>
+          {isPopover && onClosePopover && (
+            <button
+              onClick={onClosePopover}
+              className="p-1 rounded bg-[#141414] hover:bg-[#202020] text-zinc-400 hover:text-white transition-all cursor-pointer"
+              title="Close Source Control Popover (Esc)"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -475,10 +628,16 @@ export default function SourceControlPanel({
       )}
 
       {/* Sub-navigation Tabs: Changes | History | Stashes */}
-      <div className="flex border-b border-[#1f1f1f] bg-[#08080c] shrink-0 text-[11px] font-semibold">
+      <div
+        style={{
+          backgroundColor: isPopover ? "rgba(8, 10, 18, 0.9)" : "#08080c",
+          borderColor: isPopover ? "rgba(31, 31, 46, 0.8)" : "#1f1f1f",
+        }}
+        className="flex border-b shrink-0 text-[10.5px] font-semibold"
+      >
         <button
           onClick={() => setActiveSection("changes")}
-          className={`flex-1 py-2 px-2 flex items-center justify-center gap-1.5 border-b-2 transition-all cursor-pointer ${
+          className={`flex-1 ${isPopover ? "py-1.5 px-1.5" : "py-2 px-2"} flex items-center justify-center gap-1.5 border-b-2 transition-all cursor-pointer ${
             activeSection === "changes"
               ? "border-cyan-500 text-cyan-400 bg-cyan-950/20"
               : "border-transparent text-zinc-400 hover:text-zinc-200"
@@ -533,7 +692,7 @@ export default function SourceControlPanel({
 
       {/* SECTION 1: CHANGES VIEW */}
       {activeSection === "changes" && (
-        <>
+        <div className={`flex flex-col flex-1 ${isPopover ? "overflow-y-auto" : "overflow-hidden"}`}>
           {/* Milestone 30: Unresolved Conflicts Alert */}
           {conflictsCount > 0 && (
             <div className="p-2.5 bg-amber-950/50 border-b border-amber-500/40 flex items-center justify-between gap-2 shrink-0 animate-fadeIn">
@@ -560,15 +719,33 @@ export default function SourceControlPanel({
             </div>
           )}
 
-          {/* Branch & Last Commit Summary */}
+          {/* Repository & Branch Summary Card */}
           <div
             style={{
-              backgroundColor: "var(--theme-surface, #08080a)",
-              borderColor: "var(--theme-border, #1f1f1f)",
+              backgroundColor: isPopover ? "rgba(12, 14, 26, 0.6)" : "var(--theme-surface, #08080a)",
+              borderColor: isPopover ? "rgba(31, 31, 46, 0.6)" : "var(--theme-border, #1f1f1f)",
             }}
-            className="p-3 border-b space-y-2 shrink-0"
+            className={`border-b shrink-0 ${isPopover ? "p-2.5 space-y-2" : "p-3 space-y-2.5"}`}
           >
-            {/* Interactive Branch selector */}
+            {/* 1. Repository Info Display */}
+            <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[#0e0e14] border border-[#1f1f2a] text-[11px]">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <FolderGit2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span className="font-bold text-zinc-100 truncate" title={workspacePath || repositoryName || "LocalRepo"}>
+                  {repositoryName || (workspacePath ? workspacePath.split(/[\\/]/).filter(Boolean).pop() : "LocalRepo")}
+                </span>
+              </div>
+              {associatedRepo ? (
+                <div className="flex items-center gap-1 text-[10px] text-emerald-400 font-bold bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-500/30 shrink-0">
+                  <Check className="w-3 h-3" />
+                  <span className="truncate max-w-[120px]" title={associatedRepo.fullName}>@{associatedRepo.fullName}</span>
+                </div>
+              ) : (
+                <span className="text-[10px] text-zinc-500 font-mono">Local</span>
+              )}
+            </div>
+
+            {/* 2. Interactive Branch Selector & Create Branch */}
             <div className="relative">
               <div className="flex items-center justify-between gap-2">
                 <button
@@ -577,7 +754,7 @@ export default function SourceControlPanel({
                     backgroundColor: "var(--theme-surface-raised, #121215)",
                     borderColor: "var(--theme-border-card, #27272a)",
                   }}
-                  className="flex items-center gap-1.5 px-2 py-1 rounded border text-xs font-bold text-cyan-400 hover:border-cyan-500/50 transition-all cursor-pointer truncate max-w-[200px]"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-bold text-cyan-400 hover:border-cyan-500/50 transition-all cursor-pointer truncate flex-1 min-w-0"
                   title={`Active branch: ${currentBranch}${tracking ? ` (tracking ${tracking})` : ""}`}
                 >
                   <GitBranch className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
@@ -605,10 +782,10 @@ export default function SourceControlPanel({
                     backgroundColor: "var(--theme-surface-raised, #18181b)",
                     borderColor: "var(--theme-border-card, #27272a)",
                   }}
-                  className="px-2 py-1 rounded border text-zinc-300 hover:text-white text-[10.5px] font-medium flex items-center gap-1 cursor-pointer transition-all hover:border-cyan-500/40 shrink-0"
+                  className="px-2.5 py-1.5 rounded-lg border text-zinc-300 hover:text-white text-[10.5px] font-medium flex items-center gap-1 cursor-pointer transition-all hover:border-cyan-500/40 shrink-0"
                   title="Create New Branch"
                 >
-                  <Plus className="w-3 h-3 text-cyan-400" />
+                  <Plus className="w-3.5 h-3.5 text-cyan-400" />
                   <span>New Branch</span>
                 </button>
               </div>
@@ -620,7 +797,7 @@ export default function SourceControlPanel({
                     backgroundColor: "var(--theme-surface-overlay, #0c0c12)",
                     borderColor: "var(--theme-border, #27272a)",
                   }}
-                  className="absolute left-0 top-9 w-64 border rounded-xl shadow-2xl z-40 p-2 space-y-2 text-xs font-mono animate-fadeIn"
+                  className="absolute left-0 top-10 w-64 border rounded-xl shadow-2xl z-40 p-2 space-y-2 text-xs font-mono animate-fadeIn"
                 >
                   <div className="relative">
                     <Search className="w-3 h-3 text-zinc-500 absolute left-2 top-2" />
@@ -649,7 +826,7 @@ export default function SourceControlPanel({
                           <button
                             key={b}
                             onClick={() => handleSelectBranch(b)}
-                            className={`w-full px-2 py-1 rounded text-left flex items-center justify-between text-[11px] cursor-pointer transition-colors ${
+                            className={`w-full px-2 py-1.5 rounded text-left flex items-center justify-between text-[11px] cursor-pointer transition-colors ${
                               isCurrent
                                 ? "bg-cyan-950/80 text-cyan-300 font-bold border border-cyan-500/30"
                                 : "text-zinc-300 hover:bg-[#181822] hover:text-white"
@@ -687,24 +864,189 @@ export default function SourceControlPanel({
               )}
             </div>
 
-            {/* Connected GitHub Repository Info */}
-            {associatedRepo && (
-              <div className="flex items-center justify-between px-2 py-1 rounded bg-cyan-950/40 border border-cyan-500/30 text-[10px] text-zinc-300">
-                <span className="truncate font-bold text-cyan-300">
-                  GitHub: @{associatedRepo.fullName}
-                </span>
-                <span className="text-emerald-400 font-bold text-[9.5px]">✓ Connected</span>
-              </div>
-            )}
+            {/* 3. Remote Sync Actions (Fetch, Pull, Push, Sync) */}
+            <div className="grid grid-cols-4 gap-1 pt-0.5">
+              <button
+                type="button"
+                onClick={handleFetchOnly}
+                disabled={loading || isFetching || isPulling || isPushing || isSyncing}
+                className="py-1 px-1.5 rounded bg-[#121218] hover:bg-[#1c1c28] border border-[#262638] hover:border-cyan-500/40 text-zinc-300 hover:text-white text-[10.5px] font-medium flex items-center justify-center gap-1 transition-all disabled:opacity-40 cursor-pointer"
+                title="Fetch remote changes without merging"
+              >
+                <RefreshCw className={`w-3 h-3 text-cyan-400 ${isFetching ? "animate-spin" : ""}`} />
+                <span>{isFetching ? "..." : "Fetch"}</span>
+              </button>
 
-            {/* Last commit summary */}
+              <button
+                type="button"
+                onClick={handlePullOnly}
+                disabled={loading || isFetching || isPulling || isPushing || isSyncing}
+                className="py-1 px-1.5 rounded bg-[#121218] hover:bg-[#1c1c28] border border-[#262638] hover:border-cyan-500/40 text-zinc-300 hover:text-white text-[10.5px] font-medium flex items-center justify-center gap-1 transition-all disabled:opacity-40 cursor-pointer"
+                title="Pull and merge remote changes into current branch"
+              >
+                <Download className={`w-3 h-3 text-purple-400 ${isPulling ? "animate-bounce" : ""}`} />
+                <span>{isPulling ? "..." : "Pull"}</span>
+                {behind > 0 && (
+                  <span className="text-[9px] text-rose-400 font-bold font-mono">↓{behind}</span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handlePushOnly}
+                disabled={loading || isFetching || isPulling || isPushing || isSyncing}
+                className="py-1 px-1.5 rounded bg-[#121218] hover:bg-[#1c1c28] border border-[#262638] hover:border-cyan-500/40 text-zinc-300 hover:text-white text-[10.5px] font-medium flex items-center justify-center gap-1 transition-all disabled:opacity-40 cursor-pointer"
+                title="Push local commits to remote repository"
+              >
+                <UploadCloud className={`w-3 h-3 text-emerald-400 ${isPushing ? "animate-pulse" : ""}`} />
+                <span>{isPushing ? "..." : "Push"}</span>
+                {ahead > 0 && (
+                  <span className="text-[9px] text-emerald-400 font-bold font-mono">↑{ahead}</span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSyncOnly}
+                disabled={loading || isFetching || isPulling || isPushing || isSyncing}
+                className="py-1 px-1.5 rounded bg-[#121218] hover:bg-[#1c1c28] border border-[#262638] hover:border-cyan-500/40 text-zinc-300 hover:text-white text-[10.5px] font-medium flex items-center justify-center gap-1 transition-all disabled:opacity-40 cursor-pointer"
+                title="Sync with remote (Pull incoming & Push outgoing commits)"
+              >
+                <RefreshCw className={`w-3 h-3 text-amber-400 ${isSyncing ? "animate-spin" : ""}`} />
+                <span>{isSyncing ? "..." : "Sync"}</span>
+                {(ahead > 0 || behind > 0) && (
+                  <span className="text-[8.5px] text-cyan-300 font-mono">
+                    {ahead > 0 ? `↑${ahead}` : ""}{behind > 0 ? `↓${behind}` : ""}
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Commit Input Area */}
+          <div
+            style={{
+              backgroundColor: isPopover ? "rgba(10, 12, 22, 0.6)" : "var(--theme-surface-panel, #050507)",
+              borderColor: isPopover ? "rgba(31, 31, 46, 0.6)" : "var(--theme-border, #1f1f1f)",
+            }}
+            className={`border-b shrink-0 ${isPopover ? "p-2.5 space-y-1.5" : "p-3 space-y-2"}`}
+          >
+            <form
+              onSubmit={(e) => {
+                if (staged.length > 0) {
+                  handleCommitSubmit(e);
+                } else if (totalChanges > 0) {
+                  handleStageAllAndCommit(e);
+                }
+              }}
+              className="space-y-2"
+            >
+              <div className="flex items-center justify-between text-[10.5px] text-zinc-400">
+                <span>Commit Message:</span>
+                <span className="text-[10px] text-zinc-500 font-mono">
+                  {staged.length > 0
+                    ? `${staged.length} staged file(s)`
+                    : totalChanges > 0
+                    ? `${totalChanges} unstaged file(s)`
+                    : "Clean working tree"}
+                </span>
+              </div>
+
+              <textarea
+                rows={2}
+                value={commitMessage}
+                onChange={(e) => setCommitMessage(e.target.value)}
+                placeholder={
+                  totalChanges > 0
+                    ? staged.length > 0
+                    ? `Commit message (Enter to Commit ${staged.length} staged, Shift+Enter for newline)...`
+                    : "Commit message (Stage files to commit, or Enter to Stage All & Commit)..."
+                    : "No changes to commit"
+                }
+                style={{
+                  backgroundColor: "var(--theme-surface-input, #0a0a0d)",
+                  borderColor: "var(--theme-border-card, #27272a)",
+                  color: "var(--theme-text, #f4f4f5)",
+                }}
+                className={`w-full border focus:border-cyan-500/50 rounded ${isPopover ? "p-1.5 min-h-[50px] max-h-[60px]" : "p-2"} placeholder:text-zinc-600 outline-none text-xs resize-none font-mono`}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    if (staged.length > 0) {
+                      handleCommitSubmit(e);
+                    } else if (totalChanges > 0) {
+                      handleStageAllAndCommit(e);
+                    }
+                  }
+                }}
+              />
+
+              {/* Commit Action Buttons */}
+              <div className="flex flex-col gap-1.5">
+                {staged.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={handleCommitSubmit}
+                    disabled={!commitMessage.trim() || loading || isSubmitting}
+                    className={`w-full ${isPopover ? "py-1.5 px-2.5 rounded-lg text-[11px]" : "py-2 px-3 rounded-xl text-xs"} bg-cyan-500 hover:bg-cyan-400 text-black font-bold flex items-center justify-center gap-1.5 transition-all shadow-md shadow-cyan-950/40 disabled:opacity-30 disabled:pointer-events-none cursor-pointer`}
+                    title="Commit only staged changes (Enter)"
+                  >
+                    {isSubmitting ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <GitCommit className="w-3.5 h-3.5" />
+                    )}
+                    <span>
+                      {isSubmitting ? "Committing..." : `Commit (${staged.length} staged)`}
+                    </span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleStageAllAndCommit}
+                    disabled={!commitMessage.trim() || totalChanges === 0 || loading || isSubmitting}
+                    className={`w-full ${isPopover ? "py-1.5 px-2.5 rounded-lg text-[11px]" : "py-2 px-3 rounded-xl text-xs"} bg-cyan-500 hover:bg-cyan-400 text-black font-bold flex items-center justify-center gap-1.5 transition-all shadow-md shadow-cyan-950/40 disabled:opacity-30 disabled:pointer-events-none cursor-pointer`}
+                    title="Stage all changes and commit (Enter)"
+                  >
+                    {isSubmitting ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <GitCommit className="w-3.5 h-3.5" />
+                    )}
+                    <span>
+                      {isSubmitting
+                        ? "Committing..."
+                        : totalChanges > 0
+                        ? `Stage All & Commit (${totalChanges} changes)`
+                        : "Commit (0 staged - stage changes to commit)"}
+                    </span>
+                  </button>
+                )}
+
+                {/* Secondary Action: Commit & Push */}
+                {totalChanges > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleCommitAndPushSubmit}
+                    disabled={!commitMessage.trim() || loading || isSubmitting}
+                    className={`w-full ${isPopover ? "py-1 px-2.5 text-[10px]" : "py-1.5 px-3 text-[10.5px]"} rounded-lg bg-[#14141c] hover:bg-[#1c1c28] border border-[#262638] text-zinc-300 hover:text-white font-medium flex items-center justify-center gap-1.5 transition-all disabled:opacity-30 cursor-pointer`}
+                    title="Stage all changes, commit, and push to remote"
+                  >
+                    <UploadCloud className="w-3 h-3 text-cyan-400" />
+                    <span>Commit & Push</span>
+                  </button>
+                )}
+              </div>
+            </form>
+
+            {/* 4. Last Commit Summary */}
             {lastCommit && (
               <div
                 style={{
                   backgroundColor: "var(--theme-surface-raised, #0d0d10)",
                   borderColor: "var(--theme-border, #1f1f1f)",
                 }}
-                className="p-2 rounded border text-[10.5px] text-zinc-400 space-y-0.5"
+                className={`${isPopover ? "p-1.5" : "p-2"} rounded border text-[10.5px] text-zinc-400 space-y-0.5`}
               >
                 <div className="flex items-center justify-between text-zinc-500 text-[10px]">
                   <span className="flex items-center gap-1">
@@ -718,107 +1060,81 @@ export default function SourceControlPanel({
                 </div>
               </div>
             )}
-          </div>
 
-          {/* Commit Input Area */}
-          <div
-            style={{
-              backgroundColor: "var(--theme-surface-panel, #050507)",
-              borderColor: "var(--theme-border, #1f1f1f)",
-            }}
-            className="p-3 border-b shrink-0 space-y-2"
-          >
-            <form onSubmit={handleCommitAndPushSubmit} className="space-y-2">
-              <div className="flex items-center justify-between text-[10.5px] text-zinc-400">
-                <span>Commit Message:</span>
-                {onSuggestMessage && totalChanges > 0 && !commitMessage.trim() && (
-                  <button
-                    type="button"
-                    onClick={() => handleAutoSuggest(true)}
-                    disabled={isGeneratingSuggestion}
-                    className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer text-[10px]"
-                  >
-                    <Sparkles className="w-3 h-3" />
-                    <span>{isGeneratingSuggestion ? "Generating..." : "Auto-fill with AI"}</span>
-                  </button>
-                )}
-              </div>
-
-              <textarea
-                rows={2}
-                value={commitMessage}
-                onChange={(e) => setCommitMessage(e.target.value)}
-                placeholder={totalChanges > 0 ? "Commit message (Enter to Commit & Push, Shift+Enter for newline)..." : "No changes to commit"}
+            {/* 5. Operation Progress Component */}
+            {operationProgress.state !== "idle" && (
+              <div
                 style={{
-                  backgroundColor: "var(--theme-surface-input, #0a0a0d)",
-                  borderColor: "var(--theme-border-card, #27272a)",
-                  color: "var(--theme-text, #f4f4f5)",
+                  backgroundColor:
+                    operationProgress.state === "failed"
+                      ? "rgba(244, 63, 94, 0.08)"
+                      : operationProgress.state === "success"
+                      ? "rgba(16, 185, 129, 0.08)"
+                      : "var(--theme-surface-raised, #0d0d10)",
+                  borderColor:
+                    operationProgress.state === "failed"
+                      ? "rgba(244, 63, 94, 0.3)"
+                      : operationProgress.state === "success"
+                      ? "rgba(16, 185, 129, 0.3)"
+                      : "var(--theme-border, #1f1f1f)",
                 }}
-                className="w-full border focus:border-cyan-500/50 rounded p-2 placeholder:text-zinc-600 outline-none text-xs resize-none font-mono"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    handleCommitAndPushSubmit(e);
-                  }
-                }}
-              />
-
-              {/* Primary One-Click [Commit & Push] */}
-              <button
-                type="submit"
-                disabled={!commitMessage.trim() || totalChanges === 0 || loading || isSubmitting}
-                className="w-full py-2 px-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-md shadow-cyan-950/40 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
-                title="Stage all changes, commit, and push to remote (Enter)"
+                className={`${isPopover ? "p-1.5 space-y-1" : "p-2 space-y-1.5"} rounded border text-[10.5px] transition-all duration-200`}
               >
-                {isSubmitting ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <UploadCloud className="w-3.5 h-3.5 stroke-[2.5]" />
-                )}
-                <span>
-                  {isSubmitting
-                    ? associatedRepo
-                      ? `Pushing to @${associatedRepo.fullName}...`
-                      : "Pushing to remote..."
-                    : `Commit & Push (${totalChanges} changed)`}
-                </span>
-              </button>
+                {/* Progress Bar Track */}
+                <div className="h-1 w-full bg-zinc-800/80 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      operationProgress.state === "processing"
+                        ? "w-full bg-gradient-to-r from-cyan-600 via-cyan-400 to-cyan-600 animate-pulse"
+                        : operationProgress.state === "success"
+                        ? "w-full bg-emerald-500"
+                        : "w-full bg-rose-500"
+                    }`}
+                  />
+                </div>
 
-              {/* Secondary Actions */}
-              {(staged.length > 0 || onPush) && (
-                <div className="flex items-center gap-1.5 pt-0.5">
-                  {staged.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleCommitSubmit}
-                      disabled={!commitMessage.trim() || staged.length === 0 || loading || isSubmitting}
-                      className="flex-1 py-1.5 px-2 rounded-lg bg-[#14141c] hover:bg-[#1c1c28] border border-[#262638] text-zinc-300 text-[10.5px] font-medium flex items-center justify-center gap-1 transition-all disabled:opacity-30 cursor-pointer"
-                      title="Commit only staged files"
+                {/* Operation Status Label & Icon */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    {operationProgress.state === "processing" && (
+                      <Loader2 className="w-3 h-3 text-cyan-400 animate-spin" />
+                    )}
+                    {operationProgress.state === "success" && (
+                      <Check className="w-3 h-3 text-emerald-400" />
+                    )}
+                    {operationProgress.state === "failed" && (
+                      <AlertCircle className="w-3 h-3 text-rose-400" />
+                    )}
+                    <span
+                      className={`font-medium ${
+                        operationProgress.state === "processing"
+                          ? "text-cyan-300"
+                          : operationProgress.state === "success"
+                          ? "text-emerald-300"
+                          : "text-rose-300"
+                      }`}
                     >
-                      <GitCommit className="w-3 h-3 text-cyan-400" />
-                      <span>Commit Staged ({staged.length})</span>
-                    </button>
-                  )}
+                      {getOperationLabel(operationProgress.type, operationProgress.state)}
+                    </span>
+                  </div>
 
-                  {onPush && (
-                    <button
-                      type="button"
-                      onClick={handlePushOnly}
-                      disabled={loading || isSubmitting}
-                      className="py-1.5 px-2.5 rounded-lg bg-[#14141c] hover:bg-[#1c1c28] border border-[#262638] text-zinc-300 text-[10.5px] font-medium flex items-center justify-center gap-1 transition-all disabled:opacity-30 cursor-pointer"
-                      title="Push local commits to remote"
-                    >
-                      <UploadCloud className="w-3 h-3 text-emerald-400" />
-                      <span>Push</span>
-                    </button>
+                  {operationProgress.state === "processing" && (
+                    <span className="text-[9.5px] text-zinc-500 font-mono animate-pulse">Running...</span>
                   )}
                 </div>
-              )}
-            </form>
+
+                {/* Optional Sanitized Error Details on Failure */}
+                {operationProgress.state === "failed" && operationProgress.errorMessage && (
+                  <div className="text-[10px] text-rose-400/90 font-mono break-words pl-4.5">
+                    {operationProgress.errorMessage}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Changed Files Scrollable Area */}
-          <div className="flex-1 overflow-y-auto p-2 space-y-3">
+          <div className={isPopover ? "p-1.5 space-y-2 shrink-0" : "flex-1 overflow-y-auto p-2 space-y-3"}>
             {/* 1. Staged Changes Section */}
             <div>
               <div className="flex items-center justify-between text-zinc-400 px-1 py-1 hover:bg-[#0e0e12] rounded cursor-pointer group">
@@ -841,10 +1157,11 @@ export default function SourceControlPanel({
                       e.stopPropagation();
                       onUnstageAll();
                     }}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-cyan-300 transition-opacity"
-                    title="Unstage All"
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-cyan-300 transition-opacity flex items-center gap-0.5 text-[10px]"
+                    title="Unstage All Files"
                   >
                     <Minus className="w-3.5 h-3.5" />
+                    <span>Unstage All</span>
                   </button>
                 )}
               </div>
@@ -866,6 +1183,16 @@ export default function SourceControlPanel({
 
                       <div className="flex items-center gap-1.5 shrink-0">
                         {renderBadge(f.status)}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenFileDiff(f.path, true);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-cyan-300 transition-opacity"
+                          title="Review Diff (Staged vs HEAD)"
+                        >
+                          <Eye className="w-3 h-3" />
+                        </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -905,10 +1232,11 @@ export default function SourceControlPanel({
                       e.stopPropagation();
                       onStageAll();
                     }}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-cyan-300 transition-opacity"
-                    title="Stage All"
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-cyan-300 transition-opacity flex items-center gap-0.5 text-[10px]"
+                    title="Stage All Files"
                   >
                     <Plus className="w-3.5 h-3.5" />
+                    <span>Stage All</span>
                   </button>
                 )}
               </div>
@@ -933,10 +1261,20 @@ export default function SourceControlPanel({
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
+                            onOpenFileDiff(f.path, false);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-cyan-300 transition-opacity"
+                          title="Review Diff (Working Tree)"
+                        >
+                          <Eye className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setFileToDiscard(f.path);
                           }}
                           className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-rose-300 transition-opacity"
-                          title="Discard changes"
+                          title="Discard changes (requires confirmation)"
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
@@ -972,6 +1310,20 @@ export default function SourceControlPanel({
                     {untracked.length}
                   </span>
                 </div>
+
+                {untracked.length > 0 && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onStageAll();
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-cyan-300 transition-opacity flex items-center gap-0.5 text-[10px]"
+                    title="Track & Stage All Untracked Files"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Track All</span>
+                  </button>
+                )}
               </div>
 
               {isUntrackedOpen && untracked.length > 0 && (
@@ -994,10 +1346,20 @@ export default function SourceControlPanel({
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
+                            onOpenFileDiff(f.path, false);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-zinc-800 text-zinc-400 hover:text-cyan-300 transition-opacity"
+                          title="Review File Content"
+                        >
+                          <Eye className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setFileToDiscard(f.path);
                           }}
                           className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-rose-950 text-zinc-400 hover:text-rose-300 transition-opacity"
-                          title="Delete untracked file"
+                          title="Delete untracked file (requires confirmation)"
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
@@ -1018,7 +1380,7 @@ export default function SourceControlPanel({
               )}
             </div>
           </div>
-        </>
+        </div>
       )}
 
       {/* SECTION 2: VISUAL HISTORY GRAPH VIEW (Milestone 28) */}

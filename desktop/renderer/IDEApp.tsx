@@ -7,7 +7,7 @@ import {
   Folder, FolderOpen, FolderTree, FileText, ChevronRight, ChevronDown, Play, Sparkles,
   Terminal as TerminalIcon, Zap, X, Check, Save, RotateCcw, ArrowRight,
   Command, Search, Cpu, Layers, Activity, BarChart3, CheckCircle2, AlertTriangle, ShieldCheck, ShieldAlert,
-  LayoutDashboard, Clock, FileSearch, Network, Download, Flame, Sun, Moon, Copy, GitPullRequest, GitBranch, Compass, Globe, FileCode, Bug, Bot, FlaskConical, Github,
+  LayoutDashboard, Clock, FileSearch, Network, Download, Flame, Sun, Moon, Copy, GitPullRequest, GitBranch, Compass, Globe, FileCode, Bug, Bot, FlaskConical,
   History as HistoryIcon, Camera, Square, StepForward, Palette,
   Plus, FolderPlus, FilePlus, Edit2, Trash2, MoreVertical, RefreshCw, ExternalLink,
   Columns, Rows, ArrowRightLeft, Hash, Box, Code, Tag
@@ -61,6 +61,7 @@ import AgentWorkspace from "./components/AgentWorkspace";
 import { TerminalDiagnostic, ProblemItem, terminalDiagnosticToProblem } from "./utils/diagnosticParser";
 import CodexAIControlPopover from "./components/CodexAIControlPopover";
 import ThemesPopover from "./components/ThemesPopover";
+import SourceControlPopover from "./components/SourceControlPopover";
 import GithubConnectModal from "./components/GithubConnectModal";
 import { getTheme, applyThemeToDocument, registerMonacoThemes } from "./theme/themeRegistry";
 import CodexSidebar from "./components/CodexSidebar";
@@ -1038,10 +1039,11 @@ export default function IDEApp() {
   const [moreMenuOpen, setMoreMenuOpen] = useState<boolean>(false);
   const [activeThemeId, setActiveThemeId] = useState<string>("nexus-dark");
   const [showThemesPicker, setShowThemesPicker] = useState<boolean>(false);
+  const [showSourceControlPopover, setShowSourceControlPopover] = useState<boolean>(false);
   const [showGithubModal, setShowGithubModal] = useState<boolean>(false);
   const aiControlTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const sourceControlTriggerRef = useRef<HTMLButtonElement | null>(null);
   const themesTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const githubTriggerRef = useRef<HTMLButtonElement | null>(null);
   const moreMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const moreMenuRef = useOutsideClick<HTMLDivElement>({
     isOpen: moreMenuOpen,
@@ -3035,6 +3037,48 @@ export default function IDEApp() {
       }
     } catch (e) {
       console.error("[IDE-APP] Error opening recent workspace:", e);
+    }
+  };
+
+  // Open Target Workspace Path (used by GitHub repo selection, clone, etc.)
+  const handleOpenWorkspacePath = async (targetFolder: string) => {
+    if (typeof window === "undefined" || !window.electronAPI || !targetFolder) return;
+    try {
+      addLog(`[WORKSPACE] Switching active workspace to: ${targetFolder}`);
+      const dirRes = await window.electronAPI.readDir(targetFolder);
+      if (dirRes && dirRes.tree) {
+        setFolderPath(targetFolder);
+        setFileTree(dirRes.tree);
+        saveRecentWorkspace(targetFolder);
+
+        // Clear previous editor tabs
+        setOpenTabs([]);
+        setActiveTabPath("");
+
+        // Auto trigger workspace scan
+        console.log('[WORKSPACE] scan start', targetFolder);
+        setWorkspaceLoading(true);
+        setWorkspaceScanLoading(true);
+        try {
+          const scanRes = await window.electronAPI.scanWorkspace(targetFolder);
+          if (scanRes && !scanRes.error) {
+            setWorkspaceSummary(scanRes);
+            setWorkspaceReport(scanRes);
+            console.log('[WORKSPACE] scan complete', scanRes);
+            addLog(`[WORKSPACE] Scan complete: ${scanRes.files_scanned} files analyzed.`);
+          }
+        } catch (scanErr) {
+          console.error('[WORKSPACE] scan error:', scanErr);
+        } finally {
+          setWorkspaceLoading(false);
+          setWorkspaceScanLoading(false);
+        }
+
+        // Refresh Git status on the new workspace
+        git.refreshStatus(targetFolder);
+      }
+    } catch (e) {
+      console.error("[IDE-APP] Error opening workspace path:", e);
     }
   };
 
@@ -6168,44 +6212,21 @@ return (
             <kbd className="hidden lg:inline text-[9.5px] bg-[#161620] px-1 rounded text-zinc-400">⌘K</kbd>
           </button>
 
-          {/* Codex-Style Upper-Right AI Control */}
-          <div className="relative shrink-0">
-            <button
-              ref={aiControlTriggerRef}
-              onClick={() => setShowCodexAiControl((prev) => !prev)}
-              className={`px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 transition-all cursor-pointer ${
-                showCodexAiControl
-                  ? "bg-purple-950 text-purple-300 border-purple-500/50 font-bold shadow-[0_0_8px_rgba(168,85,247,0.3)]"
-                  : "bg-[#101016] hover:bg-[#181822] border-[#20202d] text-purple-300"
-              }`}
-              title="AI & Agent Capabilities Control"
-            >
-              <Cpu className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-              <span>AI Control ▾</span>
-            </button>
+          {/* AI Agent Dock Toggle */}
+          <button
+            onClick={() => setShowDockedAgentPanel((prev) => !prev)}
+            className={`px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 transition-all cursor-pointer ${
+              showDockedAgentPanel
+                ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold shadow-[0_0_8px_rgba(6,182,212,0.2)]"
+                : "bg-[#101016] hover:bg-[#181822] border-[#20202d] text-cyan-300"
+            }`}
+            title="Toggle AI Agent Dock (⌘I)"
+          >
+            <Bot className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <span>AI Dock</span>
+          </button>
 
-            <CodexAIControlPopover
-              isOpen={showCodexAiControl}
-              onClose={() => setShowCodexAiControl(false)}
-              triggerRef={aiControlTriggerRef}
-              activeProvider={aiActiveProvider}
-              activeModel={aiActiveModel}
-              onSelectModel={(pId, mId) => {
-                setAiActiveProvider(pId);
-                if (mId) setAiActiveModel(mId);
-                if (typeof window !== "undefined" && (window as any).electronAPI?.ai?.setConfig) {
-                  (window as any).electronAPI.ai.setConfig(pId, mId);
-                }
-              }}
-              onOpenApiKeyModal={(pId) => {
-                if (pId) setAiActiveProvider(pId);
-                setShowCodexAiControl(false);
-                setShowApiKeyRequiredModal(true);
-              }}
-            />
-          </div>
-
-          {/* Global NEXUS Themes (BETWEEN AI Control and AI Dock) */}
+          {/* Global NEXUS Themes */}
           <div className="relative shrink-0">
             <button
               ref={themesTriggerRef}
@@ -6230,41 +6251,81 @@ return (
             />
           </div>
 
-          {/* AI Agent Dock Toggle */}
-          <button
-            onClick={() => setShowDockedAgentPanel((prev) => !prev)}
-            className={`px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 transition-all cursor-pointer ${
-              showDockedAgentPanel
-                ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold shadow-[0_0_8px_rgba(6,182,212,0.2)]"
-                : "bg-[#101016] hover:bg-[#181822] border-[#20202d] text-cyan-300"
-            }`}
-            title="Toggle AI Agent Dock (⌘I)"
-          >
-            <Bot className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <span>AI Dock</span>
-          </button>
-
-          {/* GitHub Header Button */}
+          {/* Source Control Top Header Shortcut with Floating Popover */}
           <div className="relative shrink-0">
             <button
-              ref={githubTriggerRef}
-              onClick={() => setShowGithubModal((prev) => !prev)}
+              ref={sourceControlTriggerRef}
+              onClick={() => setShowSourceControlPopover((prev) => !prev)}
               className={`px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center gap-1.5 transition-all cursor-pointer ${
-                showGithubModal
+                showSourceControlPopover
                   ? "bg-cyan-950 text-cyan-300 border-cyan-500/50 font-bold shadow-[0_0_8px_rgba(6,182,212,0.25)]"
                   : "bg-[#101016] hover:bg-[#181822] border-[#20202d] text-cyan-300"
               }`}
-              title="GitHub Account Connection"
+              title="Source Control (Quick Access)"
             >
-              <Github className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-              <span>GitHub</span>
+              <GitBranch className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span>Source Control</span>
             </button>
 
-            <GithubConnectModal
-              isOpen={showGithubModal}
-              onClose={() => setShowGithubModal(false)}
-              triggerRef={githubTriggerRef}
+            <SourceControlPopover
+              isOpen={showSourceControlPopover}
+              onClose={() => setShowSourceControlPopover(false)}
+              triggerRef={sourceControlTriggerRef}
+              isRepo={git.isRepo}
+              currentBranch={git.currentBranch}
+              isDetached={git.isDetached}
+              tracking={git.tracking}
+              ahead={git.ahead}
+              behind={git.behind}
+              isClean={git.isClean}
+              hasLocalChanges={git.hasLocalChanges}
+              branches={git.branches}
+              branchDetails={git.branchDetails}
+              stashes={git.stashes}
+              staged={git.staged}
+              unstaged={git.unstaged}
+              untracked={git.untracked}
+              lastCommit={git.lastCommit}
+              loading={git.loading}
+              statusMessage={git.statusMessage}
+              errorMessage={git.errorMessage}
+              onRefresh={() => git.refreshStatus(folderPath || "")}
+              onStageFile={(f) => git.stageFile(f)}
+              onUnstageFile={(f) => git.unstageFile(f)}
+              onStageAll={() => git.stageAllFiles()}
+              onUnstageAll={() => git.unstageAllFiles()}
+              onCommit={(msg) => git.commitChanges(msg)}
+              onCommitAndPush={(msg) => git.commitAndPushChanges(msg)}
+              onFetch={(r) => git.fetchRemote(r)}
+              onPull={(r, b) => git.pullRemote(r, b)}
+              onPush={(remote, branch) => git.pushChanges(remote, branch)}
+              onSync={(r, b) => git.syncRemote(r, b)}
               workspacePath={folderPath || ""}
+              repositoryName={folderPath ? folderPath.split(/[\\/]/).filter(Boolean).pop() || "LocalRepo" : "LocalRepo"}
+              onSuggestMessage={() => git.suggestCommitMessage()}
+              onCheckoutBranch={(b, f) => git.checkoutBranch(b, f)}
+              onCreateBranch={(b, c) => git.createAndCheckoutBranch(b, c)}
+              onValidateBranchName={(n) => git.validateBranchName(n)}
+              onStashSave={(opt) => git.stashSave(opt)}
+              onStashApply={(id) => git.stashApply(id)}
+              onStashPop={(id) => git.stashPop(id)}
+              onStashDrop={(id) => git.stashDrop(id)}
+              onStashClear={() => git.stashClear()}
+              onDiscardFile={(f) => git.discardFile(f)}
+              onOpenFileDiff={handleOpenGitDiff}
+              historyGraph={git.historyGraph}
+              selectedCommit={git.selectedCommit}
+              selectedCommitDiff={git.selectedCommitDiff}
+              historyBranch={git.historyBranch}
+              setHistoryBranch={git.setHistoryBranch}
+              historyLoading={git.historyLoading}
+              onFetchHistory={git.fetchHistory}
+              onFetchCommitDetails={git.fetchCommitDetails}
+              onFetchCommitDiff={git.fetchCommitDiff}
+              onFetchFileHistory={git.fetchFileHistory}
+              onSelectCommit={git.setSelectedCommit}
+              onOpenConflictResolver={handleOpenConflictResolver}
+              conflictsCount={activeConflicts.length}
             />
           </div>
 
@@ -6445,7 +6506,12 @@ return (
             onUnstageAll={() => git.unstageAllFiles()}
             onCommit={(msg) => git.commitChanges(msg)}
             onCommitAndPush={(msg) => git.commitAndPushChanges(msg)}
+            onFetch={(r) => git.fetchRemote(r)}
+            onPull={(r, b) => git.pullRemote(r, b)}
             onPush={(remote, branch) => git.pushChanges(remote, branch)}
+            onSync={(r, b) => git.syncRemote(r, b)}
+            workspacePath={folderPath || ""}
+            repositoryName={folderPath ? folderPath.split(/[\\/]/).filter(Boolean).pop() || "LocalRepo" : "LocalRepo"}
             onSuggestMessage={() => git.suggestCommitMessage()}
             onCheckoutBranch={(b, f) => git.checkoutBranch(b, f)}
             onCreateBranch={(b, c) => git.createAndCheckoutBranch(b, c)}
@@ -6715,7 +6781,12 @@ return (
                 onUnstageAll={() => git.unstageAllFiles()}
                 onCommit={(msg) => git.commitChanges(msg)}
                 onCommitAndPush={(msg) => git.commitAndPushChanges(msg)}
+                onFetch={(r) => git.fetchRemote(r)}
+                onPull={(r, b) => git.pullRemote(r, b)}
                 onPush={(remote, branch) => git.pushChanges(remote, branch)}
+                onSync={(r, b) => git.syncRemote(r, b)}
+                workspacePath={folderPath || ""}
+                repositoryName={folderPath ? folderPath.split(/[\\/]/).filter(Boolean).pop() || "LocalRepo" : "LocalRepo"}
                 onSuggestMessage={() => git.suggestCommitMessage()}
                 onCheckoutBranch={(b, f) => git.checkoutBranch(b, f)}
                 onCreateBranch={(b, c) => git.createAndCheckoutBranch(b, c)}
@@ -7058,7 +7129,12 @@ return (
                   onUnstageAll={() => git.unstageAllFiles()}
                   onCommit={(msg) => git.commitChanges(msg)}
                   onCommitAndPush={(msg) => git.commitAndPushChanges(msg)}
+                  onFetch={(r) => git.fetchRemote(r)}
+                  onPull={(r, b) => git.pullRemote(r, b)}
                   onPush={(remote, branch) => git.pushChanges(remote, branch)}
+                  onSync={(r, b) => git.syncRemote(r, b)}
+                  workspacePath={folderPath || ""}
+                  repositoryName={folderPath ? folderPath.split(/[\\/]/).filter(Boolean).pop() || "LocalRepo" : "LocalRepo"}
                   onSuggestMessage={() => git.suggestCommitMessage()}
                   onCheckoutBranch={(b, f) => git.checkoutBranch(b, f)}
                   onCreateBranch={(b, c) => git.createAndCheckoutBranch(b, c)}
@@ -8115,6 +8191,14 @@ return (
         onSelectVerificationTab={() => setActiveActivityItem("verification")}
         onSelectAgentPanel={() => setShowDockedAgentPanel(true)}
         onSelectSourceControl={() => setActiveActivityItem("git")}
+        onOpenGithub={() => setShowGithubModal((prev) => !prev)}
+      />
+
+      <GithubConnectModal
+        isOpen={showGithubModal}
+        onClose={() => setShowGithubModal(false)}
+        workspacePath={folderPath || ""}
+        onSelectRepositoryWorkspace={handleOpenWorkspacePath}
       />
 
       {/* 4. Right-Side Sliding Diff Drawer */}

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
   FolderTree, Search, GitBranch, Layers, ShieldCheck, Settings, 
-  Plus, MessageSquare, GitPullRequest, Plug, ChevronDown, ChevronRight,
+  Plus, MessageSquare, Plug, ChevronDown, ChevronRight,
   Folder, Pin, PinOff, MoreVertical, Edit2, Trash2, X, Check, Clock, Bot, Sparkles
 } from "lucide-react";
 import { useOutsideClick } from "../hooks/useOutsideClick";
@@ -313,18 +313,6 @@ export default function CodexSidebar({
           >
             <FolderTree className="w-4 h-4 text-cyan-400 shrink-0" />
             <span className="truncate">Files & Workspace</span>
-          </button>
-
-          <button
-            onClick={() => onSelectItem("git")}
-            className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 transition-colors cursor-pointer ${
-              activeItem === "git"
-                ? "bg-[#121624] text-cyan-300 font-bold border border-cyan-500/30"
-                : "text-zinc-400 hover:text-zinc-200 hover:bg-[#101016]"
-            }`}
-          >
-            <GitPullRequest className="w-4 h-4 text-purple-400 shrink-0" />
-            <span className="truncate">Pull Requests & Git</span>
           </button>
 
           <button

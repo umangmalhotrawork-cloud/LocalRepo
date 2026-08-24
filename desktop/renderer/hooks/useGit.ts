@@ -132,14 +132,27 @@ export function useGit(workspacePath: string = "") {
   const workspaceRef = useRef(workspacePath);
   workspaceRef.current = workspacePath;
 
+  const activeRequestIdRef = useRef<number>(0);
+
   const refreshStatus = useCallback(async (pathOverride?: string) => {
     const ws = pathOverride || workspaceRef.current;
     if (!ws || typeof window === "undefined" || !window.electronAPI || !window.electronAPI.git) {
+      setBranches([]);
+      setBranchDetails([]);
+      setStashes([]);
+      setHistoryGraph(null);
       return;
     }
 
+    const requestId = ++activeRequestIdRef.current;
+
     try {
       const statusRes = await window.electronAPI.git.status(ws);
+      // Guard against stale response if workspace changed while status was in flight
+      if (requestId !== activeRequestIdRef.current || ws !== workspaceRef.current) {
+        return;
+      }
+
       if (statusRes) {
         setGitState({
           isRepo: !!statusRes.isRepo,
@@ -159,32 +172,83 @@ export function useGit(workspacePath: string = "") {
         if (statusRes.isRepo) {
           try {
             const branchRes: any = await (window.electronAPI.git as any).branches(ws);
-            if (branchRes) {
-              if (Array.isArray(branchRes.all)) {
-                setBranches(branchRes.all);
-              }
-              if (Array.isArray(branchRes.branches)) {
-                setBranchDetails(branchRes.branches);
-              }
+            if (requestId !== activeRequestIdRef.current || ws !== workspaceRef.current) {
+              return;
             }
-          } catch (bErr) {}
+            if (branchRes) {
+              setBranches(Array.isArray(branchRes.all) ? branchRes.all : []);
+              setBranchDetails(Array.isArray(branchRes.branches) ? branchRes.branches : []);
+            } else {
+              setBranches([]);
+              setBranchDetails([]);
+            }
+          } catch (bErr) {
+            if (requestId === activeRequestIdRef.current && ws === workspaceRef.current) {
+              setBranches([]);
+              setBranchDetails([]);
+            }
+          }
 
           try {
             if ((window.electronAPI.git as any)?.stashes) {
               const stashRes = await (window.electronAPI.git as any).stashes(ws);
-              if (Array.isArray(stashRes)) {
-                setStashes(stashRes);
+              if (requestId !== activeRequestIdRef.current || ws !== workspaceRef.current) {
+                return;
               }
+              setStashes(Array.isArray(stashRes) ? stashRes : []);
             }
-          } catch (sErr) {}
+          } catch (sErr) {
+            if (requestId === activeRequestIdRef.current && ws === workspaceRef.current) {
+              setStashes([]);
+            }
+          }
+        } else {
+          // When isRepo is false, immediately clear branches, stashes, and history
+          setBranches([]);
+          setBranchDetails([]);
+          setStashes([]);
+          setHistoryGraph(null);
+          setSelectedCommit(null);
+          setSelectedCommitDiff(null);
+          setFileHistory([]);
         }
       }
     } catch (err: any) {
       console.error("[USE-GIT] refreshStatus error:", err);
+      if (requestId === activeRequestIdRef.current && ws === workspaceRef.current) {
+        setBranches([]);
+        setBranchDetails([]);
+        setStashes([]);
+        setHistoryGraph(null);
+      }
     }
   }, []);
 
   useEffect(() => {
+    // 1. Immediately reset workspace-specific Git UI state on workspace change
+    setBranches([]);
+    setBranchDetails([]);
+    setStashes([]);
+    setHistoryGraph(null);
+    setSelectedCommit(null);
+    setSelectedCommitDiff(null);
+    setFileHistory([]);
+    setGitState({
+      isRepo: false,
+      currentBranch: "",
+      isDetached: false,
+      tracking: null,
+      ahead: 0,
+      behind: 0,
+      isClean: true,
+      hasLocalChanges: false,
+      staged: [],
+      unstaged: [],
+      untracked: [],
+      lastCommit: null,
+    });
+
+    // 2. Fetch fresh status for the new workspace if valid
     if (workspacePath) {
       refreshStatus(workspacePath);
     }
@@ -290,6 +354,56 @@ export function useGit(workspacePath: string = "") {
     }
   }, []);
 
+  const fetchRemote = useCallback(async (remote = "origin") => {
+    const ws = workspaceRef.current;
+    if (!ws || !window.electronAPI?.git) return false;
+    setLoading(true);
+    try {
+      const res = await (window.electronAPI.git as any).fetch(ws, remote);
+      if (res && res.status) {
+        setGitState((prev) => ({ ...prev, ...res.status }));
+      }
+      if (res && res.success) {
+        showToast(res.message || `Fetched from ${remote}`);
+        await refreshStatus(ws);
+        return true;
+      } else {
+        showToast(res?.message || "Fetch failed", true);
+        return false;
+      }
+    } catch (err: any) {
+      showToast(`Fetch failed: ${err.message || String(err)}`, true);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [refreshStatus]);
+
+  const pullRemote = useCallback(async (remote = "origin", branch?: string) => {
+    const ws = workspaceRef.current;
+    if (!ws || !window.electronAPI?.git) return false;
+    setLoading(true);
+    try {
+      const res = await (window.electronAPI.git as any).pull(ws, remote, branch);
+      if (res && res.status) {
+        setGitState((prev) => ({ ...prev, ...res.status }));
+      }
+      if (res && res.success) {
+        showToast(res.message || `Pulled from ${remote}`);
+        await refreshStatus(ws);
+        return true;
+      } else {
+        showToast(res?.message || "Pull failed", true);
+        return false;
+      }
+    } catch (err: any) {
+      showToast(`Pull failed: ${err.message || String(err)}`, true);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [refreshStatus]);
+
   const pushChanges = useCallback(async (remote = "origin", branch?: string) => {
     const ws = workspaceRef.current;
     if (!ws || !window.electronAPI?.git) return false;
@@ -313,6 +427,31 @@ export function useGit(workspacePath: string = "") {
       setLoading(false);
     }
   }, []);
+
+  const syncRemote = useCallback(async (remote = "origin", branch?: string) => {
+    const ws = workspaceRef.current;
+    if (!ws || !window.electronAPI?.git) return false;
+    setLoading(true);
+    try {
+      const res = await (window.electronAPI.git as any).sync(ws, remote, branch);
+      if (res && res.status) {
+        setGitState((prev) => ({ ...prev, ...res.status }));
+      }
+      if (res && res.success) {
+        showToast(res.message || "Synced with remote successfully!");
+        await refreshStatus(ws);
+        return true;
+      } else {
+        showToast(res?.message || "Sync failed", true);
+        return false;
+      }
+    } catch (err: any) {
+      showToast(`Sync failed: ${err.message || String(err)}`, true);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [refreshStatus]);
 
   const commitAndPushChanges = useCallback(async (message: string) => {
     const ws = workspaceRef.current;
@@ -578,6 +717,8 @@ export function useGit(workspacePath: string = "") {
         branch: branchToQuery === "ALL" ? undefined : branchToQuery,
       });
 
+      if (ws !== workspaceRef.current) return null;
+
       if (res && res.success) {
         setHistoryGraph({
           commits: res.commits || [],
@@ -594,7 +735,9 @@ export function useGit(workspacePath: string = "") {
       console.error("[USE-GIT] fetchHistory error:", err);
       return null;
     } finally {
-      setHistoryLoading(false);
+      if (ws === workspaceRef.current) {
+        setHistoryLoading(false);
+      }
     }
   }, [historyBranch]);
 
@@ -667,7 +810,10 @@ export function useGit(workspacePath: string = "") {
     stageAllFiles,
     unstageAllFiles,
     commitChanges,
+    fetchRemote,
+    pullRemote,
     pushChanges,
+    syncRemote,
     commitAndPushChanges,
     suggestCommitMessage,
     validateBranchName,
